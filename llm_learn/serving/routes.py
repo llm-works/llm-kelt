@@ -5,6 +5,7 @@ import uuid
 from typing import NoReturn
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from llm_infer.api import (
     ChatCompletionChoice,
     ChatCompletionRequest,
@@ -16,6 +17,10 @@ from llm_infer.api import (
     ModelList,
     Role,
 )
+from llm_infer.client import OpenAIClient
+
+# Import directly to avoid circular import in llm_infer.serving.api
+from llm_infer.serving.api.openai.streaming import stream_chat_completion
 
 from ..inference.backends import (
     BackendError,
@@ -132,21 +137,64 @@ class _RouteHandlers:
         model_name: str,
         llm_client: LLMClient,
         context_builder: ContextBuilder,
+        streaming_client: OpenAIClient | None = None,
     ) -> None:
         self.model_name = model_name
         self.llm_client = llm_client
         self.context_builder = context_builder
+        self.streaming_client = streaming_client
 
-    async def chat_completions(self, body: ChatCompletionRequest) -> ChatCompletionResponse:
+    async def chat_completions(
+        self, body: ChatCompletionRequest
+    ) -> ChatCompletionResponse | StreamingResponse:
         """Handle chat completion with facts injection."""
         facts_prompt = self.context_builder.build_system_prompt("")
         enhanced_messages = _inject_facts_into_system(body.messages, facts_prompt)
-        backend_messages, system_prompt = _convert_to_backend_messages(enhanced_messages)
 
+        if body.stream and self.streaming_client:
+            return await self._handle_streaming(enhanced_messages, body)
+
+        backend_messages, system_prompt = _convert_to_backend_messages(enhanced_messages)
         content, usage = await self._call_backend(
             backend_messages, system_prompt, body.temperature, body.max_tokens
         )
         return _build_chat_response(self.model_name, content, usage)
+
+    async def _handle_streaming(
+        self,
+        messages: list[ChatMessage],
+        body: ChatCompletionRequest,
+    ) -> StreamingResponse:
+        """Handle streaming chat completion."""
+        # Extract system prompt from messages for OpenAIClient
+        system_prompt = None
+        chat_messages: list[dict] = []
+        for msg in messages:
+            if msg.role == Role.SYSTEM:
+                system_prompt = msg.content
+            else:
+                chat_messages.append({"role": msg.role.value, "content": msg.content})
+
+        request_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+
+        async def token_generator():
+            async for token in self.streaming_client.chat_stream(
+                messages=chat_messages,
+                system=system_prompt,
+                temperature=body.temperature if body.temperature else 1.0,
+                max_tokens=body.max_tokens,
+            ):
+                yield token
+
+        return StreamingResponse(
+            stream_chat_completion(
+                request_id=request_id,
+                model=self.model_name,
+                token_iterator=token_generator(),
+                get_finish_reason=lambda: FinishReason.STOP,
+            ),
+            media_type="text/event-stream",
+        )
 
     async def _call_backend(
         self,
@@ -188,6 +236,7 @@ def create_router(
     model_name: str,
     llm_client: LLMClient,
     context_builder: ContextBuilder,
+    streaming_client: OpenAIClient | None = None,
 ) -> APIRouter:
     """Create API router with chat completions endpoint.
 
@@ -195,14 +244,15 @@ def create_router(
         model_name: Name of the backend model for responses.
         llm_client: LLM client for backend calls.
         context_builder: Context builder for facts injection.
+        streaming_client: OpenAI client for streaming requests (optional).
 
     Returns:
         FastAPI router with OpenAI-compatible endpoints.
     """
     router = APIRouter()
-    handlers = _RouteHandlers(model_name, llm_client, context_builder)
+    handlers = _RouteHandlers(model_name, llm_client, context_builder, streaming_client)
 
-    router.post("/v1/chat/completions", response_model=ChatCompletionResponse)(
+    router.post("/v1/chat/completions", response_model=None)(
         handlers.chat_completions
     )
     router.get("/v1/models", response_model=ModelList)(handlers.list_models)

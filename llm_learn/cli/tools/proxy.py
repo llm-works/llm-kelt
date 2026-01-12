@@ -31,11 +31,11 @@ class ServeTool(Tool):
         config = self._get_config()
 
         # Apply CLI overrides
-        if self.args.host:
+        if getattr(self.args, "host", None):
             config["host"] = self.args.host
-        if self.args.port:
+        if getattr(self.args, "port", None):
             config["port"] = self.args.port
-        if self.args.profile:
+        if getattr(self.args, "profile", None):
             config["profile_id"] = self.args.profile
 
         self.lg.info(
@@ -62,8 +62,7 @@ class ProxyTool(Tool):
             help_text="Proxy server commands",
         )
         super().__init__(parent, config)
-        # Add serve as default subtool
-        self.add_tool(ServeTool(self), default="serve")
+        self.add_tool(ServeTool(self))
 
     def run(self, **kwargs: Any) -> int:
         """Delegate to subtool."""
