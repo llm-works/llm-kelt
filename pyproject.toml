@@ -64,6 +64,9 @@ pythonpath = ["."]
 filterwarnings = [
     "ignore:'crypt' is deprecated:DeprecationWarning:passlib",
 ]
+markers = [
+    "llm: marks tests as requiring a running LLM (deselect with '-m \"not llm\"')",
+]
 
 [tool.coverage.run]
 source = ["llm_learn"]
