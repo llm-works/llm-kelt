@@ -81,8 +81,10 @@ jobs:
           # Install runtime deps (avoid heavy ML deps from llm-infer)
           python -m pip install sqlalchemy psycopg2-binary pgvector alembic httpx fastapi uvicorn pydantic
           python -m pip install appinfra
-          # Install dev deps and package without transitive deps
-          python -m pip install -e ".[dev]" --no-deps
+          # Install dev deps explicitly
+          python -m pip install pytest pytest-cov pytest-xdist coverage
+          # Install package without transitive deps
+          python -m pip install -e . --no-deps
 
       - name: Run tests
         env:
@@ -126,8 +128,10 @@ jobs:
           # Install runtime deps (avoid heavy ML deps from llm-infer)
           python -m pip install sqlalchemy psycopg2-binary pgvector alembic httpx fastapi uvicorn pydantic
           python -m pip install appinfra
-          # Install dev deps and package without transitive deps
-          python -m pip install -e ".[dev]" --no-deps
+          # Install dev deps explicitly
+          python -m pip install pytest pytest-cov pytest-xdist coverage
+          # Install package without transitive deps
+          python -m pip install -e . --no-deps
 
       - name: Run tests with coverage
         env:
