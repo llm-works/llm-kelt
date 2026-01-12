@@ -2,7 +2,14 @@
 
 import os
 
-from .base import Backend, ChatResponse, Message
+from .base import (
+    Backend,
+    BackendRequestError,
+    BackendTimeoutError,
+    BackendUnavailableError,
+    ChatResponse,
+    Message,
+)
 
 
 class AnthropicBackend(Backend):
@@ -64,14 +71,24 @@ class AnthropicBackend(Backend):
                 continue
             api_messages.append({"role": msg.role, "content": msg.content})
 
-        # Make request with explicit parameters
-        response = await self._client.messages.create(
-            model=self.model,
-            messages=api_messages,  # type: ignore[arg-type]
-            temperature=temperature,
-            max_tokens=max_tokens or self.default_max_tokens,
-            system=system or "",
-        )
+        # Make request with exception translation
+        # Import anthropic for exception types (module already loaded at __init__)
+        import anthropic
+
+        try:
+            response = await self._client.messages.create(
+                model=self.model,
+                messages=api_messages,  # type: ignore[arg-type]
+                temperature=temperature,
+                max_tokens=max_tokens or self.default_max_tokens,
+                system=system or "",
+            )
+        except anthropic.APIConnectionError as e:
+            raise BackendUnavailableError(f"Cannot connect to Anthropic API: {e}") from e
+        except anthropic.APITimeoutError as e:
+            raise BackendTimeoutError("Anthropic API request timed out") from e
+        except anthropic.APIStatusError as e:
+            raise BackendRequestError(e.status_code, str(e)[:500]) from e
 
         # Extract content (Anthropic returns list of content blocks)
         content = ""

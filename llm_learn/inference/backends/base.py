@@ -4,6 +4,38 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Literal
 
+# --- Backend Exceptions ---
+# These provide a transport-agnostic interface for error handling.
+# Each backend translates its specific exceptions (httpx, anthropic SDK, etc.)
+# into these semantic exceptions.
+
+
+class BackendError(Exception):
+    """Base exception for all backend errors."""
+
+    pass
+
+
+class BackendUnavailableError(BackendError):
+    """Backend server is not reachable (connection refused, DNS failure, etc.)."""
+
+    pass
+
+
+class BackendTimeoutError(BackendError):
+    """Request to backend timed out."""
+
+    pass
+
+
+class BackendRequestError(BackendError):
+    """Backend returned an HTTP error status."""
+
+    def __init__(self, status_code: int, detail: str):
+        self.status_code = status_code
+        self.detail = detail
+        super().__init__(f"HTTP {status_code}: {detail}")
+
 
 @dataclass
 class Message:
