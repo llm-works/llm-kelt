@@ -4,7 +4,14 @@ import os
 
 import httpx
 
-from .base import Backend, ChatResponse, Message
+from .base import (
+    Backend,
+    BackendRequestError,
+    BackendTimeoutError,
+    BackendUnavailableError,
+    ChatResponse,
+    Message,
+)
 
 
 class OpenAICompatibleBackend(Backend):
@@ -84,9 +91,16 @@ class OpenAICompatibleBackend(Backend):
         # Add any extra kwargs
         payload.update(kwargs)
 
-        # Make request
-        response = await self._client.post("/chat/completions", json=payload)
-        response.raise_for_status()
+        # Make request with exception translation
+        try:
+            response = await self._client.post("/chat/completions", json=payload)
+            response.raise_for_status()
+        except httpx.ConnectError as e:
+            raise BackendUnavailableError(f"Cannot connect to {self.base_url}: {e}") from e
+        except httpx.TimeoutException as e:
+            raise BackendTimeoutError(f"Request timed out after {self.timeout}s") from e
+        except httpx.HTTPStatusError as e:
+            raise BackendRequestError(e.response.status_code, e.response.text[:500]) from e
 
         data = response.json()
 

@@ -2,7 +2,14 @@
 
 import os
 
-from .base import Backend, ChatResponse, Message
+from .base import (
+    Backend,
+    BackendRequestError,
+    BackendTimeoutError,
+    BackendUnavailableError,
+    ChatResponse,
+    Message,
+)
 
 
 class AnthropicBackend(Backend):
@@ -47,38 +54,15 @@ class AnthropicBackend(Backend):
 
         self._client = anthropic.AsyncAnthropic(api_key=key)
 
-    async def chat(  # cq: max-lines=40
-        self,
-        messages: list[Message],
-        system: str | None = None,
-        temperature: float = 0.7,
-        max_tokens: int | None = None,
-        **kwargs,
-    ) -> ChatResponse:
-        """Send chat completion request to Anthropic API."""
-        # Build messages list (Anthropic format)
-        api_messages: list[dict[str, str]] = []
-        for msg in messages:
-            if msg.role == "system":
-                # Anthropic handles system separately, skip in messages
-                continue
-            api_messages.append({"role": msg.role, "content": msg.content})
+    def _build_api_messages(self, messages: list[Message]) -> list[dict[str, str]]:
+        """Convert messages to Anthropic format, filtering out system messages."""
+        return [
+            {"role": msg.role, "content": msg.content} for msg in messages if msg.role != "system"
+        ]
 
-        # Make request with explicit parameters
-        response = await self._client.messages.create(
-            model=self.model,
-            messages=api_messages,  # type: ignore[arg-type]
-            temperature=temperature,
-            max_tokens=max_tokens or self.default_max_tokens,
-            system=system or "",
-        )
-
-        # Extract content (Anthropic returns list of content blocks)
-        content = ""
-        for block in response.content:
-            if block.type == "text":
-                content += block.text
-
+    def _parse_response(self, response) -> ChatResponse:
+        """Extract content and metadata from Anthropic API response."""
+        content = "".join(block.text for block in response.content if block.type == "text")
         return ChatResponse(
             content=content,
             model=response.model,
@@ -88,6 +72,35 @@ class AnthropicBackend(Backend):
             },
             finish_reason=response.stop_reason,
         )
+
+    async def chat(
+        self,
+        messages: list[Message],
+        system: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        **kwargs,
+    ) -> ChatResponse:
+        """Send chat completion request to Anthropic API."""
+        import anthropic
+
+        api_messages = self._build_api_messages(messages)
+        try:
+            response = await self._client.messages.create(
+                model=self.model,
+                messages=api_messages,  # type: ignore[arg-type]
+                temperature=temperature,
+                max_tokens=max_tokens or self.default_max_tokens,
+                system=system or "",
+            )
+        except anthropic.APIConnectionError as e:
+            raise BackendUnavailableError(f"Cannot connect to Anthropic API: {e}") from e
+        except anthropic.APITimeoutError as e:
+            raise BackendTimeoutError("Anthropic API request timed out") from e
+        except anthropic.APIStatusError as e:
+            raise BackendRequestError(e.status_code, str(e)[:500]) from e
+
+        return self._parse_response(response)
 
     async def close(self) -> None:
         """Close the Anthropic client."""
