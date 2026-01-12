@@ -2,7 +2,7 @@ local := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 infra := $(shell appinfra scripts-path)
 
 # Configuration
-INFRA_DEV_PKG_NAME := learn
+INFRA_DEV_PKG_NAME := llm_learn
 
 # Code quality strictness
 # - true: Fail on any code quality violations (CI mode)

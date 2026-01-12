@@ -1,7 +1,5 @@
 """Tests for context builder (fact injection into system prompts)."""
 
-import pytest
-
 from llm_learn.inference.context import ContextBuilder
 
 
