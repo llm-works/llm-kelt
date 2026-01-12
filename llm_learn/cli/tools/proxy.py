@@ -67,4 +67,5 @@ class ProxyTool(Tool):
 
     def run(self, **kwargs: Any) -> int:
         """Delegate to subtool."""
-        return self.group.run(**kwargs)
+        result: int = self.group.run(**kwargs)
+        return result

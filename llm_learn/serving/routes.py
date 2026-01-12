@@ -2,6 +2,7 @@
 
 import time
 import uuid
+from typing import NoReturn
 
 from fastapi import APIRouter, HTTPException
 from llm_infer.api import (
@@ -17,6 +18,7 @@ from llm_infer.api import (
 )
 
 from ..inference.backends import (
+    BackendError,
     BackendRequestError,
     BackendTimeoutError,
     BackendUnavailableError,
@@ -24,6 +26,17 @@ from ..inference.backends import (
 from ..inference.backends.base import Message
 from ..inference.client import LLMClient
 from ..inference.context import ContextBuilder
+
+
+def _raise_http_for_backend_error(e: BackendError) -> NoReturn:
+    """Convert backend error to appropriate HTTPException and raise it."""
+    if isinstance(e, BackendUnavailableError):
+        raise HTTPException(status_code=503, detail=f"Backend unavailable: {e}")
+    if isinstance(e, BackendTimeoutError):
+        raise HTTPException(status_code=504, detail=f"Backend timeout: {e}")
+    if isinstance(e, BackendRequestError):
+        raise HTTPException(status_code=502, detail=f"Backend error: {e.detail}")
+    raise HTTPException(status_code=500, detail=f"Unexpected backend error: {e}")
 
 
 def _inject_facts_into_system(
@@ -77,6 +90,100 @@ def _convert_to_backend_messages(
     return backend_messages, system_prompt
 
 
+def _build_chat_response(
+    model_name: str,
+    content: str,
+    usage: dict | None,
+) -> ChatCompletionResponse:
+    """Build OpenAI-compatible chat completion response.
+
+    Args:
+        model_name: Model name to include in response.
+        content: Assistant's response content.
+        usage: Token usage dict from backend, or None.
+
+    Returns:
+        Formatted ChatCompletionResponse.
+    """
+    return ChatCompletionResponse(
+        id=f"chatcmpl-{uuid.uuid4().hex[:24]}",
+        created=int(time.time()),
+        model=model_name,
+        choices=[
+            ChatCompletionChoice(
+                index=0,
+                message=ChatMessage(role=Role.ASSISTANT, content=content),
+                finish_reason=FinishReason.STOP,
+            )
+        ],
+        usage=ChatCompletionUsage(
+            prompt_tokens=usage.get("prompt_tokens", 0) if usage else 0,
+            completion_tokens=usage.get("completion_tokens", 0) if usage else 0,
+            total_tokens=usage.get("total_tokens", 0) if usage else 0,
+        ),
+    )
+
+
+class _RouteHandlers:
+    """Handlers for proxy API routes."""
+
+    def __init__(
+        self,
+        model_name: str,
+        llm_client: LLMClient,
+        context_builder: ContextBuilder,
+    ) -> None:
+        self.model_name = model_name
+        self.llm_client = llm_client
+        self.context_builder = context_builder
+
+    async def chat_completions(self, body: ChatCompletionRequest) -> ChatCompletionResponse:
+        """Handle chat completion with facts injection."""
+        facts_prompt = self.context_builder.build_system_prompt("")
+        enhanced_messages = _inject_facts_into_system(body.messages, facts_prompt)
+        backend_messages, system_prompt = _convert_to_backend_messages(enhanced_messages)
+
+        content, usage = await self._call_backend(
+            backend_messages, system_prompt, body.temperature, body.max_tokens
+        )
+        return _build_chat_response(self.model_name, content, usage)
+
+    async def _call_backend(
+        self,
+        messages: list[Message],
+        system: str | None,
+        temperature: float | None,
+        max_tokens: int | None,
+    ) -> tuple[str, dict | None]:
+        """Call backend LLM with error translation."""
+        try:
+            response = await self.llm_client.chat_full(
+                messages=messages,
+                system=system,
+                temperature=temperature if temperature is not None else 0.7,
+                max_tokens=max_tokens,
+            )
+            return response.content, response.usage
+        except BackendError as e:
+            _raise_http_for_backend_error(e)
+
+    async def list_models(self) -> ModelList:
+        """List available models."""
+        return ModelList(
+            data=[
+                ModelInfo(
+                    id=self.model_name,
+                    created=int(time.time()),
+                    owned_by="llm-learn",
+                )
+            ]
+        )
+
+    async def health(self) -> dict:
+        """Health check endpoint."""
+        return {"status": "ok"}
+
+
 def create_router(
     model_name: str,
     llm_client: LLMClient,
@@ -93,72 +200,12 @@ def create_router(
         FastAPI router with OpenAI-compatible endpoints.
     """
     router = APIRouter()
+    handlers = _RouteHandlers(model_name, llm_client, context_builder)
 
-    @router.post("/v1/chat/completions", response_model=ChatCompletionResponse)
-    async def chat_completions(body: ChatCompletionRequest) -> ChatCompletionResponse:
-        """Handle chat completion with facts injection."""
-        # Build facts prompt from user's profile (empty base = just facts section)
-        facts_prompt = context_builder.build_system_prompt("")
-
-        # Inject facts into messages
-        enhanced_messages = _inject_facts_into_system(body.messages, facts_prompt)
-
-        # Convert to backend format
-        backend_messages, system_prompt = _convert_to_backend_messages(enhanced_messages)
-
-        # Call backend LLM
-        try:
-            response = await llm_client.chat_full(
-                messages=backend_messages,
-                system=system_prompt,
-                temperature=body.temperature,
-                max_tokens=body.max_tokens,
-            )
-        except BackendUnavailableError as e:
-            raise HTTPException(status_code=503, detail=f"Backend unavailable: {e}")
-        except BackendTimeoutError as e:
-            raise HTTPException(status_code=504, detail=f"Backend timeout: {e}")
-        except BackendRequestError as e:
-            raise HTTPException(status_code=502, detail=f"Backend error: {e.detail}")
-
-        # Build response
-        request_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
-        return ChatCompletionResponse(
-            id=request_id,
-            created=int(time.time()),
-            model=model_name,
-            choices=[
-                ChatCompletionChoice(
-                    index=0,
-                    message=ChatMessage(role=Role.ASSISTANT, content=response.content),
-                    finish_reason=FinishReason.STOP,
-                )
-            ],
-            usage=ChatCompletionUsage(
-                prompt_tokens=response.usage.get("prompt_tokens", 0) if response.usage else 0,
-                completion_tokens=response.usage.get("completion_tokens", 0)
-                if response.usage
-                else 0,
-                total_tokens=response.usage.get("total_tokens", 0) if response.usage else 0,
-            ),
-        )
-
-    @router.get("/v1/models", response_model=ModelList)
-    async def list_models() -> ModelList:
-        """List available models."""
-        return ModelList(
-            data=[
-                ModelInfo(
-                    id=model_name,
-                    created=int(time.time()),
-                    owned_by="llm-learn",
-                )
-            ]
-        )
-
-    @router.get("/health")
-    async def health() -> dict:
-        """Health check endpoint."""
-        return {"status": "ok"}
+    router.post("/v1/chat/completions", response_model=ChatCompletionResponse)(
+        handlers.chat_completions
+    )
+    router.get("/v1/models", response_model=ModelList)(handlers.list_models)
+    router.get("/health")(handlers.health)
 
     return router

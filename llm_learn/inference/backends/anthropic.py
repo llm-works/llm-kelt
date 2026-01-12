@@ -54,7 +54,26 @@ class AnthropicBackend(Backend):
 
         self._client = anthropic.AsyncAnthropic(api_key=key)
 
-    async def chat(  # cq: max-lines=40
+    def _build_api_messages(self, messages: list[Message]) -> list[dict[str, str]]:
+        """Convert messages to Anthropic format, filtering out system messages."""
+        return [
+            {"role": msg.role, "content": msg.content} for msg in messages if msg.role != "system"
+        ]
+
+    def _parse_response(self, response) -> ChatResponse:
+        """Extract content and metadata from Anthropic API response."""
+        content = "".join(block.text for block in response.content if block.type == "text")
+        return ChatResponse(
+            content=content,
+            model=response.model,
+            usage={
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+            },
+            finish_reason=response.stop_reason,
+        )
+
+    async def chat(
         self,
         messages: list[Message],
         system: str | None = None,
@@ -63,18 +82,9 @@ class AnthropicBackend(Backend):
         **kwargs,
     ) -> ChatResponse:
         """Send chat completion request to Anthropic API."""
-        # Build messages list (Anthropic format)
-        api_messages: list[dict[str, str]] = []
-        for msg in messages:
-            if msg.role == "system":
-                # Anthropic handles system separately, skip in messages
-                continue
-            api_messages.append({"role": msg.role, "content": msg.content})
-
-        # Make request with exception translation
-        # Import anthropic for exception types (module already loaded at __init__)
         import anthropic
 
+        api_messages = self._build_api_messages(messages)
         try:
             response = await self._client.messages.create(
                 model=self.model,
@@ -90,21 +100,7 @@ class AnthropicBackend(Backend):
         except anthropic.APIStatusError as e:
             raise BackendRequestError(e.status_code, str(e)[:500]) from e
 
-        # Extract content (Anthropic returns list of content blocks)
-        content = ""
-        for block in response.content:
-            if block.type == "text":
-                content += block.text
-
-        return ChatResponse(
-            content=content,
-            model=response.model,
-            usage={
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens,
-            },
-            finish_reason=response.stop_reason,
-        )
+        return self._parse_response(response)
 
     async def close(self) -> None:
         """Close the Anthropic client."""

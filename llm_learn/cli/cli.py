@@ -18,7 +18,8 @@ def main() -> int:
         .done()
         .build()
     )
-    return app.main()
+    result: int = app.main()
+    return result
 
 
 if __name__ == "__main__":

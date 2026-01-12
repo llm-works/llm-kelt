@@ -8,7 +8,7 @@ INFRA_PYTEST_COVERAGE_THRESHOLD := 30
 # Code quality strictness
 # - true: Fail on any code quality violations (CI mode)
 # - false: Report violations but don't fail (development mode)
-INFRA_DEV_CQ_STRICT := false
+INFRA_DEV_CQ_STRICT := true
 
 # PostgreSQL configuration
 INFRA_PG_CONFIG_FILE := pg.yaml
