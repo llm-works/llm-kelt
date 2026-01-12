@@ -2,7 +2,6 @@
 
 import os
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from appinfra.config import Config
@@ -40,13 +39,13 @@ def db_config(config):
     """
     database_url = os.environ.get("DATABASE_URL")
     if database_url:
-        # Create config-like object for CI environment
-        return SimpleNamespace(
-            url=database_url,
-            create_db=True,
-            readonly=False,
-            pool_pre_ping=True,
-        )
+        # Return dict for CI environment (appinfra expects dict-like .get())
+        return {
+            "url": database_url,
+            "create_db": True,
+            "readonly": False,
+            "pool_pre_ping": True,
+        }
 
     # Fall back to config file
     db_cfg = config.dbs.get("unittest")
