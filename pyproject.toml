@@ -1,0 +1,87 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel", "setuptools-scm>=8.0,<9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-learn"
+dynamic = ["version"]
+description = "Framework for collecting and managing LLM context"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.11"
+dependencies = [
+    # Core infrastructure
+    "appinfra",
+
+    # Storage
+    "sqlalchemy>=2.0,<3.0",
+    "psycopg2-binary>=2.9,<3.0",
+    "pgvector>=0.3,<1.0",
+    "alembic>=1.12,<2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "coverage>=7.0.0,<8.0.0",
+    "ruff>=0.1.0,<1.0.0",
+    "mypy>=1.0.0,<2.0.0",
+    "pytest>=7.0.0,<10.0.0",
+    "pytest-cov>=4.0.0,<8.0.0",
+    "pytest-xdist>=3.0.0,<4.0.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["llm_learn"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-v --tb=short"
+pythonpath = ["."]
+filterwarnings = [
+    "ignore:'crypt' is deprecated:DeprecationWarning:passlib",
+]
+
+[tool.coverage.run]
+source = ["llm_learn"]
+omit = ["*/test/*", "*/tests/*", "*_test.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["llm_learn*"]
+exclude = ["tests*", "migrations*", "docs*", "etc*"]
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0.dev0"

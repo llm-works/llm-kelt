@@ -1,0 +1,17 @@
+logging:
+  level: debug
+  location: 3
+  location_color: gray-5
+
+  handlers:
+    console_text:
+      type: console              # Handler type (console, file, database, rotating_file, timed_rotating_file)
+      enabled: true              # Enable this handler
+      level: trace               # More detailed than global - should be restricted to INFO
+      format: text               # Format: text, json
+      stream: stdout             # Output stream: stdout, stderr
+      colors: true               # Enable colored output
+      micros: false              # Show microseconds (overwrites global setting)
+
+pgserver: !include './pg.yaml#pgserver'
+dbs: !include './pg.yaml#dbs'

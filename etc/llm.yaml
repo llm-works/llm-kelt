@@ -1,0 +1,19 @@
+default: local  # Options: local, anthropic, openai
+
+backends:
+  local:
+    type: openai_compatible
+    base_url: "http://localhost:8000/v1"
+    model: "qwen2.5-72b"
+    # No API key needed for local
+
+  anthropic:
+    type: anthropic
+    model: "claude-sonnet-4-20250514"
+    # API key via ANTHROPIC_API_KEY environment variable
+
+  openai:
+    type: openai
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4o"
+    # API key via OPENAI_API_KEY environment variable
