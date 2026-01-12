@@ -1,6 +1,8 @@
 """Pytest fixtures for Learn framework tests."""
 
+import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from appinfra.config import Config
@@ -31,8 +33,22 @@ def logger():
 
 @pytest.fixture(scope="session")
 def db_config(config):
-    """Get test database configuration."""
-    # Use 'unittest' db key for test isolation
+    """Get test database configuration.
+
+    Checks for DATABASE_URL environment variable first (used in CI),
+    otherwise falls back to config file.
+    """
+    database_url = os.environ.get("DATABASE_URL")
+    if database_url:
+        # Create config-like object for CI environment
+        return SimpleNamespace(
+            url=database_url,
+            create_db=True,
+            readonly=False,
+            pool_pre_ping=True,
+        )
+
+    # Fall back to config file
     db_cfg = config.dbs.get("unittest")
     if db_cfg is None:
         pytest.skip("Database config 'dbs.unittest' not found in etc/infra.yaml")
