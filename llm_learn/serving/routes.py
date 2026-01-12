@@ -252,9 +252,7 @@ def create_router(
     router = APIRouter()
     handlers = _RouteHandlers(model_name, llm_client, context_builder, streaming_client)
 
-    router.post("/v1/chat/completions", response_model=None)(
-        handlers.chat_completions
-    )
+    router.post("/v1/chat/completions", response_model=None)(handlers.chat_completions)
     router.get("/v1/models", response_model=ModelList)(handlers.list_models)
     router.get("/health")(handlers.health)
 
