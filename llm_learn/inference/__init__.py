@@ -29,7 +29,7 @@ from .backends import Backend, Message
 from .backends.base import ChatResponse
 from .client import LLMClient
 from .context import ContextBuilder
-from .query import Conversation, ContextQuery
+from .query import ContextQuery, Conversation
 
 __all__ = [
     # Core classes

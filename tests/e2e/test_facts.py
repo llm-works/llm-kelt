@@ -42,6 +42,7 @@ def facts_learn_client(database, test_profile):
     return LearnClient(profile_id=test_profile, database=database)
 
 
+@pytest.mark.llm
 class TestFactsEndToEnd:
     """End-to-end tests for fact memorization affecting LLM responses."""
 

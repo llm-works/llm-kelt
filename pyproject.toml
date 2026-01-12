@@ -10,13 +10,16 @@ license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
 dependencies = [
     # Core infrastructure
-    "appinfra",
+    "appinfra>=0.2.1",
 
     # Storage
     "sqlalchemy>=2.0,<3.0",
     "psycopg2-binary>=2.9,<3.0",
     "pgvector>=0.3,<1.0",
     "alembic>=1.12,<2.0",
+
+    # Inference
+    "httpx>=0.27,<1.0",
 ]
 
 [project.optional-dependencies]
@@ -63,6 +66,9 @@ addopts = "-v --tb=short"
 pythonpath = ["."]
 filterwarnings = [
     "ignore:'crypt' is deprecated:DeprecationWarning:passlib",
+]
+markers = [
+    "llm: marks tests as requiring a running LLM (deselect with '-m \"not llm\"')",
 ]
 
 [tool.coverage.run]
