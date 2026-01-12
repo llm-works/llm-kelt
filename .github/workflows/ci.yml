@@ -78,7 +78,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          # Install runtime deps (avoid heavy ML deps from llm-infer)
+          python -m pip install sqlalchemy psycopg2-binary pgvector alembic httpx fastapi uvicorn pydantic
+          python -m pip install appinfra
+          # Install dev deps and package without transitive deps
+          python -m pip install -e ".[dev]" --no-deps
 
       - name: Run tests
         env:
@@ -119,7 +123,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          # Install runtime deps (avoid heavy ML deps from llm-infer)
+          python -m pip install sqlalchemy psycopg2-binary pgvector alembic httpx fastapi uvicorn pydantic
+          python -m pip install appinfra
+          # Install dev deps and package without transitive deps
+          python -m pip install -e ".[dev]" --no-deps
 
       - name: Run tests with coverage
         env:
