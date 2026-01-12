@@ -8,6 +8,13 @@ dbs: !include './infra.yaml#dbs'
 
 llm: !include './llm.yaml'
 
+# Proxy server settings
+proxy:
+  host: "0.0.0.0"
+  port: 8001
+  profile_id: 1
+  model_name: "llm-learn-proxy"
+
 # Learn-specific settings
 learn:
   # Memory/Context Injection settings
