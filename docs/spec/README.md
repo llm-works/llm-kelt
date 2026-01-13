@@ -11,6 +11,7 @@ Read in order:
 | 3 | [Framework Strategy](03-framework-strategy.md) | Which approaches we use and why |
 | 4 | [Architecture](04-architecture.md) | System components and data flows |
 | 5 | [Data Model](05-data-model.md) | Database schemas |
+| 6 | [Context Routing](06-context-routing.md) | Hybrid routing architecture for context selection |
 
 ## Quick Links
 
