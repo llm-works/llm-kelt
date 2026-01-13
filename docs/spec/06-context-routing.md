@@ -1,17 +1,333 @@
-# Context Routing Architecture
+# Context Routing
+
+How learn provides primitives for context selection, and the protocols agent implements.
 
 ## Problem
 
-As the fact store grows, dumping all facts into the system prompt becomes impractical:
-- Token limits exceeded
-- Irrelevant context dilutes important information
-- Response quality degrades
+Dumping all facts into the system prompt doesn't scale:
 
-We need intelligent context selection: the right facts for each query.
+```python
+# Naive approach - doesn't work
+system = base_prompt + "\n".join(all_facts)  # 500 facts = 50k tokens = slow, expensive, confused
+```
 
-## Approach: Hybrid Routing
+We need intelligent selection: given a query, which facts are relevant?
 
-Three-tier system that escalates complexity only when needed:
+## Architectural Split
+
+| Layer | Responsibility |
+|-------|---------------|
+| **learn** | Vector search primitives, candidate retrieval, protocol definitions |
+| **agent** | Selection logic (rules, scoring, LLM-based selection) |
+
+learn provides the **what** (candidates, data types). Agent provides the **how** (selection logic).
+
+---
+
+## Learn Provides: Primitives
+
+### Vector Search
+
+```python
+# learn/collection/content.py
+class ContentClient:
+    async def search_similar(
+        self,
+        query: str,
+        top_k: int = 30,
+        min_similarity: float = 0.5,
+    ) -> list[ScoredContent]:
+        """
+        Retrieve content candidates by embedding similarity.
+
+        Returns candidates sorted by similarity score.
+        Agent decides final selection from these candidates.
+        """
+        query_embedding = await self._embedder.embed(query)
+        return await self._vector_store.search(
+            embedding=query_embedding,
+            top_k=top_k,
+            min_similarity=min_similarity,
+        )
+```
+
+### Fact Retrieval
+
+```python
+# learn/collection/facts.py
+class FactsClient:
+    async def list_by_category(
+        self,
+        category: str,
+        include_inactive: bool = False,
+    ) -> list[Fact]:
+        """Get all facts in a category."""
+        ...
+
+    async def list_active(
+        self,
+        category: str | None = None,
+        min_confidence: float = 0.0,
+        limit: int = 100,
+    ) -> list[Fact]:
+        """Get active facts, optionally filtered."""
+        ...
+```
+
+### Database Support
+
+Extend facts table for embeddings:
+
+```sql
+ALTER TABLE facts ADD COLUMN embedding vector(1536);
+CREATE INDEX idx_facts_embedding ON facts USING ivfflat (embedding vector_cosine_ops);
+```
+
+---
+
+## Learn Defines: Data Types
+
+```python
+# learn/adaptation/types.py
+
+@dataclass
+class ScoredFact:
+    """Fact with relevance score from vector search."""
+    fact: Fact
+    similarity: float  # 0-1, from embedding search
+
+
+@dataclass
+class SelectionResult:
+    """Result of context selection (agent produces this)."""
+    facts: list[Fact]
+    confidence: float  # How confident in selection (0-1)
+    tier: str  # "rules" | "embedding" | "llm" - which method was used
+    reasoning: str | None = None
+    candidates_considered: int = 0
+```
+
+---
+
+## Learn Defines: Protocols
+
+Agent must implement these protocols to participate in the pipeline.
+
+### ContextSelector Protocol
+
+```python
+# learn/adaptation/protocols.py
+
+from typing import Protocol, runtime_checkable
+
+@runtime_checkable
+class ContextSelector(Protocol):
+    """
+    Select relevant context for a query.
+
+    Agent implements this with rules, embeddings, LLM, or hybrid approaches.
+    Learn's pipeline calls this during adaptation.
+    """
+
+    async def select(
+        self,
+        query: str,
+        candidates: list[ScoredFact],
+        max_facts: int = 10,
+    ) -> SelectionResult:
+        """
+        Given candidates from vector search, select the most relevant.
+
+        Args:
+            query: The user's query
+            candidates: Pre-filtered candidates from learn's vector search
+            max_facts: Maximum facts to return
+
+        Returns:
+            SelectionResult with selected facts, confidence, and method used
+        """
+        ...
+```
+
+### RoutingCache Protocol (Optional)
+
+```python
+@runtime_checkable
+class RoutingCache(Protocol):
+    """
+    Cache selection decisions. Optional optimization.
+
+    Agent can implement to avoid redundant LLM calls for similar queries.
+    """
+
+    async def get(self, query_hash: str) -> SelectionResult | None:
+        """Get cached selection for query."""
+        ...
+
+    async def put(self, query_hash: str, result: SelectionResult, ttl: int = 3600) -> None:
+        """Cache selection result."""
+        ...
+
+    async def invalidate(self, fact_ids: list[int]) -> None:
+        """Invalidate cache entries that used these facts."""
+        ...
+```
+
+---
+
+## Agent Implements: Selection Logic
+
+Agent provides concrete implementations of the protocols.
+
+### Example: Rule-Based Selector
+
+```python
+# agent/adaptation/selectors.py
+
+class RuleBasedSelector(ContextSelector):
+    """Fast rule-based selection for simple cases."""
+
+    def __init__(self, rules: list[SelectionRule]):
+        self.rules = rules
+
+    async def select(
+        self,
+        query: str,
+        candidates: list[ScoredFact],
+        max_facts: int = 10,
+    ) -> SelectionResult:
+        selected = []
+
+        for candidate in candidates:
+            # Always include high-similarity facts
+            if candidate.similarity > 0.85:
+                selected.append(candidate.fact)
+                continue
+
+            # Check rule matches
+            for rule in self.rules:
+                if rule.matches(query, candidate.fact):
+                    selected.append(candidate.fact)
+                    break
+
+            if len(selected) >= max_facts:
+                break
+
+        return SelectionResult(
+            facts=selected,
+            confidence=0.9 if selected else 0.3,
+            tier="rules",
+            candidates_considered=len(candidates),
+        )
+```
+
+### Example: LLM-Based Selector
+
+```python
+class LLMSelector(ContextSelector):
+    """Use small LLM to score and select facts."""
+
+    SYSTEM_PROMPT = """
+    You are a context selection assistant. Given a user query and candidate facts,
+    select the facts most relevant to answering the query.
+
+    Output JSON: {"selected_ids": [1, 3, 7], "reasoning": "..."}
+
+    Selection criteria:
+    - Directly relevant to the query topic
+    - Provides necessary background for accurate response
+    - Respects user preferences that affect response style
+    """
+
+    def __init__(self, model: LLMBackend):
+        self.model = model
+
+    async def select(
+        self,
+        query: str,
+        candidates: list[ScoredFact],
+        max_facts: int = 10,
+    ) -> SelectionResult:
+        # Score each candidate with LLM
+        scores = await self._batch_score(query, candidates)
+
+        # Select top scoring
+        sorted_candidates = sorted(
+            zip(candidates, scores),
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        selected = [c.fact for c, s in sorted_candidates[:max_facts]]
+
+        avg_score = sum(scores[:max_facts]) / max_facts if scores else 0
+
+        return SelectionResult(
+            facts=selected,
+            confidence=avg_score,
+            tier="llm",
+            reasoning=f"Selected {len(selected)} facts with avg score {avg_score:.2f}",
+            candidates_considered=len(candidates),
+        )
+
+    async def _batch_score(
+        self,
+        query: str,
+        candidates: list[ScoredFact],
+    ) -> list[float]:
+        """Score all candidates for relevance to query."""
+        prompt = self._build_scoring_prompt(query, candidates)
+        response = await self.model.complete(self.SYSTEM_PROMPT, prompt)
+        return self._parse_scores(response)
+```
+
+### Example: Hybrid Selector (Three-Tier)
+
+The recommended approach: escalate through tiers based on confidence.
+
+```python
+class HybridSelector(ContextSelector):
+    """
+    Three-tier selection: rules → embeddings → LLM.
+
+    Escalates through tiers based on confidence.
+    """
+
+    def __init__(
+        self,
+        rule_selector: RuleBasedSelector,
+        llm_selector: LLMSelector,
+        rule_confidence_threshold: float = 0.8,
+        embedding_confidence_threshold: float = 0.75,
+    ):
+        self.rules = rule_selector
+        self.llm = llm_selector
+        self.rule_threshold = rule_confidence_threshold
+        self.embedding_threshold = embedding_confidence_threshold
+
+    async def select(
+        self,
+        query: str,
+        candidates: list[ScoredFact],
+        max_facts: int = 10,
+    ) -> SelectionResult:
+        # Tier 1: Try rules first (fast, free)
+        result = await self.rules.select(query, candidates, max_facts)
+        if result.confidence >= self.rule_threshold:
+            return result
+
+        # Tier 2: Check embedding scores (fast, free)
+        high_similarity = [c for c in candidates if c.similarity > 0.8]
+        if len(high_similarity) >= max_facts * 0.7:
+            return SelectionResult(
+                facts=[c.fact for c in high_similarity[:max_facts]],
+                confidence=self.embedding_threshold,
+                tier="embedding",
+                candidates_considered=len(candidates),
+            )
+
+        # Tier 3: Use LLM (slower, costs tokens)
+        return await self.llm.select(query, candidates, max_facts)
+```
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -33,9 +349,9 @@ Three-tier system that escalates complexity only when needed:
 ┌─────────────────────────────────────────────────────────────────┐
 │                  Tier 2: Embedding Retrieval                     │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │ • Embed query                                              │  │
-│  │ • Vector similarity search against fact embeddings        │  │
-│  │ • Return top-k candidates                                  │  │
+│  │ • Check similarity scores from learn's vector search      │  │
+│  │ • High confidence if top results clearly separate         │  │
+│  │ • Return top-k if confident                               │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                                 │
@@ -49,253 +365,167 @@ Three-tier system that escalates complexity only when needed:
 │  │ • Output: selected facts + relevance reasoning            │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Inference LLM                               │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ • Full model with selected context                        │  │
-│  │ • System prompt with routed facts                         │  │
-│  │ • User query                                               │  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Components
+---
 
-### 1. Fact Store with Embeddings
+## Pipeline Integration
 
-Extend current `facts` table:
+Learn's pipeline uses the agent-provided selector:
 
-```sql
-ALTER TABLE facts ADD COLUMN embedding vector(1536);
-CREATE INDEX idx_facts_embedding ON facts USING ivfflat (embedding vector_cosine_ops);
+```python
+# learn/adaptation/pipeline.py
+
+class AdaptationPipeline:
+    def __init__(
+        self,
+        learn_client: LearnClient,
+        context_selector: ContextSelector,  # Agent provides this
+        ...
+    ):
+        self.learn = learn_client
+        self.selector = context_selector
+
+    async def process(self, query: str, messages: list, system: str | None) -> PipelineResult:
+        # Step 1: Learn retrieves candidates
+        candidates = await self.learn.content.search_similar(
+            query,
+            top_k=self.config.candidate_limit,
+        )
+
+        # Step 2: Agent selects from candidates
+        selection = await self.selector.select(query, candidates)
+
+        # Step 3: Build context string (learn)
+        context_str = self.learn.build_context([f.id for f in selection.facts])
+
+        # ... continue pipeline
 ```
 
-Embedding generation:
-- On fact creation/update
-- Batch job for existing facts
-- Consistent embedding model across query and facts
+---
 
-### 2. Rule Engine
+## Selection Rules (Agent-Defined)
 
-Configuration-driven rules for deterministic routing:
+Agent can define rules for fast context routing:
+
+```python
+# agent/adaptation/rules.py
+
+@dataclass
+class SelectionRule:
+    """Rule for context selection."""
+    name: str
+    condition: Callable[[str, Fact], bool]
+    priority: int = 0
+    always_include: bool = False
+
+# Example rules
+RULES = [
+    SelectionRule(
+        name="always_include_identity",
+        condition=lambda q, f: f.category == "identity",
+        always_include=True,
+    ),
+    SelectionRule(
+        name="preferences_for_how_questions",
+        condition=lambda q, f: "how" in q.lower() and f.category == "preferences",
+        priority=10,
+    ),
+    SelectionRule(
+        name="work_context_for_project_queries",
+        condition=lambda q, f: "project" in q.lower() and f.category == "work",
+        priority=5,
+    ),
+]
+```
+
+Or configuration-driven rules:
 
 ```yaml
-routing:
-  always_include:
-    - category: "identity"
-    - category: "core_preferences"
+# agent.yaml
+context_selection:
+  rules:
+    always_include:
+      - category: "identity"
+      - category: "core_preferences"
 
-  category_mapping:
-    - triggers: ["code", "programming", "debug", "function"]
-      categories: ["programming", "technical"]
-    - triggers: ["schedule", "meeting", "calendar"]
-      categories: ["scheduling", "preferences"]
+    category_mapping:
+      - triggers: ["code", "programming", "debug", "function"]
+        categories: ["programming", "technical"]
+      - triggers: ["schedule", "meeting", "calendar"]
+        categories: ["scheduling", "preferences"]
 
-  keyword_triggers:
-    - pattern: "my name"
-      categories: ["identity"]
+    keyword_triggers:
+      - pattern: "my name"
+        categories: ["identity"]
 ```
 
-### 3. Embedding Retriever
+---
 
-```python
-class EmbeddingRetriever:
-    async def retrieve(
-        self,
-        query: str,
-        profile_id: int,
-        top_k: int = 30,
-        min_similarity: float = 0.7,
-    ) -> list[ScoredFact]:
-        """
-        Retrieve facts by embedding similarity.
-        Returns facts with similarity scores for downstream filtering.
-        """
-        query_embedding = await self.embed(query)
-        return await self.vector_search(
-            embedding=query_embedding,
-            profile_id=profile_id,
-            top_k=top_k,
-            min_similarity=min_similarity,
-        )
-```
+## Feedback Tracking (Optional)
 
-### 4. Router LLM
-
-Dedicated model for context selection:
-
-```python
-class RouterLLM:
-    SYSTEM_PROMPT = """
-    You are a context selection assistant. Given a user query and candidate facts,
-    select the facts most relevant to answering the query.
-
-    Output JSON: {"selected_ids": [1, 3, 7], "reasoning": "..."}
-
-    Selection criteria:
-    - Directly relevant to the query topic
-    - Provides necessary background for accurate response
-    - Respects user preferences that affect response style
-    """
-
-    async def select(
-        self,
-        query: str,
-        candidates: list[Fact],
-        max_facts: int = 10,
-    ) -> RouterDecision:
-        ...
-```
-
-### 5. Routing Cache
-
-Cache routing decisions for repeated query patterns:
-
-```python
-class RoutingCache:
-    async def get(self, query: str, profile_id: int) -> CachedRoute | None:
-        """Return cached fact selection if fresh."""
-        ...
-
-    async def set(
-        self,
-        query: str,
-        profile_id: int,
-        fact_ids: list[int],
-        tier_used: str,
-    ):
-        """Cache routing decision."""
-        ...
-```
-
-Cache invalidation triggers:
-- Fact creation/update/deletion
-- Time-based expiry
-- Profile configuration changes
-
-## Routing Orchestrator
-
-```python
-class HybridRouter:
-    async def route(self, query: str, profile_id: int) -> RoutingResult:
-        # Check cache first
-        cached = await self.cache.get(query, profile_id)
-        if cached:
-            return cached.to_result()
-
-        # Tier 1: Rules
-        rule_facts = await self.rule_engine.match(query, profile_id)
-        always_facts = await self.rule_engine.always_include(profile_id)
-
-        if self._rules_sufficient(query, rule_facts):
-            return RoutingResult(
-                facts=always_facts + rule_facts,
-                tier="rules",
-            )
-
-        # Tier 2: Embeddings
-        candidates = await self.retriever.retrieve(query, profile_id)
-
-        if self._high_confidence(candidates):
-            selected = self._select_top(candidates, k=10)
-            return RoutingResult(
-                facts=always_facts + selected,
-                tier="embedding",
-            )
-
-        # Tier 3: Router LLM
-        decision = await self.router_llm.select(query, candidates)
-
-        return RoutingResult(
-            facts=always_facts + decision.facts,
-            tier="router_llm",
-            reasoning=decision.reasoning,
-        )
-
-    def _high_confidence(self, candidates: list[ScoredFact]) -> bool:
-        """
-        Determine if embedding results are confident enough.
-
-        High confidence when:
-        - Top results have high similarity scores
-        - Clear separation between relevant and irrelevant
-        """
-        ...
-```
-
-## Data Model Extensions
-
-### RoutingResult
-
-```python
-@dataclass
-class RoutingResult:
-    facts: list[Fact]
-    tier: str  # "rules" | "embedding" | "router_llm"
-    reasoning: str | None = None
-    candidates_considered: int = 0
-```
-
-### Routing Feedback
-
-Track routing decisions for analysis and improvement:
+Learn can optionally store routing decisions for analysis:
 
 ```sql
+-- Optional: Track routing decisions for learning
 CREATE TABLE routing_decisions (
     id BIGSERIAL PRIMARY KEY,
     profile_id BIGINT NOT NULL REFERENCES profiles(id),
     query_hash VARCHAR(64) NOT NULL,
-    tier_used VARCHAR(20) NOT NULL,
-    selected_fact_ids BIGINT[] NOT NULL,
+    tier_used VARCHAR(20) NOT NULL,  -- 'rules', 'embedding', 'llm'
+    facts_selected BIGINT[] NOT NULL,
     candidates_count INT,
+    confidence REAL NOT NULL,
     reasoning TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE routing_feedback (
     id BIGSERIAL PRIMARY KEY,
-    routing_decision_id BIGINT NOT NULL REFERENCES routing_decisions(id),
+    decision_id BIGINT NOT NULL REFERENCES routing_decisions(id),
     signal VARCHAR(20) NOT NULL,  -- 'positive', 'negative', 'missing_context'
     comment TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 ```
 
-## Integration with Proxy
+Agent can use this data to improve selection over time.
 
-Update the serving layer to use hybrid routing:
+---
 
-```python
-class _RouteHandlers:
-    def __init__(
-        self,
-        model_name: str,
-        llm_client: LLMClient,
-        router: HybridRouter,  # Replaces simple ContextBuilder
-        streaming_client: OpenAIClient | None = None,
-    ):
-        self.router = router
-        ...
+## Configuration
 
-    async def chat_completions(self, body: ChatCompletionRequest):
-        # Route to get relevant facts
-        routing_result = await self.router.route(
-            query=self._extract_query(body.messages),
-            profile_id=self.profile_id,
-        )
+```yaml
+# learn.yaml - learn's config
+adaptation:
+  candidate_limit: 30           # Max candidates from vector search
+  min_similarity: 0.5           # Minimum embedding similarity
 
-        # Build system prompt from routed facts
-        system_prompt = self._build_system_prompt(routing_result.facts)
-
-        # Continue with inference...
+# agent.yaml - agent's config
+context_selection:
+  rule_confidence_threshold: 0.8
+  embedding_confidence_threshold: 0.75
+  llm_selector:
+    model: "small"
+    batch_size: 10
+  cache:
+    enabled: true
+    ttl: 3600
 ```
 
-## Open Questions
+---
 
-1. **Escalation thresholds**: How to tune confidence thresholds for tier escalation?
-2. **Router model**: Which model balances speed and accuracy for routing?
-3. **Fact grouping**: Should related facts be grouped/summarized?
-4. **Multi-turn**: How does conversation history affect routing?
-5. **Feedback collection**: How to gather implicit feedback on routing quality?
+## Summary
+
+| Component | Owner | Responsibility |
+|-----------|-------|---------------|
+| Vector search | learn | Retrieve candidates by embedding similarity |
+| Fact retrieval | learn | List facts by category/confidence |
+| `ContextSelector` protocol | learn | Define what agent must implement |
+| `SelectionResult` type | learn | Standardized result format |
+| Rule-based selection | agent | Fast selection via rules |
+| LLM-based selection | agent | Accurate selection via model |
+| Hybrid selection | agent | Tiered approach (rules → embeddings → LLM) |
+| Routing cache | agent | Optional caching of decisions |
+
+Learn provides the primitives and protocols. Agent provides the intelligence.

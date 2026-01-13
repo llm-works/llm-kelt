@@ -1,17 +1,139 @@
 # Framework Strategy
 
-Which approaches the framework supports, and when to use them.
+Which approaches the framework supports, how responsibilities are divided between learn and agent.
+
+## Architectural Boundary
+
+**learn** and **agent** have distinct responsibilities:
+
+| Layer | Responsibility | Examples |
+|-------|---------------|----------|
+| **learn** | Data primitives + pipeline framework | Facts CRUD, feedback storage, vector search, pipeline executor |
+| **agent** | Orchestration intelligence | Routing decisions, quality evaluation, model selection, retry logic |
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              agent                                       │
+│                                                                          │
+│   Implements learn's protocols:                                          │
+│   - ContextSelector (which facts for this query?)                        │
+│   - QualityEvaluator (is response good enough?)                          │
+│   - ModelRouter (small or large model?)                                  │
+│   - RetryStrategy (how to handle failures?)                              │
+│                                                                          │
+│   Uses learn's primitives + pipeline framework                           │
+└──────────────────────────────────────────────────────────────────────────┘
+                                   │
+                        implements │ protocols
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              learn                                       │
+│                                                                          │
+│   Provides:                                                              │
+│   - Data primitives (facts, feedback, preferences, content)              │
+│   - Vector search (similarity retrieval)                                 │
+│   - Pipeline framework (executor calls agent-provided hooks)             │
+│   - Protocol definitions (what agent must implement)                     │
+│   - Export functionality (training data)                                 │
+│                                                                          │
+│   Does NOT provide:                                                      │
+│   - Routing logic (agent decides)                                        │
+│   - Quality evaluation (agent decides)                                   │
+│   - Model selection (agent decides)                                      │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key insight:** learn defines *what* the pipeline does (structure, data flow, hooks). Agent defines
+*how* decisions are made (implementations of the hooks).
+
+---
 
 ## Approach Selection
 
 From the [learning methods](02-learning-methods.md), the framework supports:
 
-| Approach | Use Case | Why |
-|----------|----------|-----|
-| **RAG** | Immediate context injection | No training needed, works with any LLM |
-| **Classifiers** | Fast scoring/filtering | Cheap, fast inference |
-| **Embeddings** | Similarity search | Required for RAG, enables clustering |
-| **LoRA + DPO** | Behavior customization | Efficient fine-tuning for local models |
+| Approach | Use Case | Owner |
+|----------|----------|-------|
+| **RAG** | Semantic context retrieval | learn (primitives) + agent (selection logic) |
+| **Memory** | Fact injection | learn (storage) + agent (routing) |
+| **Classifiers** | Fast scoring/filtering | learn (data export) + agent (model calls) |
+| **Embeddings** | Similarity search | learn (vector storage + search) |
+| **LoRA + DPO** | Behavior customization | learn (training data export) |
+
+## What learn Provides
+
+### Data Primitives
+
+```python
+# learn owns CRUD and retrieval
+class FactsClient:
+    def add(content, category, source, confidence) -> int
+    def list_active(category, min_confidence, limit) -> list[Fact]
+    def search(query, active_only, limit) -> list[Fact]
+
+class ContentClient:
+    def store(content_text, source, ...) -> int
+    def search_similar(query, top_k, min_similarity) -> list[ScoredContent]
+
+class FeedbackClient:
+    def record(signal, content_text, context) -> int
+    def export_jsonl(path) -> int
+```
+
+### Pipeline Framework
+
+learn provides the pipeline executor that calls agent-provided hooks:
+
+```python
+# learn owns the pipeline structure
+class AdaptationPipeline:
+    def __init__(
+        self,
+        learn_client: LearnClient,
+        # Agent provides these implementations
+        context_selector: ContextSelector,
+        quality_evaluator: QualityEvaluator,
+        model_router: ModelRouter,
+        retry_strategy: RetryStrategy,
+        ...
+    ): ...
+
+    async def process(query, messages, system) -> PipelineResult:
+        # learn controls the flow, agent provides the intelligence
+        ...
+```
+
+### Protocol Definitions
+
+learn defines what agent must implement:
+
+```python
+# learn defines the contracts
+class ContextSelector(Protocol):
+    async def select(query, candidates, max_facts) -> SelectionResult: ...
+
+class QualityEvaluator(Protocol):
+    async def evaluate(query, response, context) -> EvaluationResult: ...
+
+class ModelRouter(Protocol):
+    async def route(query, context_confidence) -> RoutingDecision: ...
+
+class RetryStrategy(Protocol):
+    async def should_retry(attempt, quality_score, error) -> RetryDecision: ...
+```
+
+See [Context Routing](06-context-routing.md) and [Advanced Methods](07-advanced-methods.md) for full
+protocol definitions.
+
+## What learn Does NOT Provide
+
+| Concern | Why Not | Owner |
+|---------|---------|-------|
+| **Routing logic** | Requires LLM calls, domain knowledge | agent |
+| **Quality evaluation** | Requires LLM judge or domain rules | agent |
+| **Model selection** | Requires budget/capability awareness | agent |
+| **Retry logic** | Requires strategy decisions | agent |
 
 ## What the Framework Does NOT Support
 
@@ -19,60 +141,87 @@ From the [learning methods](02-learning-methods.md), the framework supports:
 |----------|--------|
 | **Full fine-tuning** | Too expensive, LoRA is sufficient |
 | **RLHF** | Overkill, DPO achieves similar results more simply |
-| **Training from scratch** | Uses existing base models (see [out of scope](02-learning-methods.md#out-of-scope)) |
+| **Training from scratch** | Uses existing base models |
 | **Continued pre-training** | LoRA + RAG achieves similar results at fraction of cost |
 | **Prompt tuning** | Not available via API, limited value |
 | **Reward modeling** | Only needed for RLHF, which we're not doing |
 
-## Future Considerations
-
-Approaches that may be added as the framework matures:
-
-| Approach | When to Consider | Trigger |
-|----------|------------------|---------|
-| **KTO** | If paired preferences are hard to collect | Have thumbs up/down but not A vs B |
-| **Synthetic Data** | Bootstrapping training | Need more training examples than organic feedback provides |
-| **RLAIF** | Scaling preference collection | Human feedback becomes bottleneck |
-| **Knowledge Distillation** | Deployment cost reduction | Need faster/cheaper inference |
-| **Active Learning** | Optimizing labeling effort | Limited annotation budget |
-| **Continual Learning** | Ongoing model updates | Need to update without full retraining |
-
-See [learning methods](02-learning-methods.md) for full details on each technique.
+---
 
 ## Implementation Layers
 
-### Layer 1: Context Injection
+### Layer 1: Data Primitives (learn)
 
-**Goal:** Immediate customization with no training.
+**Goal:** Store and retrieve personalization data.
 
-- Embed content as it's ingested
-- Retrieve relevant context at query time
-- Inject into LLM prompt
-- Works with API models (Claude, GPT) and local models
+- Facts storage with categories and confidence
+- Feedback collection (positive/negative/dismiss)
+- Preference pairs for DPO training
+- Content deduplication with embeddings
+- Vector similarity search
 
-**Data needed:** Content with embeddings
+**No intelligence here** - just CRUD and retrieval.
 
-### Layer 2: Scoring
+### Layer 2: Pipeline Framework (learn)
 
-**Goal:** Fast relevance/quality scoring.
+**Goal:** Define the adaptation flow structure.
 
-- Train classifiers on feedback signals
-- Fast inference for filtering
-- Periodic retraining as feedback accumulates
+- Pipeline executor with configurable steps
+- Protocol definitions for agent hooks
+- Data types for pipeline state
+- Result recording back to learn
 
-**Data needed:** Labeled examples (100+)
+**Orchestrates the flow, delegates decisions to agent.**
 
-### Layer 3: Behavior Customization
+### Layer 3: Orchestration Intelligence (agent)
 
-**Goal:** Model learns specific behaviors.
+**Goal:** Make smart decisions within the pipeline.
 
-- LoRA adapters with DPO/KTO
-- Periodic retraining
-- Hot-swap into local inference
+- Context selection (rules, embeddings, LLM-based)
+- Quality evaluation (rule-based, LLM judge)
+- Model routing (small for filtering, large for reasoning)
+- Retry strategies (escalate model, expand context)
 
-**Data needed:** 500+ preference pairs (chosen/rejected) or binary feedback
+**Implements learn's protocols with actual intelligence.**
 
-**Note:** Only applies when running local LLM. If API-only, use Layer 1 and 2.
+---
+
+## Integration Example
+
+```python
+# In agent - assembles pipeline with its implementations
+
+from llm_learn import LearnClient
+from llm_learn.adaptation import AdaptationPipeline, PipelineConfig
+
+# Agent's implementations of learn's protocols
+from agent.adaptation.selectors import HybridSelector
+from agent.adaptation.evaluators import LLMJudgeEvaluator
+from agent.adaptation.routers import ConfidenceBasedRouter
+from agent.adaptation.retry import ExponentialBackoffRetry
+
+class OrchestrationAgent:
+    def setup(self):
+        # Learn client for data primitives
+        self.learn = LearnClient(profile_id=self.config.profile_id)
+
+        # Agent provides implementations
+        selector = HybridSelector(self.small_model)
+        evaluator = LLMJudgeEvaluator(self.small_model)
+        router = ConfidenceBasedRouter("small", "large", threshold=0.7)
+        retry = ExponentialBackoffRetry(max_attempts=3)
+
+        # Learn's pipeline with agent's implementations
+        self.pipeline = AdaptationPipeline(
+            learn_client=self.learn,
+            context_selector=selector,
+            quality_evaluator=evaluator,
+            model_router=router,
+            retry_strategy=retry,
+            models={"small": self.small_model, "large": self.large_model},
+            config=PipelineConfig(max_attempts=3),
+        )
+```
 
 ---
 
@@ -81,17 +230,17 @@ See [learning methods](02-learning-methods.md) for full details on each techniqu
 ### Simplicity over Power
 - LoRA over full fine-tune
 - DPO/KTO over RLHF (no reward model needed)
-- Classifiers over complex LLM chains for scoring
+- Protocol-based hooks over hardcoded logic
 
 ### Portability over Lock-in
 - Store everything in PostgreSQL (portable)
 - JSONL exports for training (tool-agnostic)
 - Support both API and local models
 
-### Iteration over Perfection
-- Start with RAG (immediate results)
-- Add classifiers when feedback accumulates
-- Add LoRA when preference pairs are available
+### Separation of Concerns
+- learn = data + framework (stable, tested)
+- agent = intelligence (flexible, evolving)
+- Clean protocol boundary between them
 
 ---
 
@@ -99,11 +248,13 @@ See [learning methods](02-learning-methods.md) for full details on each techniqu
 
 | Layer | GPU | Storage |
 |-------|-----|---------|
-| Layer 1 (Context) | None (embeddings via API or local) | PostgreSQL + pgvector |
-| Layer 2 (Scoring) | Optional (CPU works for small classifiers) | + classifier artifacts |
-| Layer 3 (Behavior) | 1x 24GB+ (RTX 4090 or better) | + LoRA adapters |
+| Layer 1 (Data) | None | PostgreSQL + pgvector |
+| Layer 2 (Pipeline) | None | Same |
+| Layer 3 (Agent) | Optional for local models | + model weights |
 
-For LoRA training on larger models (70B+), need 2x 48GB or cloud GPU.
+For agent with local models:
+- Small model (filtering): 8GB GPU
+- Large model (reasoning): 24-96GB GPU or API
 
 ---
 
@@ -111,6 +262,6 @@ For LoRA training on larger models (70B+), need 2x 48GB or cloud GPU.
 
 | Layer | Metric | Target |
 |-------|--------|--------|
-| Layer 1 | RAG retrieval precision | >70% relevant |
-| Layer 2 | Classifier accuracy | >80% on held-out |
-| Layer 3 | DPO win rate | >60% vs base |
+| Layer 1 | Data integrity, query latency | <100ms retrieval |
+| Layer 2 | Pipeline completion rate | >95% |
+| Layer 3 | Quality score improvement | >20% vs no adaptation |
