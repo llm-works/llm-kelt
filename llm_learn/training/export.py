@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy import select
 
 from ..core.models import Content, Feedback, PreferencePair
+from ..core.utils import utc_now
 
 
 @dataclass
@@ -42,11 +43,16 @@ def _build_sft_instruction(feedback: Feedback, content: Content) -> str:
 
 def _build_sft_record(
     feedback: Feedback, content: Content, include_context: bool
-) -> dict[str, str]:
-    """Build a single SFT training record from feedback and content."""
+) -> dict[str, str] | None:
+    """Build a single SFT training record from feedback and content.
+
+    Returns None if content has no text (record would be useless for training).
+    """
+    if not content.content_text:
+        return None
     record: dict[str, str] = {
         "instruction": _build_sft_instruction(feedback, content),
-        "output": content.content_text or "",
+        "output": content.content_text,
     }
     if include_context and feedback.context:
         context_str = (
@@ -85,7 +91,7 @@ def _classifier_record_from_row(row: tuple[Feedback, Content]) -> dict[str, str 
 def _sft_record_builder(include_context: bool):
     """Return a function that builds SFT records with the given context setting."""
 
-    def builder(row: tuple[Feedback, Content]) -> dict[str, str]:
+    def builder(row: tuple[Feedback, Content]) -> dict[str, str] | None:
         return _build_sft_record(row[0], row[1], include_context)
 
     return builder
@@ -166,7 +172,7 @@ def export_preferences_dpo(
         count=count,
         profile_id=profile_id,
         format="dpo",
-        exported_at=datetime.now(),
+        exported_at=utc_now(),
     )
 
 
@@ -192,6 +198,9 @@ def export_feedback_sft(
     This exports feedback records that have associated content,
     formatted for supervised fine-tuning. The content text becomes
     the output, and any context/tags become the instruction.
+
+    Note: Only feedback with associated content (content_id set) is exported.
+    Feedback without content or with empty content_text is skipped.
 
     Args:
         session_factory: Database session factory
@@ -220,7 +229,7 @@ def export_feedback_sft(
         count=count,
         profile_id=profile_id,
         format="sft",
-        exported_at=datetime.now(),
+        exported_at=utc_now(),
     )
 
 
@@ -241,6 +250,9 @@ def export_feedback_classifier(
 
     Exports both positive and negative feedback for training
     a relevance/quality classifier.
+
+    Note: Only feedback with associated content (content_id set) is exported.
+    Feedback without content or with empty content_text is skipped.
 
     Args:
         session_factory: Database session factory
@@ -268,5 +280,5 @@ def export_feedback_classifier(
         count=count,
         profile_id=profile_id,
         format="classifier",
-        exported_at=datetime.now(),
+        exported_at=utc_now(),
     )
