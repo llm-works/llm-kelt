@@ -60,6 +60,7 @@ def db_config(config):
             create_db=True,
             readonly=False,
             pool_pre_ping=True,
+            extensions=["vector"],  # pgvector for embeddings
         )
 
     # Fall back to config file
