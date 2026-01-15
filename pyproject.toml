@@ -72,10 +72,15 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 addopts = "-v --tb=short"
 pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
     "ignore:'crypt' is deprecated:DeprecationWarning:passlib",
 ]
 markers = [
+    "unit: marks tests as unit tests (fast, no external dependencies)",
+    "integration: marks tests as integration tests (require database)",
+    "e2e: marks tests as end-to-end tests (require full system)",
     "llm: marks tests as requiring a running LLM (deselect with '-m \"not llm\"')",
 ]
 

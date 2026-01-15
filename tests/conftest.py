@@ -13,6 +13,20 @@ from llm_learn.client import LearnClient
 from llm_learn.core.database import Database
 from llm_learn.core.models import Base, Profile, Workspace
 
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-apply markers based on test directory."""
+    for item in items:
+        test_path = Path(item.fspath)
+        # Determine marker from directory name
+        if "unit" in test_path.parts:
+            item.add_marker(pytest.mark.unit)
+        elif "integration" in test_path.parts:
+            item.add_marker(pytest.mark.integration)
+        elif "e2e" in test_path.parts:
+            item.add_marker(pytest.mark.e2e)
+
+
 # Find project root
 PROJECT_ROOT = Path(__file__).parent.parent
 CONFIG_PATH = PROJECT_ROOT / "etc" / "infra.yaml"
@@ -46,6 +60,7 @@ def db_config(config):
             create_db=True,
             readonly=False,
             pool_pre_ping=True,
+            extensions=["vector"],  # pgvector for embeddings
         )
 
     # Fall back to config file

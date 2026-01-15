@@ -79,7 +79,6 @@ def create_server(
         streaming_client=streaming_client,
     )
 
-    # Build server using appinfra
     server = (
         ServerBuilder("llm-learn-proxy")
         .with_host(host)
@@ -91,10 +90,7 @@ def create_server(
         .done()
         .build()
     )
-
-    # Store clients for cleanup
-    server._llm_client = llm_client
-
+    server._llm_client = llm_client  # Store for cleanup
     return server
 
 
