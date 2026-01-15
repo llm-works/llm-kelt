@@ -7,12 +7,13 @@ Exports collected data to formats suitable for training:
 
 import json
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from ..core.models import Content, Feedback, PreferencePair
 from ..core.utils import utc_now
@@ -120,7 +121,7 @@ def _build_feedback_query(
 
 
 def export_preferences_dpo(
-    session_factory: Callable[[], Any],
+    session_factory: Callable[[], AbstractContextManager[Session]],
     profile_id: int,
     output_path: str | Path,
     *,
@@ -177,7 +178,7 @@ def export_preferences_dpo(
 
 
 def export_feedback_sft(
-    session_factory: Callable[[], Any],
+    session_factory: Callable[[], AbstractContextManager[Session]],
     profile_id: int,
     output_path: str | Path,
     *,
@@ -234,7 +235,7 @@ def export_feedback_sft(
 
 
 def export_feedback_classifier(
-    session_factory: Callable[[], Any],
+    session_factory: Callable[[], AbstractContextManager[Session]],
     profile_id: int,
     output_path: str | Path,
     *,

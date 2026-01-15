@@ -1,9 +1,7 @@
 """Training modules for Learn framework.
 
-Contains training pipelines for different learning approaches:
+Contains utilities for training data preparation:
 - export: Data export to training formats (DPO, SFT, classifier)
-- lora: LoRA adapter training (coming soon)
-- dpo: DPO training (coming soon)
 """
 
 from .export import (
