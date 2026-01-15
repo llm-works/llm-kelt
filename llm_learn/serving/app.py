@@ -1,6 +1,7 @@
 """FastAPI application factory for llm-learn proxy server using appinfra."""
 
 from appinfra.app.fastapi import Server, ServerBuilder
+from fastapi import APIRouter
 from llm_infer.client import OpenAIClient
 
 from ..client import LearnClient
@@ -8,6 +9,21 @@ from ..core.database import Database
 from ..inference.client import LLMClient
 from ..inference.context import ContextBuilder
 from .routes import create_router
+
+
+def _build_server(router: APIRouter, host: str, port: int) -> Server:
+    """Build the FastAPI server with the given router."""
+    return (
+        ServerBuilder("llm-learn-proxy")
+        .with_host(host)
+        .with_port(port)
+        .with_title("llm-learn Proxy")
+        .with_description("OpenAI-compatible API with learning context injection")
+        .with_version("0.1.0")
+        .routes.with_router(router)
+        .done()
+        .build()
+    )
 
 
 def _create_streaming_client(llm_config: dict) -> OpenAIClient | None:
@@ -79,22 +95,8 @@ def create_server(
         streaming_client=streaming_client,
     )
 
-    # Build server using appinfra
-    server = (
-        ServerBuilder("llm-learn-proxy")
-        .with_host(host)
-        .with_port(port)
-        .with_title("llm-learn Proxy")
-        .with_description("OpenAI-compatible API with learning context injection")
-        .with_version("0.1.0")
-        .routes.with_router(router)
-        .done()
-        .build()
-    )
-
-    # Store clients for cleanup
-    server._llm_client = llm_client
-
+    server = _build_server(router, host, port)
+    server._llm_client = llm_client  # Store for cleanup
     return server
 
 

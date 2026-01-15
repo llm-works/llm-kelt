@@ -2,7 +2,7 @@
 
 from .content import ContentClient
 from .directives import DirectivesClient
-from .facts import FactsClient
+from .facts import FactsClient, ScoredFact
 from .feedback import FeedbackClient
 from .interactions import InteractionsClient
 from .predictions import PredictionsClient
@@ -16,4 +16,5 @@ __all__ = [
     "InteractionsClient",
     "PredictionsClient",
     "PreferencesClient",
+    "ScoredFact",
 ]

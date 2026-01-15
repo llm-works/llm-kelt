@@ -3,6 +3,7 @@
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Optional
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -18,11 +19,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-
-try:
-    from pgvector.sqlalchemy import Vector
-except ImportError:
-    Vector = None  # type: ignore[misc, assignment]
 
 if TYPE_CHECKING:
     pass
@@ -407,6 +403,7 @@ class Fact(Base):
 
     # Relationships
     profile: Mapped["Profile"] = relationship(back_populates="facts")
+    embeddings: Mapped[list["FactEmbedding"]] = relationship(back_populates="fact")
 
     __table_args__ = (
         Index("idx_facts_profile", "profile_id"),
@@ -418,3 +415,33 @@ class Fact(Base):
     def __repr__(self) -> str:
         preview = self.content[:30] + "..." if len(self.content) > 30 else self.content
         return f"<Fact(id={self.id}, category={self.category!r}, content={preview!r})>"
+
+
+class FactEmbedding(Base):
+    """
+    Embeddings for facts, stored separately for model flexibility.
+
+    Allows multiple embedding models per fact and easy model upgrades.
+    The current/active model is defined in config, not per-row.
+    """
+
+    __tablename__ = "fact_embeddings"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    fact_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("facts.id"), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    dimensions: Mapped[int] = mapped_column(Integer, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(Vector(), nullable=False)  # Unconstrained
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+    # Relationships
+    fact: Mapped["Fact"] = relationship(back_populates="embeddings")
+
+    __table_args__ = (
+        # Only one embedding per fact per model
+        UniqueConstraint("fact_id", "model_name", name="uq_fact_embedding_model"),
+        Index("idx_fact_embeddings_fact", "fact_id"),
+        Index("idx_fact_embeddings_model", "model_name"),
+    )

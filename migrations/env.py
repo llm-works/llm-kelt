@@ -5,14 +5,15 @@ import sys
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy.engine import Engine
+from sqlalchemy import inspect, text
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from appinfra.config import Config  # noqa: E402
-from appinfra.db.pg import create_engine_from_config  # noqa: E402
+from appinfra.db.pg import PG  # noqa: E402
+from appinfra.log import LogConfig, LoggerFactory  # noqa: E402
 
 from llm_learn.core.models import Base  # noqa: E402
 
@@ -29,20 +30,20 @@ config = context.config
 # Set URL from our config
 config.set_main_option("sqlalchemy.url", db_config.url)
 
+
+def _get_pg() -> PG:
+    """Create appinfra PG instance (deferred to avoid early connection)."""
+    log_config = LogConfig.from_params(level="warning")
+    logger = LoggerFactory.create_root(log_config)
+    return PG(logger, db_config)
+
+
 # SQLAlchemy metadata for autogenerate
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode.
-
-    This configures the context with just a URL and not an Engine,
-    though an Engine is acceptable here as well. By skipping the Engine
-    creation we don't even need a DBAPI to be available.
-
-    Calls to context.execute() here emit the given string to the
-    script output.
-    """
+    """Run migrations in 'offline' mode."""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -55,20 +56,48 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def _bootstrap_fresh_database(pg: PG) -> None:
+    """Bootstrap a fresh database with schema from models."""
+    from alembic.script import ScriptDirectory
+
+    # Use appinfra to create db, extensions, and tables
+    pg.migrate(Base)
+
+    # Stamp with head revision
+    script = ScriptDirectory.from_config(config)
+    head_rev = script.get_current_head()
+    with pg.engine.connect() as conn:
+        conn.execute(
+            text("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)")
+        )
+        conn.execute(
+            text("INSERT INTO alembic_version (version_num) VALUES (:rev) ON CONFLICT DO NOTHING"),
+            {"rev": head_rev},
+        )
+        conn.commit()
+
+
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
+    """Run migrations in 'online' mode."""
+    pg = _get_pg()
 
-    In this scenario we need to create an Engine and associate a
-    connection with the context.
-    """
-    # Create engine from config
-    connectable: Engine = create_engine_from_config(db_config)
+    # Check if database needs bootstrapping (pg.migrate handles db creation)
+    try:
+        with pg.engine.connect() as connection:
+            inspector = inspect(connection)
+            if "alembic_version" not in inspector.get_table_names():
+                _bootstrap_fresh_database(pg)
+                return
 
-    with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
-
-        with context.begin_transaction():
-            context.run_migrations()
+            context.configure(connection=connection, target_metadata=target_metadata)
+            with context.begin_transaction():
+                context.run_migrations()
+    except Exception as e:
+        # Database doesn't exist - bootstrap it
+        if "does not exist" in str(e):
+            _bootstrap_fresh_database(pg)
+        else:
+            raise
 
 
 if context.is_offline_mode():

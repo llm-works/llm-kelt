@@ -1,17 +1,60 @@
 """Facts collection client for context injection."""
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal, cast
 
 from appinfra.db.utils import detach, detach_all
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.sql.elements import TextClause
 
 from ..core.exceptions import NotFoundError, ValidationError
-from ..core.models import Fact
+from ..core.models import Fact, FactEmbedding
 from .base import ProfileScopedClient
 
 FactCategory = Literal["preferences", "background", "rules", "context"]
 FactSource = Literal["user", "inferred", "conversation", "system"]
+
+
+@dataclass
+class ScoredFact:
+    """Fact with similarity score from vector search."""
+
+    fact: Fact
+    similarity: float
+
+
+def _row_to_fact(row) -> Fact:
+    """Convert a database row to a Fact object."""
+    return Fact(
+        id=row.id,
+        profile_id=row.profile_id,
+        content=row.content,
+        category=row.category,
+        source=row.source,
+        confidence=row.confidence,
+        active=row.active,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _build_similarity_query(active_only: bool) -> TextClause:
+    """Build pgvector similarity search query."""
+    active_filter = "AND f.active = true" if active_only else ""
+    return text(f"""
+        SELECT f.id, f.content, f.category, f.source, f.confidence, f.active,
+               f.created_at, f.updated_at, f.profile_id,
+               1 - (e.embedding <=> CAST(:embedding AS vector)) as similarity
+        FROM facts f
+        JOIN fact_embeddings e ON e.fact_id = f.id
+        WHERE f.profile_id = :profile_id
+          AND e.model_name = :model_name
+          {active_filter}
+          AND 1 - (e.embedding <=> CAST(:embedding AS vector)) >= :min_similarity
+        ORDER BY e.embedding <=> CAST(:embedding AS vector)
+        LIMIT :top_k
+    """)
 
 
 class FactsClient(ProfileScopedClient[Fact]):
@@ -299,3 +342,118 @@ class FactsClient(ProfileScopedClient[Fact]):
             stmt = stmt.order_by(Fact.created_at.desc()).limit(limit)
             facts = list(session.scalars(stmt).all())
             return cast(list[Fact], detach_all(facts, session))
+
+    def search_similar(
+        self,
+        embedding: list[float],
+        model_name: str,
+        top_k: int = 30,
+        min_similarity: float = 0.5,
+        active_only: bool = True,
+    ) -> list[ScoredFact]:
+        """
+        Search facts by embedding similarity using pgvector.
+
+        Args:
+            embedding: Query embedding vector.
+            model_name: Embedding model name to search against.
+            top_k: Maximum number of results.
+            min_similarity: Minimum cosine similarity threshold (0-1).
+            active_only: Whether to search only active facts.
+
+        Returns:
+            List of ScoredFact sorted by similarity (highest first).
+        """
+        with self._session_factory() as session:
+            embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
+            result = session.execute(
+                _build_similarity_query(active_only),
+                {
+                    "embedding": embedding_str,
+                    "profile_id": self.profile_id,
+                    "model_name": model_name,
+                    "min_similarity": min_similarity,
+                    "top_k": top_k,
+                },
+            )
+            return [ScoredFact(fact=_row_to_fact(row), similarity=row.similarity) for row in result]
+
+    def set_embedding(
+        self,
+        fact_id: int,
+        embedding: list[float],
+        model_name: str,
+    ) -> None:
+        """
+        Set the embedding for a fact (upsert into fact_embeddings table).
+
+        Args:
+            fact_id: ID of fact to update.
+            embedding: Embedding vector.
+            model_name: Name of the embedding model used.
+
+        Raises:
+            NotFoundError: If fact not found or belongs to different profile.
+        """
+        with self._session_factory() as session:
+            fact = session.get(Fact, fact_id)
+            if not fact or fact.profile_id != self.profile_id:
+                raise NotFoundError(f"Fact {fact_id} not found")
+
+            # Check if embedding already exists for this model
+            existing = session.execute(
+                select(FactEmbedding).where(
+                    FactEmbedding.fact_id == fact_id,
+                    FactEmbedding.model_name == model_name,
+                )
+            ).scalar_one_or_none()
+
+            if existing:
+                # Update existing embedding
+                existing.embedding = embedding
+                existing.dimensions = len(embedding)
+            else:
+                # Create new embedding
+                fact_embedding = FactEmbedding(
+                    fact_id=fact_id,
+                    model_name=model_name,
+                    dimensions=len(embedding),
+                    embedding=embedding,
+                )
+                session.add(fact_embedding)
+
+    def list_without_embeddings(self, model_name: str, limit: int = 100) -> list[Fact]:
+        """
+        List facts that don't have embeddings for the specified model.
+
+        Args:
+            model_name: Embedding model name to check.
+            limit: Maximum results.
+
+        Returns:
+            List of facts without embeddings for the specified model.
+        """
+        with self._session_factory() as session:
+            # Find facts that don't have an embedding for this model
+            query = text("""
+                SELECT f.id, f.profile_id, f.content, f.category, f.source,
+                       f.confidence, f.active, f.created_at, f.updated_at
+                FROM facts f
+                LEFT JOIN fact_embeddings e ON e.fact_id = f.id AND e.model_name = :model_name
+                WHERE f.profile_id = :profile_id
+                  AND f.active = true
+                  AND e.id IS NULL
+                ORDER BY f.created_at DESC
+                LIMIT :limit
+            """)
+
+            result = session.execute(
+                query,
+                {
+                    "profile_id": self.profile_id,
+                    "model_name": model_name,
+                    "limit": limit,
+                },
+            )
+
+            return [_row_to_fact(row) for row in result]

@@ -71,6 +71,7 @@ class Database:
 
     def migrate(self) -> None:
         """Run migrations to create all tables from SQLAlchemy models."""
+        # Extensions (e.g., vector) are auto-created via pg.yaml config
         self._pg.migrate(Base)
 
     @contextmanager

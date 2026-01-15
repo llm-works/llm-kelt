@@ -23,5 +23,11 @@ learn:
     min_confidence: 0.0         # Minimum confidence threshold for facts
     fact_position: append       # Where to place facts: append or prepend
 
+  # Embedding model configuration
+  embedding:
+    model_name: all-MiniLM-L6-v2   # Current model (used as key in fact_embeddings)
+    dimensions: 384                 # Expected embedding dimensions
+    base_url: http://localhost:8001/v1  # Embedding server URL
+
   # Default system prompt (can be overridden per query)
   default_system_prompt: ""

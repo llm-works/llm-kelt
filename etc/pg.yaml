@@ -1,7 +1,8 @@
 pgserver:
-  version: 16                  # PostgreSQL major version (used for compatibility checks)
-  name: infra-pg               # Server identifier/name for logging and identification
-  port: 7432                   # PostgreSQL port (default: 5432, can be overridden with INFRA_PGSERVER_PORT)
+  # version: 16                # Ignored when image is specified
+  name: learn-pg               # Server identifier/name for logging and identification
+  port: 7532                   # PostgreSQL port (default: 5432, can be overridden with INFRA_PGSERVER_PORT)
+  image: pgvector/pgvector:pg16  # pgvector for vector similarity search
   user: postgres               # Database username (can be overridden with INFRA_PGSERVER_USER)
   pass: ''                     # Database password (RECOMMENDED: use environment variable)
 
@@ -11,8 +12,12 @@ dbs:
     create_db: true             # Create database if it doesn't exist
     readonly: false             # Read-write mode (default)
     pool_pre_ping: true         # Verify connections before use
+    extensions:                 # Auto-created during migrate()
+      - vector                  # pgvector for embeddings
 
   unittest:
     url: "postgresql://${pgserver.user}:${pgserver.pass}@127.0.0.1:${pgserver.port}/learn_test"
     create_db: true             # Create database if it doesn't exist
     readonly: false
+    extensions:
+      - vector
