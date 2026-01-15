@@ -1,5 +1,6 @@
 """Facts collection client for context injection."""
 
+import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
@@ -39,22 +40,49 @@ def _row_to_fact(row: Any) -> Fact:
     )
 
 
-def _build_similarity_query(active_only: bool) -> TextClause:
-    """Build pgvector similarity search query."""
-    active_filter = "AND f.active = true" if active_only else ""
-    return text(f"""
-        SELECT f.id, f.content, f.category, f.source, f.confidence, f.active,
-               f.created_at, f.updated_at, f.profile_id,
-               1 - (e.embedding <=> CAST(:embedding AS vector)) as similarity
-        FROM facts f
-        JOIN fact_embeddings e ON e.fact_id = f.id
-        WHERE f.profile_id = :profile_id
-          AND e.model_name = :model_name
-          {active_filter}
-          AND 1 - (e.embedding <=> CAST(:embedding AS vector)) >= :min_similarity
-        ORDER BY e.embedding <=> CAST(:embedding AS vector)
-        LIMIT :top_k
-    """)
+def _validate_embedding(embedding: list[float]) -> None:
+    """Validate embedding vector contains valid finite numeric values."""
+    if not embedding:
+        raise ValidationError("Embedding cannot be empty")
+    for i, val in enumerate(embedding):
+        if not isinstance(val, (int, float)):
+            raise ValidationError(f"Embedding[{i}] must be numeric, got {type(val).__name__}")
+        if not math.isfinite(val):
+            raise ValidationError(f"Embedding[{i}] must be finite, got {val}")
+
+
+# Similarity search queries - separate constants to avoid f-string SQL construction
+_SIMILARITY_QUERY_ACTIVE = text("""
+    SELECT f.id, f.content, f.category, f.source, f.confidence, f.active,
+           f.created_at, f.updated_at, f.profile_id,
+           1 - (e.embedding <=> CAST(:embedding AS vector)) as similarity
+    FROM facts f
+    JOIN fact_embeddings e ON e.fact_id = f.id
+    WHERE f.profile_id = :profile_id
+      AND e.model_name = :model_name
+      AND f.active = true
+      AND 1 - (e.embedding <=> CAST(:embedding AS vector)) >= :min_similarity
+    ORDER BY e.embedding <=> CAST(:embedding AS vector)
+    LIMIT :top_k
+""")
+
+_SIMILARITY_QUERY_ALL = text("""
+    SELECT f.id, f.content, f.category, f.source, f.confidence, f.active,
+           f.created_at, f.updated_at, f.profile_id,
+           1 - (e.embedding <=> CAST(:embedding AS vector)) as similarity
+    FROM facts f
+    JOIN fact_embeddings e ON e.fact_id = f.id
+    WHERE f.profile_id = :profile_id
+      AND e.model_name = :model_name
+      AND 1 - (e.embedding <=> CAST(:embedding AS vector)) >= :min_similarity
+    ORDER BY e.embedding <=> CAST(:embedding AS vector)
+    LIMIT :top_k
+""")
+
+
+def _get_similarity_query(active_only: bool) -> TextClause:
+    """Get the appropriate similarity search query."""
+    return _SIMILARITY_QUERY_ACTIVE if active_only else _SIMILARITY_QUERY_ALL
 
 
 class FactsClient(ProfileScopedClient[Fact]):
@@ -367,7 +395,7 @@ class FactsClient(ProfileScopedClient[Fact]):
         with self._session_factory() as session:
             embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
             result = session.execute(
-                _build_similarity_query(active_only),
+                _get_similarity_query(active_only),
                 {
                     "embedding": embedding_str,
                     "profile_id": self.profile_id,
@@ -394,7 +422,10 @@ class FactsClient(ProfileScopedClient[Fact]):
 
         Raises:
             NotFoundError: If fact not found or belongs to different profile.
+            ValidationError: If embedding is invalid.
         """
+        _validate_embedding(embedding)
+
         with self._session_factory() as session:
             fact = session.get(Fact, fact_id)
             if not fact or fact.profile_id != self.profile_id:

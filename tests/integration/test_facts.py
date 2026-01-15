@@ -258,6 +258,28 @@ class TestFactsEmbeddings:
         with pytest.raises(NotFoundError):
             learn_client.facts.set_embedding(99999, [0.1, 0.2], model_name="test")
 
+    def test_set_embedding_empty_raises(self, learn_client, clean_tables):
+        """Test setting empty embedding raises ValidationError."""
+        from llm_learn import ValidationError
+
+        fact_id = learn_client.facts.add("Test fact")
+        with pytest.raises(ValidationError, match="cannot be empty"):
+            learn_client.facts.set_embedding(fact_id, [], model_name="test")
+
+    def test_set_embedding_invalid_values_raises(self, learn_client, clean_tables):
+        """Test setting embedding with invalid values raises ValidationError."""
+        import math
+
+        from llm_learn import ValidationError
+
+        fact_id = learn_client.facts.add("Test fact")
+
+        with pytest.raises(ValidationError, match="must be finite"):
+            learn_client.facts.set_embedding(fact_id, [0.1, math.nan, 0.3], model_name="test")
+
+        with pytest.raises(ValidationError, match="must be finite"):
+            learn_client.facts.set_embedding(fact_id, [0.1, math.inf, 0.3], model_name="test")
+
     def test_list_without_embeddings(self, learn_client, clean_tables):
         """Test listing facts without embeddings for a model."""
         fact1_id = learn_client.facts.add("Fact with embedding")
