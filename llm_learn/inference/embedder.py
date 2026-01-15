@@ -24,7 +24,12 @@ class Embedder:
     Usage:
         embedder = Embedder(base_url="http://localhost:8000/v1")
         result = await embedder.embed("User prefers concise explanations")
-        embedding = result.embedding  # list[float] of 1536 dimensions
+        embedding = result.embedding  # list[float] of 384 dimensions
+        await embedder.close()
+
+    Or as async context manager:
+        async with Embedder(base_url="http://localhost:8000/v1") as embedder:
+            result = await embedder.embed("User prefers concise explanations")
     """
 
     def __init__(
@@ -43,7 +48,19 @@ class Embedder:
         """
         self._base_url = base_url.rstrip("/")
         self._model = model
-        self._timeout = timeout
+        self._client = httpx.AsyncClient(timeout=timeout)
+
+    async def close(self) -> None:
+        """Close the HTTP client and release resources."""
+        await self._client.aclose()
+
+    async def __aenter__(self) -> "Embedder":
+        """Enter async context manager."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit async context manager."""
+        await self.close()
 
     async def embed(self, text: str) -> EmbeddingResult:
         """
@@ -58,13 +75,12 @@ class Embedder:
         Raises:
             httpx.HTTPStatusError: If the API returns an error.
         """
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(
-                f"{self._base_url}/embeddings",
-                json={"model": self._model, "input": text},
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post(
+            f"{self._base_url}/embeddings",
+            json={"model": self._model, "input": text},
+        )
+        response.raise_for_status()
+        data = response.json()
 
         return EmbeddingResult(
             embedding=data["data"][0]["embedding"],
@@ -88,13 +104,12 @@ class Embedder:
         if not texts:
             return []
 
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(
-                f"{self._base_url}/embeddings",
-                json={"model": self._model, "input": texts},
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post(
+            f"{self._base_url}/embeddings",
+            json={"model": self._model, "input": texts},
+        )
+        response.raise_for_status()
+        data = response.json()
 
         model = data.get("model", self._model)
         prompt_tokens = data.get("usage", {}).get("prompt_tokens", 0)

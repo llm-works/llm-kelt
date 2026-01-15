@@ -19,6 +19,16 @@ include $(infra)/make/Makefile.env
 include $(infra)/make/Makefile.help
 include $(infra)/make/Makefile.utils
 include $(infra)/make/Makefile.pg
+
+# Integration tests share a DB and cannot run in parallel.
+# Define before Makefile.dev so this runs first and exits.
+check::
+	@echo ""
+	@echo "ERROR: Use 'make check.seq' for this project."
+	@echo "       Integration tests share a database and cannot run in parallel."
+	@echo ""
+	@exit 1
+
 include $(infra)/make/Makefile.dev
 include $(infra)/make/Makefile.pytest
 include $(infra)/make/Makefile.clean

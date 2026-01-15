@@ -403,7 +403,9 @@ class Fact(Base):
 
     # Relationships
     profile: Mapped["Profile"] = relationship(back_populates="facts")
-    embeddings: Mapped[list["FactEmbedding"]] = relationship(back_populates="fact")
+    embeddings: Mapped[list["FactEmbedding"]] = relationship(
+        back_populates="fact", passive_deletes=True
+    )
 
     __table_args__ = (
         Index("idx_facts_profile", "profile_id"),
@@ -428,7 +430,9 @@ class FactEmbedding(Base):
     __tablename__ = "fact_embeddings"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    fact_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("facts.id"), nullable=False)
+    fact_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("facts.id", ondelete="CASCADE"), nullable=False
+    )
     model_name: Mapped[str] = mapped_column(String(100), nullable=False)
     dimensions: Mapped[int] = mapped_column(Integer, nullable=False)
     embedding: Mapped[list[float]] = mapped_column(Vector(), nullable=False)  # Unconstrained
