@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models for Learn framework."""
 
 from datetime import date, datetime
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -19,9 +19,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-
-if TYPE_CHECKING:
-    pass
 
 from .utils import utc_now
 

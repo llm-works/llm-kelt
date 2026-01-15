@@ -6,6 +6,7 @@ from pathlib import Path
 
 from alembic import context
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import OperationalError
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -92,9 +93,9 @@ def run_migrations_online() -> None:
             context.configure(connection=connection, target_metadata=target_metadata)
             with context.begin_transaction():
                 context.run_migrations()
-    except Exception as e:
-        # Database doesn't exist - bootstrap it
-        if "does not exist" in str(e):
+    except OperationalError as e:
+        # Database doesn't exist - bootstrap it (PostgreSQL error code 3D000)
+        if hasattr(e.orig, "pgcode") and e.orig.pgcode == "3D000":
             _bootstrap_fresh_database(pg)
         else:
             raise

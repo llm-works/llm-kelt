@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import select, text
@@ -24,8 +24,8 @@ class ScoredFact:
     similarity: float
 
 
-def _row_to_fact(row) -> Fact:
-    """Convert a database row to a Fact object."""
+def _row_to_fact(row: Any) -> Fact:
+    """Convert a database row (from raw SQL) to a Fact object."""
     return Fact(
         id=row.id,
         profile_id=row.profile_id,
