@@ -144,6 +144,7 @@ class AdapterRegistry:
             adapter_id: Adapter to modify
             enabled: New enabled state
         """
+        self._validate_adapter_id(adapter_id)
         config_path = self.base_path / adapter_id / "config.yaml"
         if not config_path.exists():
             raise ValueError(f"Adapter '{adapter_id}' not found")
@@ -164,6 +165,7 @@ class AdapterRegistry:
         Args:
             adapter_id: Adapter to remove
         """
+        self._validate_adapter_id(adapter_id)
         adapter_path = self.base_path / adapter_id
         if not adapter_path.exists():
             raise ValueError(f"Adapter '{adapter_id}' not found")
@@ -209,6 +211,7 @@ class AdapterRegistry:
         Returns:
             AdapterInfo or None if not found
         """
+        self._validate_adapter_id(adapter_id)
         adapter_path = self.base_path / adapter_id
         config_path = adapter_path / "config.yaml"
 
@@ -238,6 +241,7 @@ class AdapterRegistry:
         url = f"{self.infer_url}/v1/adapters/refresh"
         params = {}
         if adapter_id:
+            self._validate_adapter_id(adapter_id)
             params["adapter_id"] = adapter_id
 
         try:
