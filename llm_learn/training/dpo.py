@@ -93,6 +93,7 @@ class DpoTrainer:
 
         logger.info(f"Loading base model: {self.base_model}")
 
+        # trust_remote_code required for Qwen and other models with custom architectures
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -114,7 +115,8 @@ class DpoTrainer:
 
         peft_config = self.lora_config.to_peft_config()
         self.model = get_peft_model(self.model, peft_config)
-        self.model.print_trainable_parameters()
+        trainable, total = self.model.get_nb_trainable_parameters()
+        logger.info(f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)")
 
     def _load_reference_model(self):
         """Load reference model for DPO (unless reference-free mode)."""
@@ -125,6 +127,7 @@ class DpoTrainer:
         from transformers import AutoModelForCausalLM
 
         logger.info("Loading reference model for DPO")
+        # trust_remote_code required for Qwen and other models with custom architectures
         self.ref_model = AutoModelForCausalLM.from_pretrained(
             self.base_model,
             quantization_config=self._quant_config,
@@ -185,22 +188,29 @@ class DpoTrainer:
 
     def _save_and_collect_metrics(self) -> tuple[Path, dict]:
         """Save adapter and collect training metrics."""
-        assert self.trainer is not None
-        assert self.tokenizer is not None
+        if self.trainer is None:
+            raise RuntimeError(
+                "_create_trainer() must be called before _save_and_collect_metrics()"
+            )
+        if self.tokenizer is None:
+            raise RuntimeError("_load_model() must be called before _save_and_collect_metrics()")
 
         final_path = self.output_dir / "final"
         self.trainer.save_model(str(final_path))
         self.tokenizer.save_pretrained(str(final_path))
         logger.info(f"Saved adapter to {final_path}")
 
-        metrics = {"train_loss": self.trainer.state.log_history[-1].get("loss", 0.0)}
+        metrics: dict = {}
+        if self.trainer.state.log_history:
+            last_log = self.trainer.state.log_history[-1]
+            metrics["train_loss"] = last_log.get("loss", 0.0)
+            # DPO-specific metrics
+            for key in ["rewards/chosen", "rewards/rejected", "rewards/margins"]:
+                if key in last_log:
+                    metrics[key.replace("/", "_")] = last_log[key]
+
         if self.eval_dataset:
             metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
-
-        # DPO-specific metrics
-        for key in ["rewards/chosen", "rewards/rejected", "rewards/margins"]:
-            if key in self.trainer.state.log_history[-1]:
-                metrics[key.replace("/", "_")] = self.trainer.state.log_history[-1][key]
 
         return final_path, metrics
 
@@ -245,7 +255,8 @@ class DpoTrainer:
         self._load_model()
         self._load_reference_model()
         self._create_trainer()
-        assert self.trainer is not None
+        if self.trainer is None:
+            raise RuntimeError("Failed to create trainer")
 
         self.trainer.train()
 

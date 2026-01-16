@@ -1,0 +1,19 @@
+# Model locations for training and inference
+# Used by llm-infer's ModelResolver to find local models
+
+locations:
+  # Standard ops models location
+  - !path ~/ops/models/huggingface
+
+# Model selection defaults
+selection:
+  generate:
+    default: qwen2.5-0.5b-instruct  # Small model for training tests
+  embed:
+    default: bge-small-en-v1.5
+
+# Model-specific configurations (optional)
+models: {}
+
+defaults:
+  system_prompt: null

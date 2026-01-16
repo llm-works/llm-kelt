@@ -1,6 +1,7 @@
 """Pytest fixtures for Learn framework tests."""
 
 import os
+import socket
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,6 +15,15 @@ from llm_learn.core.database import Database
 from llm_learn.core.models import Base, Profile, Workspace
 
 
+def _is_server_available(host: str, port: int, timeout: float = 1.0) -> bool:
+    """Check if a server is accepting connections."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (OSError, ConnectionRefusedError):
+        return False
+
+
 def pytest_collection_modifyitems(config, items):
     """Auto-apply markers based on test directory."""
     for item in items:
@@ -25,6 +35,26 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.integration)
         elif "e2e" in test_path.parts:
             item.add_marker(pytest.mark.e2e)
+
+
+# Cache server availability check (only check once per session)
+_llm_server_available: bool | None = None
+
+
+def pytest_runtest_setup(item):
+    """Skip LLM-marked tests if the LLM server is not available."""
+    global _llm_server_available
+
+    # Only check tests marked with @pytest.mark.llm
+    if not any(mark.name == "llm" for mark in item.iter_markers()):
+        return
+
+    # Check server availability (cached for session)
+    if _llm_server_available is None:
+        _llm_server_available = _is_server_available("localhost", 8000)
+
+    if not _llm_server_available:
+        pytest.skip("LLM server not available at localhost:8000")
 
 
 # Find project root

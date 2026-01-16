@@ -101,6 +101,7 @@ class LoraTrainer:
 
         logger.info(f"Loading base model: {self.base_model}")
 
+        # trust_remote_code required for Qwen and other models with custom architectures
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -122,7 +123,8 @@ class LoraTrainer:
 
         peft_config = self.lora_config.to_peft_config()
         self.model = get_peft_model(self.model, peft_config)
-        self.model.print_trainable_parameters()
+        trainable, total = self.model.get_nb_trainable_parameters()
+        logger.info(f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)")
 
     def _load_data(self):
         """Load training and eval datasets."""
@@ -135,9 +137,9 @@ class LoraTrainer:
 
     def _create_training_args(self):
         """Create training arguments for SFT."""
-        from transformers import TrainingArguments
+        from trl import SFTConfig
 
-        return TrainingArguments(
+        return SFTConfig(
             output_dir=str(self.output_dir),
             num_train_epochs=self.training_config.num_epochs,
             per_device_train_batch_size=self.training_config.batch_size,
@@ -156,6 +158,7 @@ class LoraTrainer:
             load_best_model_at_end=self.eval_dataset is not None,
             report_to="none",
             optim="paged_adamw_8bit",
+            max_length=self.training_config.max_seq_length,
         )
 
     def _create_trainer(self):
@@ -169,20 +172,26 @@ class LoraTrainer:
             eval_dataset=self.eval_dataset,
             processing_class=self.tokenizer,
             formatting_func=_format_sft_example,
-            max_seq_length=self.training_config.max_seq_length,
         )
 
     def _save_and_collect_metrics(self) -> tuple[Path, dict]:
         """Save adapter and collect training metrics."""
-        assert self.trainer is not None
-        assert self.tokenizer is not None
+        if self.trainer is None:
+            raise RuntimeError(
+                "_create_trainer() must be called before _save_and_collect_metrics()"
+            )
+        if self.tokenizer is None:
+            raise RuntimeError("_load_model() must be called before _save_and_collect_metrics()")
 
         final_path = self.output_dir / "final"
         self.trainer.save_model(str(final_path))
         self.tokenizer.save_pretrained(str(final_path))
         logger.info(f"Saved adapter to {final_path}")
 
-        metrics = {"train_loss": self.trainer.state.log_history[-1].get("train_loss", 0.0)}
+        metrics: dict = {}
+        if self.trainer.state.log_history:
+            metrics["train_loss"] = self.trainer.state.log_history[-1].get("train_loss", 0.0)
+
         if self.eval_dataset:
             metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
 
@@ -227,7 +236,8 @@ class LoraTrainer:
         self._load_data()
         self._load_model()
         self._create_trainer()
-        assert self.trainer is not None
+        if self.trainer is None:
+            raise RuntimeError("Failed to create trainer")
 
         if resume_from:
             logger.info(f"Resuming from checkpoint: {resume_from}")

@@ -16,6 +16,7 @@ from .export import (
     export_feedback_sft,
     export_preferences_dpo,
 )
+from .registry import AdapterInfo, AdapterRegistry
 
 __all__ = [
     # Export functions
@@ -27,6 +28,12 @@ __all__ = [
     "LoraConfig",
     "TrainingConfig",
     "TrainingResult",
+    # Adapter registry
+    "AdapterRegistry",
+    "AdapterInfo",
+    # Training functions (lazy-loaded, require 'training' extras)
+    "train_lora",
+    "train_dpo",
 ]
 
 

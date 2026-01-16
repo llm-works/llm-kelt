@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from peft import LoraConfig as PeftLoraConfig
@@ -43,8 +43,8 @@ class LoraConfig:
     lora_alpha: int = 32
     lora_dropout: float = 0.05
     target_modules: list[str] = field(default_factory=lambda: QWEN_TARGET_MODULES.copy())
-    bias: str = "none"
-    task_type: str = "CAUSAL_LM"
+    bias: Literal["none", "all", "lora_only"] = "none"
+    task_type: Literal["CAUSAL_LM", "SEQ_CLS", "SEQ_2_SEQ_LM", "TOKEN_CLS"] = "CAUSAL_LM"
 
     def __post_init__(self) -> None:
         """Validate configuration."""

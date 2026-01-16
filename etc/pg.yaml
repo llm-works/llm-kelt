@@ -1,7 +1,7 @@
 pgserver:
   # version: 16                # Ignored when image is specified
   name: learn-pg               # Server identifier/name for logging and identification
-  port: 7532                   # PostgreSQL port (default: 5432, can be overridden with INFRA_PGSERVER_PORT)
+  port: 7632                   # PostgreSQL port (default: 5432, can be overridden with INFRA_PGSERVER_PORT)
   image: pgvector/pgvector:pg16  # pgvector for vector similarity search
   user: postgres               # Database username (can be overridden with INFRA_PGSERVER_USER)
   pass: ''                     # Database password (RECOMMENDED: use environment variable)
