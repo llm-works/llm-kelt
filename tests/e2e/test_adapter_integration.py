@@ -3,12 +3,13 @@
 Tests the full pipeline: train → register → verify inference changes.
 Requires:
 - Training dependencies (torch, transformers, peft, trl)
-- llm-infer running with LoRA support at localhost:8000
+- llm-infer running with LoRA support (configured via LEARN_TEST_CONFIG_FILE)
 - Local model: qwen2.5-0.5b-instruct
 """
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -20,11 +21,20 @@ if os.environ.get("STANDALONE_TRAINING"):
 pytest.importorskip("torch")
 pytest.importorskip("peft")
 
-from llm_learn.inference.client import LLMClient
 from llm_learn.training import AdapterRegistry, LoraConfig, TrainingConfig, train_lora
 
 # Adapter base path (must match llm-infer config)
 ADAPTER_BASE_PATH = Path("~/ops/models/adapters/LoRA").expanduser()
+
+
+def _get_infer_url(llm_config: dict) -> str:
+    """Extract the inference server URL from LLM config (without /v1 suffix)."""
+    local_backend = llm_config.get("backends", {}).get("local", {})
+    base_url = local_backend.get("base_url", "http://localhost:8000/v1")
+    # Remove /v1 suffix for AdapterRegistry
+    parsed = urlparse(base_url)
+    return f"{parsed.scheme}://{parsed.netloc}"
+
 
 # Training data that creates a distinctive behavior
 # Train the model to always mention "PINEAPPLE" when asked about fruit
@@ -51,23 +61,11 @@ def _write_jsonl(path: Path, data: list[dict]) -> Path:
 
 
 @pytest.fixture(scope="module")
-def llm_client():
-    """Create LLM client for llm-infer."""
-    # Use the small model that's running
-    config = {
-        "type": "openai_compatible",
-        "base_url": "http://localhost:8000/v1",
-        "model": "qwen2.5-0.5b-instruct",
-    }
-    return LLMClient.from_backend_config(config)
-
-
-@pytest.fixture(scope="module")
-def adapter_registry():
+def adapter_registry(llm_config):
     """Create adapter registry pointing to llm-infer's adapter path."""
     return AdapterRegistry(
         base_path=ADAPTER_BASE_PATH,
-        infer_url="http://localhost:8000",
+        infer_url=_get_infer_url(llm_config),
     )
 
 

@@ -6,34 +6,13 @@ Tests that:
 2. Fact is stored
 3. AI response differs with vs without facts
 
-Requires local LLM running at localhost:8000.
+Requires local LLM (configured via LEARN_TEST_CONFIG_FILE).
 """
 
-from pathlib import Path
-
 import pytest
-import yaml
 
 from llm_learn.client import LearnClient
-from llm_learn.inference.client import LLMClient
 from llm_learn.inference.context import ContextBuilder
-
-# Find project root
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-LLM_CONFIG_PATH = PROJECT_ROOT / "etc" / "llm.yaml"
-
-
-@pytest.fixture
-def llm_config():
-    """Load LLM configuration."""
-    with open(LLM_CONFIG_PATH) as f:
-        return yaml.safe_load(f)
-
-
-@pytest.fixture
-def llm_client(llm_config):
-    """Create LLM client from config."""
-    return LLMClient.from_config(llm_config)
 
 
 @pytest.fixture
