@@ -156,6 +156,7 @@ class TestContextQueryRAG:
             model_name="test-model",
             top_k=5,
             min_similarity=0.4,
+            categories=None,
         )
 
     @pytest.mark.asyncio
@@ -232,7 +233,7 @@ class TestContextQueryRAG:
 
     @pytest.mark.asyncio
     async def test_ask_with_rag_custom_model_name(
-        self, mock_client, mock_context_builder, mock_embedder, sample_fact
+        self, mock_client, mock_context_builder, mock_embedder
     ):
         """Test that RAGArgs.model_name overrides embedder model."""
         mock_context_builder.facts_client.search_similar.return_value = []
@@ -368,11 +369,10 @@ class TestContextQueryRAG:
         mock_context_builder.build_system_prompt.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_ask_with_rag_filters_by_categories(
+    async def test_ask_with_rag_passes_categories_to_search(
         self, mock_client, mock_context_builder, mock_embedder
     ):
-        """Test that RAGArgs.categories filters retrieved facts."""
-        # Create facts from different categories
+        """Test that RAGArgs.categories is passed to search_similar for SQL filtering."""
         pref_fact = Fact(
             id=1,
             profile_id=1,
@@ -382,19 +382,10 @@ class TestContextQueryRAG:
             confidence=1.0,
             active=True,
         )
-        rule_fact = Fact(
-            id=2,
-            profile_id=1,
-            content="Always use type hints",
-            category="rules",
-            source="user",
-            confidence=1.0,
-            active=True,
-        )
 
+        # Simulate SQL filtering - only preferences facts returned
         mock_context_builder.facts_client.search_similar.return_value = [
             ScoredFact(fact=pref_fact, similarity=0.9),
-            ScoredFact(fact=rule_fact, similarity=0.8),
         ]
 
         query = ContextQuery(
@@ -406,9 +397,13 @@ class TestContextQueryRAG:
         # Filter to only preferences category
         await query.ask("Test", rag=RAGArgs(categories=["preferences"]))
 
-        # Should only pass the preferences fact to build_system_prompt_from_facts
+        # Categories should be passed to search_similar for SQL-level filtering
+        call_kwargs = mock_context_builder.facts_client.search_similar.call_args.kwargs
+        assert call_kwargs["categories"] == ["preferences"]
+
+        # All facts from search should be passed to build_system_prompt_from_facts
         call_args = mock_context_builder.build_system_prompt_from_facts.call_args
-        facts_passed = call_args[0][1]  # Second positional arg is facts list
+        facts_passed = call_args[0][1]
         assert len(facts_passed) == 1
         assert facts_passed[0].category == "preferences"
 
@@ -416,20 +411,9 @@ class TestContextQueryRAG:
     async def test_ask_with_rag_categories_empty_result(
         self, mock_client, mock_context_builder, mock_embedder
     ):
-        """Test RAG with categories filter that excludes all retrieved facts."""
-        fact = Fact(
-            id=1,
-            profile_id=1,
-            content="User prefers Python",
-            category="preferences",
-            source="user",
-            confidence=1.0,
-            active=True,
-        )
-
-        mock_context_builder.facts_client.search_similar.return_value = [
-            ScoredFact(fact=fact, similarity=0.9),
-        ]
+        """Test RAG when SQL category filter returns no results."""
+        # Simulate SQL filtering returning no results
+        mock_context_builder.facts_client.search_similar.return_value = []
 
         query = ContextQuery(
             client=mock_client,
@@ -437,10 +421,14 @@ class TestContextQueryRAG:
             embedder=mock_embedder,
         )
 
-        # Filter to a category that doesn't match any retrieved facts
+        # Filter to a category with no matching facts
         await query.ask("Test", rag=RAGArgs(categories=["rules"]))
 
-        # Should pass empty list to build_system_prompt_from_facts
+        # Categories should be passed to search_similar
+        call_kwargs = mock_context_builder.facts_client.search_similar.call_args.kwargs
+        assert call_kwargs["categories"] == ["rules"]
+
+        # Empty list passed to build_system_prompt_from_facts
         call_args = mock_context_builder.build_system_prompt_from_facts.call_args
         facts_passed = call_args[0][1]
         assert len(facts_passed) == 0
@@ -502,3 +490,129 @@ class TestContextQueryBasic:
             await query.ask("Test")
 
         mock_client.close.assert_called_once()
+
+
+class TestBuildSystemPromptFromFacts:
+    """Unit tests for ContextBuilder.build_system_prompt_from_facts method."""
+
+    @pytest.fixture
+    def mock_facts_client(self):
+        """Create a mock facts client."""
+        return MagicMock()
+
+    @pytest.fixture
+    def sample_facts(self):
+        """Create sample facts for testing."""
+        return [
+            Fact(
+                id=1,
+                profile_id=1,
+                content="Fact one",
+                category="preferences",
+                source="user",
+                confidence=1.0,
+                active=True,
+            ),
+            Fact(
+                id=2,
+                profile_id=1,
+                content="Fact two",
+                category="preferences",
+                source="user",
+                confidence=1.0,
+                active=True,
+            ),
+        ]
+
+    def test_builds_prompt_with_facts(self, mock_facts_client, sample_facts):
+        """Test building prompt from provided facts."""
+        from llm_learn.inference.context import ContextBuilder
+
+        builder = ContextBuilder(mock_facts_client)
+        result = builder.build_system_prompt_from_facts(
+            base_prompt="You are an assistant.",
+            facts=sample_facts,
+        )
+
+        assert "You are an assistant." in result
+        assert "About the user:" in result
+        assert "Fact one" in result
+        assert "Fact two" in result
+
+    def test_builds_prompt_with_empty_facts(self, mock_facts_client):
+        """Test building prompt with no facts returns base prompt."""
+        from llm_learn.inference.context import ContextBuilder
+
+        builder = ContextBuilder(mock_facts_client)
+        result = builder.build_system_prompt_from_facts(
+            base_prompt="Base prompt only",
+            facts=[],
+        )
+
+        assert result == "Base prompt only"
+
+    def test_builds_prompt_prepend(self, mock_facts_client):
+        """Test prepending facts to prompt."""
+        from llm_learn.inference.context import ContextBuilder
+
+        fact = Fact(
+            id=1,
+            profile_id=1,
+            content="Test fact",
+            category="preferences",
+            source="user",
+            confidence=1.0,
+            active=True,
+        )
+
+        builder = ContextBuilder(mock_facts_client)
+        result = builder.build_system_prompt_from_facts(
+            base_prompt="Base prompt",
+            facts=[fact],
+            fact_position="prepend",
+        )
+
+        # Facts should come before base prompt
+        facts_pos = result.find("About the user:")
+        base_pos = result.find("Base prompt")
+        assert facts_pos < base_pos
+
+    def test_groups_facts_by_category(self, mock_facts_client):
+        """Test facts are grouped by category."""
+        from llm_learn.inference.context import ContextBuilder
+
+        facts = [
+            Fact(
+                id=1,
+                profile_id=1,
+                content="Pref 1",
+                category="preferences",
+                source="user",
+                confidence=1.0,
+                active=True,
+            ),
+            Fact(
+                id=2,
+                profile_id=1,
+                content="Pref 2",
+                category="preferences",
+                source="user",
+                confidence=1.0,
+                active=True,
+            ),
+            Fact(
+                id=3,
+                profile_id=1,
+                content="Rule 1",
+                category="rules",
+                source="user",
+                confidence=1.0,
+                active=True,
+            ),
+        ]
+
+        builder = ContextBuilder(mock_facts_client)
+        result = builder.build_system_prompt_from_facts("", facts)
+
+        assert "### Preferences" in result
+        assert "### Rules" in result

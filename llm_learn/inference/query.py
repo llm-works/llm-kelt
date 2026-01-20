@@ -176,20 +176,17 @@ class ContextQuery:
         # Determine model name for search
         model_name = rag.model_name if rag.model_name else self._embedder.model
 
-        # Search for similar facts
+        # Search for similar facts (category filtering done in SQL for efficiency)
         scored_facts = self._context_builder.facts_client.search_similar(
             embedding=result.embedding,
             model_name=model_name,
             top_k=rag.top_k,
             min_similarity=rag.min_similarity,
+            categories=rag.categories,
         )
 
         # Extract facts from scored results
         facts = [sf.fact for sf in scored_facts]
-
-        # Filter by categories if specified
-        if rag.categories:
-            facts = [f for f in facts if f.category in rag.categories]
 
         # Build prompt with retrieved facts
         return self._context_builder.build_system_prompt_from_facts(base, facts)
