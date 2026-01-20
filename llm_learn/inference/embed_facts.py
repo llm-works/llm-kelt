@@ -22,16 +22,16 @@ class EmbedFactsResult:
 
 
 def _store_embeddings(
+    lg: Logger,
     facts: "Sequence[Fact]",
     results: list[EmbeddingResult],
     facts_client: FactsClient,
     model_name: str,
-    lg: Logger,
 ) -> tuple[int, int]:
     """Store embeddings for facts, returning (processed, failed) counts."""
     processed = 0
     failed = 0
-    for fact, result in zip(facts, results):
+    for fact, result in zip(facts, results, strict=True):
         try:
             facts_client.set_embedding(fact.id, result.embedding, model_name)
             processed += 1
@@ -45,11 +45,11 @@ def _store_embeddings(
 
 
 async def _embed_individually(
+    lg: Logger,
     facts: "Sequence[Fact]",
     embedder: Embedder,
     facts_client: FactsClient,
     model_name: str,
-    lg: Logger,
 ) -> tuple[int, int]:
     """Embed facts one at a time as fallback, returning (processed, failed) counts."""
     processed = 0
@@ -101,13 +101,13 @@ async def embed_missing_facts(
 
         try:
             results = await embedder.embed_batch([f.content for f in facts])
-            p, f = _store_embeddings(facts, results, facts_client, model_name, lg)
+            p, f = _store_embeddings(lg, facts, results, facts_client, model_name)
         except Exception as e:
             lg.warning(
                 "batch embedding failed, falling back to individual",
                 extra={"batch_size": len(facts), "exception": e},
             )
-            p, f = await _embed_individually(facts, embedder, facts_client, model_name, lg)
+            p, f = await _embed_individually(lg, facts, embedder, facts_client, model_name)
 
         processed += p
         failed += f
