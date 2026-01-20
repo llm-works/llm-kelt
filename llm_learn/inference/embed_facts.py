@@ -112,4 +112,12 @@ async def embed_missing_facts(
         processed += p
         failed += f
 
+        # Break if no progress to avoid infinite loop on persistent failures
+        if p == 0:
+            lg.warning(
+                "no progress made in batch, stopping to avoid infinite loop",
+                extra={"failed_in_batch": f},
+            )
+            break
+
     return EmbedFactsResult(processed=processed, failed=failed)

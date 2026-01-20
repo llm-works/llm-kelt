@@ -218,3 +218,29 @@ class TestEmbedMissingFacts:
         )
 
         mock_facts_client.list_without_embeddings.assert_called_once_with("test-model", limit=25)
+
+    @pytest.mark.asyncio
+    async def test_embed_breaks_on_no_progress(
+        self, mock_logger, mock_embedder, mock_facts_client, sample_facts
+    ):
+        """Test that loop breaks when no progress is made to avoid infinite loop."""
+        # Always return the same facts (simulating persistent storage failure)
+        mock_facts_client.list_without_embeddings.return_value = sample_facts
+
+        # Batch succeeds but all storage fails
+        mock_embedder.embed_batch.return_value = [
+            EmbeddingResult(embedding=[0.1], model="m", prompt_tokens=1),
+            EmbeddingResult(embedding=[0.2], model="m", prompt_tokens=1),
+            EmbeddingResult(embedding=[0.3], model="m", prompt_tokens=1),
+        ]
+        mock_facts_client.set_embedding.side_effect = Exception("DB unavailable")
+
+        result = await embed_missing_facts(
+            mock_logger, mock_embedder, mock_facts_client, "test-model"
+        )
+
+        # Should have attempted once and stopped
+        assert result.processed == 0
+        assert result.failed == 3
+        assert mock_embedder.embed_batch.call_count == 1
+        mock_logger.warning.assert_called()
