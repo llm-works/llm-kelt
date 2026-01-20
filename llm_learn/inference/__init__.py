@@ -31,7 +31,7 @@ from .client import LLMClient
 from .context import ContextBuilder
 from .embed_facts import EmbedFactsResult, embed_missing_facts
 from .embedder import Embedder, EmbeddingResult
-from .query import ContextQuery, Conversation
+from .query import ContextQuery, Conversation, RAGArgs
 
 __all__ = [
     # Core classes
@@ -40,6 +40,7 @@ __all__ = [
     "ContextQuery",
     "Conversation",
     "Embedder",
+    "RAGArgs",
     # Utilities
     "embed_missing_facts",
     # Types

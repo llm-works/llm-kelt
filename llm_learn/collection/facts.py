@@ -52,6 +52,7 @@ def _validate_embedding(embedding: list[float]) -> None:
 
 
 # Similarity search queries - separate constants to avoid f-string SQL construction
+# Variants: active_only (true/false) × categories (with/without)
 _SIMILARITY_QUERY_ACTIVE = text("""
     SELECT f.id, f.content, f.category, f.source, f.confidence, f.active,
            f.created_at, f.updated_at, f.profile_id,
@@ -61,6 +62,21 @@ _SIMILARITY_QUERY_ACTIVE = text("""
     WHERE f.profile_id = :profile_id
       AND e.model_name = :model_name
       AND f.active = true
+      AND 1 - (e.embedding <=> CAST(:embedding AS vector)) >= :min_similarity
+    ORDER BY e.embedding <=> CAST(:embedding AS vector)
+    LIMIT :top_k
+""")
+
+_SIMILARITY_QUERY_ACTIVE_WITH_CATEGORIES = text("""
+    SELECT f.id, f.content, f.category, f.source, f.confidence, f.active,
+           f.created_at, f.updated_at, f.profile_id,
+           1 - (e.embedding <=> CAST(:embedding AS vector)) as similarity
+    FROM facts f
+    JOIN fact_embeddings e ON e.fact_id = f.id
+    WHERE f.profile_id = :profile_id
+      AND e.model_name = :model_name
+      AND f.active = true
+      AND f.category = ANY(:categories)
       AND 1 - (e.embedding <=> CAST(:embedding AS vector)) >= :min_similarity
     ORDER BY e.embedding <=> CAST(:embedding AS vector)
     LIMIT :top_k
@@ -79,10 +95,28 @@ _SIMILARITY_QUERY_ALL = text("""
     LIMIT :top_k
 """)
 
+_SIMILARITY_QUERY_ALL_WITH_CATEGORIES = text("""
+    SELECT f.id, f.content, f.category, f.source, f.confidence, f.active,
+           f.created_at, f.updated_at, f.profile_id,
+           1 - (e.embedding <=> CAST(:embedding AS vector)) as similarity
+    FROM facts f
+    JOIN fact_embeddings e ON e.fact_id = f.id
+    WHERE f.profile_id = :profile_id
+      AND e.model_name = :model_name
+      AND f.category = ANY(:categories)
+      AND 1 - (e.embedding <=> CAST(:embedding AS vector)) >= :min_similarity
+    ORDER BY e.embedding <=> CAST(:embedding AS vector)
+    LIMIT :top_k
+""")
 
-def _get_similarity_query(active_only: bool) -> TextClause:
+
+def _get_similarity_query(active_only: bool, has_categories: bool) -> TextClause:
     """Get the appropriate similarity search query."""
-    return _SIMILARITY_QUERY_ACTIVE if active_only else _SIMILARITY_QUERY_ALL
+    if active_only:
+        return (
+            _SIMILARITY_QUERY_ACTIVE_WITH_CATEGORIES if has_categories else _SIMILARITY_QUERY_ACTIVE
+        )
+    return _SIMILARITY_QUERY_ALL_WITH_CATEGORIES if has_categories else _SIMILARITY_QUERY_ALL
 
 
 class FactsClient(ProfileScopedClient[Fact]):
@@ -378,6 +412,7 @@ class FactsClient(ProfileScopedClient[Fact]):
         top_k: int = 30,
         min_similarity: float = 0.5,
         active_only: bool = True,
+        categories: list[str] | None = None,
     ) -> list[ScoredFact]:
         """
         Search facts by embedding similarity using pgvector.
@@ -388,21 +423,26 @@ class FactsClient(ProfileScopedClient[Fact]):
             top_k: Maximum number of results.
             min_similarity: Minimum cosine similarity threshold (0-1).
             active_only: Whether to search only active facts.
+            categories: Filter results to these categories. None means all categories.
 
         Returns:
             List of ScoredFact sorted by similarity (highest first).
         """
         with self._session_factory() as session:
             embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
+            has_categories = categories is not None and len(categories) > 0
+            params: dict[str, Any] = {
+                "embedding": embedding_str,
+                "profile_id": self.profile_id,
+                "model_name": model_name,
+                "min_similarity": min_similarity,
+                "top_k": top_k,
+            }
+            if has_categories:
+                params["categories"] = categories
             result = session.execute(
-                _get_similarity_query(active_only),
-                {
-                    "embedding": embedding_str,
-                    "profile_id": self.profile_id,
-                    "model_name": model_name,
-                    "min_similarity": min_similarity,
-                    "top_k": top_k,
-                },
+                _get_similarity_query(active_only, has_categories),
+                params,
             )
             return [ScoredFact(fact=_row_to_fact(row), similarity=row.similarity) for row in result]
 

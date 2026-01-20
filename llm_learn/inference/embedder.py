@@ -50,6 +50,11 @@ class Embedder:
         self._model = model
         self._client = httpx.AsyncClient(timeout=timeout)
 
+    @property
+    def model(self) -> str:
+        """Return the model name used for embeddings."""
+        return self._model
+
     async def close(self) -> None:
         """Close the HTTP client and release resources."""
         await self._client.aclose()

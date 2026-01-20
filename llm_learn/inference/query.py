@@ -1,10 +1,24 @@
 """High-level context-aware query interface."""
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .backends import Message
 from .client import LLMClient
 from .context import ContextBuilder
+
+if TYPE_CHECKING:
+    from .embedder import Embedder
+
+
+@dataclass
+class RAGArgs:
+    """Configuration for RAG-based fact retrieval."""
+
+    top_k: int = 10
+    min_similarity: float = 0.3
+    model_name: str | None = None  # Defaults to embedder's model
+    categories: list[str] | None = None  # Filter results to these categories
 
 
 @dataclass
@@ -55,6 +69,7 @@ class ContextQuery:
         context_builder: ContextBuilder,
         base_system_prompt: str = "",
         temperature: float = 0.7,
+        embedder: "Embedder | None" = None,
     ):
         """
         Initialize context-aware query interface.
@@ -64,13 +79,15 @@ class ContextQuery:
             context_builder: Context builder for fact injection
             base_system_prompt: Default system prompt to use
             temperature: Default temperature for responses
+            embedder: Optional embedder for RAG-based fact retrieval
         """
         self._client = client
         self._context_builder = context_builder
         self._base_system_prompt = base_system_prompt
         self._temperature = temperature
+        self._embedder = embedder
 
-    async def ask(  # cq: max-lines=40
+    async def ask(  # cq: max-lines=50
         self,
         question: str,
         conversation: Conversation | None = None,
@@ -79,6 +96,7 @@ class ContextQuery:
         max_tokens: int | None = None,
         include_facts: bool = True,
         fact_categories: list[str] | None = None,
+        rag: RAGArgs | None = None,
     ) -> str:
         """
         Ask a question with context-aware context.
@@ -89,11 +107,16 @@ class ContextQuery:
             system_prompt: Override base system prompt (None = use default)
             temperature: Override temperature (None = use default)
             max_tokens: Maximum response tokens
-            include_facts: Whether to inject user facts
-            fact_categories: Only include facts from these categories
+            include_facts: Whether to inject user facts (ignored when rag is provided)
+            fact_categories: Only include facts from these categories (ignored when rag
+                is provided; use rag.categories instead)
+            rag: RAG configuration - enables semantic retrieval when provided
 
         Returns:
             The assistant's response
+
+        Raises:
+            ValueError: If rag is provided but no embedder is configured
 
         Example:
             # Single question
@@ -103,11 +126,16 @@ class ContextQuery:
             conv = Conversation()
             r1 = await query.ask("What is ML?", conversation=conv)
             r2 = await query.ask("Tell me more about neural networks", conversation=conv)
+
+            # With RAG
+            response = await query.ask("What's my preferred coding style?", rag=RAGArgs())
         """
         # Build system prompt
         base = system_prompt if system_prompt is not None else self._base_system_prompt
 
-        if include_facts:
+        if rag is not None:
+            system = await self._build_rag_prompt(base, question, rag)
+        elif include_facts:
             system = self._context_builder.build_system_prompt(
                 base_prompt=base,
                 categories=fact_categories,
@@ -116,13 +144,7 @@ class ContextQuery:
             system = base
 
         # Build messages
-        if conversation:
-            # Add user message to conversation
-            conversation.add_user(question)
-            messages = conversation.messages
-        else:
-            # Single message
-            messages = [Message(role="user", content=question)]
+        messages = self._build_messages(question, conversation)
 
         # Get response
         response = await self._client.chat(
@@ -137,6 +159,48 @@ class ContextQuery:
             conversation.add_assistant(response)
 
         return response
+
+    async def _build_rag_prompt(
+        self,
+        base: str,
+        question: str,
+        rag: RAGArgs,
+    ) -> str:
+        """Build system prompt using RAG-based fact retrieval."""
+        if self._embedder is None:
+            raise ValueError("RAG requires embedder to be configured")
+
+        # Embed the question
+        result = await self._embedder.embed(question)
+
+        # Determine model name for search
+        model_name = rag.model_name if rag.model_name else self._embedder.model
+
+        # Search for similar facts (category filtering done in SQL for efficiency)
+        scored_facts = self._context_builder.facts_client.search_similar(
+            embedding=result.embedding,
+            model_name=model_name,
+            top_k=rag.top_k,
+            min_similarity=rag.min_similarity,
+            categories=rag.categories,
+        )
+
+        # Extract facts from scored results
+        facts = [sf.fact for sf in scored_facts]
+
+        # Build prompt with retrieved facts
+        return self._context_builder.build_system_prompt_from_facts(base, facts)
+
+    def _build_messages(
+        self,
+        question: str,
+        conversation: Conversation | None,
+    ) -> list[Message]:
+        """Build message list, updating conversation if provided."""
+        if conversation:
+            conversation.add_user(question)
+            return conversation.messages
+        return [Message(role="user", content=question)]
 
     async def ask_without_facts(
         self,

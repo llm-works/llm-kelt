@@ -461,3 +461,55 @@ class TestFactsEmbeddings:
             min_similarity=0.0,
         )
         assert len(results_after) == 0
+
+    def test_search_similar_with_categories_filter(self, learn_client, clean_tables):
+        """Test that search_similar filters by categories in SQL."""
+        # Create facts in different categories with similar embeddings
+        pref_id = learn_client.facts.add("User prefers Python", category="preferences")
+        rule_id = learn_client.facts.add("Always use type hints", category="rules")
+        bg_id = learn_client.facts.add("10 years experience", category="background")
+
+        # All facts have similar embeddings
+        learn_client.facts.set_embedding(pref_id, [0.9, 0.1, 0.0], model_name="test")
+        learn_client.facts.set_embedding(rule_id, [0.85, 0.15, 0.0], model_name="test")
+        learn_client.facts.set_embedding(bg_id, [0.8, 0.2, 0.0], model_name="test")
+
+        # Search without categories - should get all
+        results_all = learn_client.facts.search_similar(
+            embedding=[0.9, 0.1, 0.0],
+            model_name="test",
+            min_similarity=0.5,
+        )
+        assert len(results_all) == 3
+
+        # Search with single category filter
+        results_prefs = learn_client.facts.search_similar(
+            embedding=[0.9, 0.1, 0.0],
+            model_name="test",
+            min_similarity=0.5,
+            categories=["preferences"],
+        )
+        assert len(results_prefs) == 1
+        assert results_prefs[0].fact.id == pref_id
+
+        # Search with multiple categories
+        results_multi = learn_client.facts.search_similar(
+            embedding=[0.9, 0.1, 0.0],
+            model_name="test",
+            min_similarity=0.5,
+            categories=["preferences", "rules"],
+        )
+        result_ids = [r.fact.id for r in results_multi]
+        assert len(results_multi) == 2
+        assert pref_id in result_ids
+        assert rule_id in result_ids
+        assert bg_id not in result_ids
+
+        # Search with non-existent category
+        results_empty = learn_client.facts.search_similar(
+            embedding=[0.9, 0.1, 0.0],
+            model_name="test",
+            min_similarity=0.5,
+            categories=["nonexistent"],
+        )
+        assert len(results_empty) == 0

@@ -166,7 +166,7 @@ class TestGetSimilarityQuery:
 
     def test_query_with_active_only_true(self):
         """Test query includes active filter when active_only=True."""
-        query = _get_similarity_query(active_only=True)
+        query = _get_similarity_query(active_only=True, has_categories=False)
         query_text = str(query)
 
         assert "f.active = true" in query_text
@@ -177,7 +177,7 @@ class TestGetSimilarityQuery:
 
     def test_query_with_active_only_false(self):
         """Test query excludes active filter when active_only=False."""
-        query = _get_similarity_query(active_only=False)
+        query = _get_similarity_query(active_only=False, has_categories=False)
         query_text = str(query)
 
         assert "f.active = true" not in query_text
@@ -187,7 +187,7 @@ class TestGetSimilarityQuery:
 
     def test_query_has_required_parameters(self):
         """Test query expects required parameters."""
-        query = _get_similarity_query(active_only=True)
+        query = _get_similarity_query(active_only=True, has_categories=False)
         query_text = str(query)
 
         # Check for parameter placeholders
@@ -199,7 +199,7 @@ class TestGetSimilarityQuery:
 
     def test_query_selects_similarity_score(self):
         """Test query calculates similarity score."""
-        query = _get_similarity_query(active_only=True)
+        query = _get_similarity_query(active_only=True, has_categories=False)
         query_text = str(query)
 
         # Should calculate 1 - cosine_distance as similarity
@@ -208,7 +208,31 @@ class TestGetSimilarityQuery:
 
     def test_query_filters_by_min_similarity(self):
         """Test query filters by minimum similarity threshold."""
-        query = _get_similarity_query(active_only=True)
+        query = _get_similarity_query(active_only=True, has_categories=False)
         query_text = str(query)
 
         assert ">= :min_similarity" in query_text
+
+    def test_query_with_categories_includes_category_filter(self):
+        """Test query includes category filter when has_categories=True."""
+        query = _get_similarity_query(active_only=True, has_categories=True)
+        query_text = str(query)
+
+        assert "f.category = ANY(:categories)" in query_text
+        assert "f.active = true" in query_text
+
+    def test_query_without_categories_excludes_category_filter(self):
+        """Test query excludes category filter when has_categories=False."""
+        query = _get_similarity_query(active_only=True, has_categories=False)
+        query_text = str(query)
+
+        assert "f.category = ANY(:categories)" not in query_text
+        assert ":categories" not in query_text
+
+    def test_query_inactive_with_categories(self):
+        """Test query with both active_only=False and has_categories=True."""
+        query = _get_similarity_query(active_only=False, has_categories=True)
+        query_text = str(query)
+
+        assert "f.category = ANY(:categories)" in query_text
+        assert "f.active = true" not in query_text

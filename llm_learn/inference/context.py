@@ -1,5 +1,7 @@
 """Context builder for injecting facts into system prompts."""
 
+from typing import Literal
+
 from ..collection.facts import FactsClient
 from ..core.models import Fact
 
@@ -26,7 +28,7 @@ class ContextBuilder:
         Args:
             facts_client: Client for retrieving facts from database
         """
-        self._facts_client = facts_client
+        self.facts_client = facts_client
 
     def build_system_prompt(  # cq: max-lines=45
         self,
@@ -34,7 +36,7 @@ class ContextBuilder:
         categories: list[str] | None = None,
         min_confidence: float = 0.0,
         max_facts: int = 100,
-        fact_position: str = "append",
+        fact_position: Literal["append", "prepend"] = "append",
     ) -> str:
         """
         Build a system prompt with injected facts.
@@ -53,7 +55,7 @@ class ContextBuilder:
         if categories:
             facts = []
             for category in categories:
-                category_facts = self._facts_client.list_active(
+                category_facts = self.facts_client.list_active(
                     category=category,
                     min_confidence=min_confidence,
                     limit=max_facts,
@@ -68,7 +70,7 @@ class ContextBuilder:
                     unique_facts.append(f)
             facts = unique_facts[:max_facts]
         else:
-            facts = self._facts_client.list_active(
+            facts = self.facts_client.list_active(
                 min_confidence=min_confidence,
                 limit=max_facts,
             )
@@ -76,7 +78,40 @@ class ContextBuilder:
         # Format facts into a section
         facts_section = self._format_facts(facts)
 
-        # Combine with base prompt
+        # Combine with base prompt (helper handles empty facts_section)
+        return self._combine_prompt_and_facts(base_prompt, facts_section, fact_position)
+
+    def build_system_prompt_from_facts(
+        self,
+        base_prompt: str,
+        facts: list[Fact],
+        fact_position: Literal["append", "prepend"] = "append",
+    ) -> str:
+        """
+        Build system prompt from pre-retrieved facts (for RAG).
+
+        Unlike build_system_prompt which fetches facts from the database,
+        this method accepts facts that were already retrieved (e.g., via
+        semantic search).
+
+        Args:
+            base_prompt: The base system prompt to augment
+            facts: List of facts to include (already retrieved)
+            fact_position: Where to place facts - "append" or "prepend"
+
+        Returns:
+            System prompt with facts section added
+        """
+        facts_section = self._format_facts(facts)
+        return self._combine_prompt_and_facts(base_prompt, facts_section, fact_position)
+
+    def _combine_prompt_and_facts(
+        self,
+        base_prompt: str,
+        facts_section: str,
+        fact_position: str,
+    ) -> str:
+        """Combine base prompt with facts section."""
         if not facts_section:
             return base_prompt
 
@@ -140,8 +175,8 @@ class ContextBuilder:
         Returns:
             Dict with counts, categories, and fact list
         """
-        facts = self._facts_client.list_active(limit=max_facts)
-        counts = self._facts_client.count_by_category()
+        facts = self.facts_client.list_active(limit=max_facts)
+        counts = self.facts_client.count_by_category()
 
         return {
             "total_active": len(facts),
