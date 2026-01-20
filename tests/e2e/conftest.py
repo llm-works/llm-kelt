@@ -2,9 +2,10 @@
 
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 
+import httpx
 import pytest
-from appinfra.config import Config
 
 # Skip all training tests if dependencies not available
 torch = pytest.importorskip("torch")
@@ -16,9 +17,8 @@ from llm_infer.models import ModelResolver, ModelsConfig  # noqa: E402
 
 from llm_learn.training import LoraConfig, TrainingConfig  # noqa: E402
 
-# Path to llm-learn's models config
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-MODELS_CONFIG_PATH = PROJECT_ROOT / "etc" / "models.yaml"
+# Quantization suffixes to strip when finding training models
+QUANTIZATION_SUFFIXES = ("-w4a16", "-w8a16", "-gptq-int4", "-gptq-int8", "-awq", "-gguf")
 
 # Sample training data
 SFT_SAMPLES = [
@@ -93,14 +93,9 @@ def _write_jsonl(path: Path, data: list[dict]) -> Path:
 
 
 @pytest.fixture(scope="session")
-def model_resolver(logger) -> ModelResolver:
-    """Model resolver using llm-learn's models.yaml config."""
-    if not MODELS_CONFIG_PATH.exists():
-        pytest.skip(f"Models config not found: {MODELS_CONFIG_PATH}")
-
-    # Use appinfra Config to load yaml (resolves !path directives)
-    raw_config = Config(str(MODELS_CONFIG_PATH))
-    models_config = ModelsConfig.from_dict(raw_config.to_dict())
+def model_resolver(logger, config) -> ModelResolver:
+    """Model resolver using learn.yaml models config."""
+    models_config = ModelsConfig.from_dict(config.models.to_dict())
     return ModelResolver(logger, models_config.locations)
 
 
@@ -111,6 +106,60 @@ def local_model_path(model_resolver) -> Path:
     if path is None:
         pytest.skip("Model 'qwen2.5-0.5b-instruct' not found in local cache")
     return path
+
+
+@pytest.fixture(scope="session")
+def infer_server_url(config) -> str:
+    """Get the inference server URL (without /v1 suffix)."""
+    local_backend = config.llm.backends.local
+    base_url = local_backend.base_url
+    parsed = urlparse(base_url)
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+@pytest.fixture(scope="session")
+def infer_model_name(infer_server_url) -> str:
+    """Query the inference server to get the running model name."""
+    response = httpx.get(f"{infer_server_url}/v1/models", timeout=5.0)
+    response.raise_for_status()
+    data = response.json()
+    models = data.get("data", [])
+    if not models:
+        pytest.skip("No models loaded in inference server")
+    return models[0]["id"]
+
+
+def _strip_quantization_suffix(model_name: str) -> str:
+    """Strip quantization suffix from model name to find base model."""
+    for suffix in QUANTIZATION_SUFFIXES:
+        if model_name.endswith(suffix):
+            return model_name[: -len(suffix)]
+    return model_name
+
+
+@pytest.fixture(scope="session")
+def training_model_path(model_resolver, infer_model_name) -> Path:
+    """Find the non-quantized training model matching the inference server model."""
+    # First try exact match (model might not be quantized)
+    path = model_resolver.find_by_name(infer_model_name)
+    if path is not None:
+        return path
+
+    # Strip quantization suffix and try again
+    base_name = _strip_quantization_suffix(infer_model_name)
+    path = model_resolver.find_by_name(base_name)
+    if path is None:
+        pytest.skip(
+            f"Training model not found: tried '{infer_model_name}' and '{base_name}'. "
+            f"Download the non-quantized model for training."
+        )
+    return path
+
+
+@pytest.fixture(scope="session")
+def adapter_lora_base_path(config) -> Path:
+    """Get the LoRA adapter base path from config."""
+    return Path(config.adapters.lora.base_path)
 
 
 @pytest.fixture

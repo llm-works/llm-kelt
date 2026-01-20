@@ -119,22 +119,20 @@ class DpoTrainer:
         logger.info(f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)")
 
     def _load_reference_model(self):
-        """Load reference model for DPO (unless reference-free mode)."""
+        """Load reference model for DPO (unless using PEFT or reference-free mode).
+
+        When using LoRA/PEFT (which is always the case here), TRL's DPOTrainer
+        automatically computes reference logprobs by disabling the adapter.
+        No separate model is needed, saving significant GPU memory.
+        """
+        # With PEFT, TRL handles reference by disabling adapter - no separate model needed
+        # This saves ~50% GPU memory compared to loading a full reference model
         if self.reference_free:
-            return
-
-        import torch
-        from transformers import AutoModelForCausalLM
-
-        logger.info("Loading reference model for DPO")
-        # trust_remote_code required for Qwen and other models with custom architectures
-        self.ref_model = AutoModelForCausalLM.from_pretrained(
-            self.base_model,
-            quantization_config=self._quant_config,
-            device_map="auto",
-            torch_dtype=torch.bfloat16 if self._quant_config is None else None,
-            trust_remote_code=True,
-        )
+            logger.info("Using reference-free DPO")
+        else:
+            logger.info(
+                "Using PEFT base model as reference (adapter disabled during ref computation)"
+            )
 
     def _load_data(self):
         """Load training and eval datasets."""

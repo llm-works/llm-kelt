@@ -11,9 +11,14 @@ llm: !include './llm.yaml'
 # Proxy server settings
 proxy:
   host: "0.0.0.0"
-  port: 8001
+  port: 8010
   profile_id: 1
   model_name: "llm-learn-proxy"
+
+# Adapter settings (for training integration with llm-infer)
+adapters:
+  lora:
+    base_path: !path ~/ops/models/adapters/LoRA
 
 # Learn-specific settings
 learn:
@@ -31,3 +36,5 @@ learn:
 
   # Default system prompt (can be overridden per query)
   default_system_prompt: ""
+
+models: !include "./models.yaml"
