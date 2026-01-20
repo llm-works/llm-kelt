@@ -36,7 +36,7 @@ class ContextBuilder:
         categories: list[str] | None = None,
         min_confidence: float = 0.0,
         max_facts: int = 100,
-        fact_position: str = "append",
+        fact_position: Literal["append", "prepend"] = "append",
     ) -> str:
         """
         Build a system prompt with injected facts.
@@ -78,10 +78,7 @@ class ContextBuilder:
         # Format facts into a section
         facts_section = self._format_facts(facts)
 
-        # Combine with base prompt
-        if not facts_section:
-            return base_prompt
-
+        # Combine with base prompt (helper handles empty facts_section)
         return self._combine_prompt_and_facts(base_prompt, facts_section, fact_position)
 
     def build_system_prompt_from_facts(
