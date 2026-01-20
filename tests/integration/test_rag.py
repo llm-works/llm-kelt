@@ -49,7 +49,7 @@ class TestRAGIntegration:
             )
 
         embedder.embed = AsyncMock(side_effect=embed)
-        embedder._model = "test-model"
+        embedder.model = "test-model"
         return embedder
 
     @pytest.fixture
@@ -221,8 +221,12 @@ class TestRAGIntegration:
         call_kwargs = mock_llm_client.chat.call_args.kwargs
         system_prompt = call_kwargs["system"] or ""
 
-        # With 0.99 similarity threshold, probably no facts match
-        assert "About the user" not in system_prompt or system_prompt.count("- ") == 0
+        # With 0.99 similarity threshold, no facts should match
+        # Either no facts section at all, or it's empty
+        if "About the user" in system_prompt:
+            assert system_prompt.count("- ") == 0, (
+                "Expected no facts with high similarity threshold"
+            )
 
     @pytest.mark.asyncio
     async def test_rag_only_searches_active_facts(

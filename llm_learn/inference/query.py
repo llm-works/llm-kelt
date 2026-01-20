@@ -18,6 +18,7 @@ class RAGArgs:
     top_k: int = 10
     min_similarity: float = 0.3
     model_name: str | None = None  # Defaults to embedder's model
+    categories: list[str] | None = None  # Filter results to these categories
 
 
 @dataclass
@@ -107,7 +108,8 @@ class ContextQuery:
             temperature: Override temperature (None = use default)
             max_tokens: Maximum response tokens
             include_facts: Whether to inject user facts (ignored when rag is provided)
-            fact_categories: Only include facts from these categories (ignored when rag is provided)
+            fact_categories: Only include facts from these categories (ignored when rag
+                is provided; use rag.categories instead)
             rag: RAG configuration - enables semantic retrieval when provided
 
         Returns:
@@ -172,10 +174,10 @@ class ContextQuery:
         result = await self._embedder.embed(question)
 
         # Determine model name for search
-        model_name = rag.model_name if rag.model_name else self._embedder._model
+        model_name = rag.model_name if rag.model_name else self._embedder.model
 
         # Search for similar facts
-        scored_facts = self._context_builder._facts_client.search_similar(
+        scored_facts = self._context_builder.facts_client.search_similar(
             embedding=result.embedding,
             model_name=model_name,
             top_k=rag.top_k,
@@ -184,6 +186,10 @@ class ContextQuery:
 
         # Extract facts from scored results
         facts = [sf.fact for sf in scored_facts]
+
+        # Filter by categories if specified
+        if rag.categories:
+            facts = [f for f in facts if f.category in rag.categories]
 
         # Build prompt with retrieved facts
         return self._context_builder.build_system_prompt_from_facts(base, facts)

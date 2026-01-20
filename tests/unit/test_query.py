@@ -19,13 +19,20 @@ class TestRAGArgs:
         assert args.top_k == 10
         assert args.min_similarity == 0.3
         assert args.model_name is None
+        assert args.categories is None
 
     def test_custom_values(self):
         """Test RAGArgs with custom values."""
-        args = RAGArgs(top_k=5, min_similarity=0.5, model_name="custom-model")
+        args = RAGArgs(
+            top_k=5,
+            min_similarity=0.5,
+            model_name="custom-model",
+            categories=["preferences", "rules"],
+        )
         assert args.top_k == 5
         assert args.min_similarity == 0.5
         assert args.model_name == "custom-model"
+        assert args.categories == ["preferences", "rules"]
 
 
 class TestConversation:
@@ -76,7 +83,7 @@ class TestContextQueryRAG:
     def mock_context_builder(self, mock_facts_client):
         """Create mock context builder."""
         builder = MagicMock()
-        builder._facts_client = mock_facts_client
+        builder.facts_client = mock_facts_client
         builder.build_system_prompt.return_value = "System prompt with facts"
         builder.build_system_prompt_from_facts.return_value = "RAG system prompt"
         return builder
@@ -92,7 +99,7 @@ class TestContextQueryRAG:
                 prompt_tokens=5,
             )
         )
-        embedder._model = "test-model"
+        embedder.model = "test-model"
         return embedder
 
     @pytest.fixture
@@ -113,7 +120,7 @@ class TestContextQueryRAG:
         self, mock_client, mock_context_builder, mock_embedder, sample_fact
     ):
         """Test that RAG embeds the question."""
-        mock_context_builder._facts_client.search_similar.return_value = [
+        mock_context_builder.facts_client.search_similar.return_value = [
             ScoredFact(fact=sample_fact, similarity=0.9)
         ]
 
@@ -132,7 +139,7 @@ class TestContextQueryRAG:
         self, mock_client, mock_context_builder, mock_embedder, sample_fact
     ):
         """Test that RAG searches for similar facts with correct params."""
-        mock_context_builder._facts_client.search_similar.return_value = [
+        mock_context_builder.facts_client.search_similar.return_value = [
             ScoredFact(fact=sample_fact, similarity=0.9)
         ]
 
@@ -144,7 +151,7 @@ class TestContextQueryRAG:
 
         await query.ask("Test question", rag=RAGArgs(top_k=5, min_similarity=0.4))
 
-        mock_context_builder._facts_client.search_similar.assert_called_once_with(
+        mock_context_builder.facts_client.search_similar.assert_called_once_with(
             embedding=[0.1, 0.2, 0.3],
             model_name="test-model",
             top_k=5,
@@ -156,7 +163,7 @@ class TestContextQueryRAG:
         self, mock_client, mock_context_builder, mock_embedder, sample_fact
     ):
         """Test that RAG injects retrieved facts into system prompt."""
-        mock_context_builder._facts_client.search_similar.return_value = [
+        mock_context_builder.facts_client.search_similar.return_value = [
             ScoredFact(fact=sample_fact, similarity=0.9)
         ]
 
@@ -189,10 +196,10 @@ class TestContextQueryRAG:
 
     @pytest.mark.asyncio
     async def test_ask_with_rag_config_top_k(
-        self, mock_client, mock_context_builder, mock_embedder, sample_fact
+        self, mock_client, mock_context_builder, mock_embedder
     ):
         """Test that RAGArgs.top_k is passed to search."""
-        mock_context_builder._facts_client.search_similar.return_value = []
+        mock_context_builder.facts_client.search_similar.return_value = []
 
         query = ContextQuery(
             client=mock_client,
@@ -202,15 +209,15 @@ class TestContextQueryRAG:
 
         await query.ask("Test", rag=RAGArgs(top_k=20))
 
-        call_kwargs = mock_context_builder._facts_client.search_similar.call_args.kwargs
+        call_kwargs = mock_context_builder.facts_client.search_similar.call_args.kwargs
         assert call_kwargs["top_k"] == 20
 
     @pytest.mark.asyncio
     async def test_ask_with_rag_config_min_similarity(
-        self, mock_client, mock_context_builder, mock_embedder, sample_fact
+        self, mock_client, mock_context_builder, mock_embedder
     ):
         """Test that RAGArgs.min_similarity is passed to search."""
-        mock_context_builder._facts_client.search_similar.return_value = []
+        mock_context_builder.facts_client.search_similar.return_value = []
 
         query = ContextQuery(
             client=mock_client,
@@ -220,7 +227,7 @@ class TestContextQueryRAG:
 
         await query.ask("Test", rag=RAGArgs(min_similarity=0.7))
 
-        call_kwargs = mock_context_builder._facts_client.search_similar.call_args.kwargs
+        call_kwargs = mock_context_builder.facts_client.search_similar.call_args.kwargs
         assert call_kwargs["min_similarity"] == 0.7
 
     @pytest.mark.asyncio
@@ -228,7 +235,7 @@ class TestContextQueryRAG:
         self, mock_client, mock_context_builder, mock_embedder, sample_fact
     ):
         """Test that RAGArgs.model_name overrides embedder model."""
-        mock_context_builder._facts_client.search_similar.return_value = []
+        mock_context_builder.facts_client.search_similar.return_value = []
 
         query = ContextQuery(
             client=mock_client,
@@ -238,7 +245,7 @@ class TestContextQueryRAG:
 
         await query.ask("Test", rag=RAGArgs(model_name="custom-embedding-model"))
 
-        call_kwargs = mock_context_builder._facts_client.search_similar.call_args.kwargs
+        call_kwargs = mock_context_builder.facts_client.search_similar.call_args.kwargs
         assert call_kwargs["model_name"] == "custom-embedding-model"
 
     @pytest.mark.asyncio
@@ -246,7 +253,7 @@ class TestContextQueryRAG:
         self, mock_client, mock_context_builder, mock_embedder, sample_fact
     ):
         """Test that RAG uses embedder's model when model_name is None."""
-        mock_context_builder._facts_client.search_similar.return_value = []
+        mock_context_builder.facts_client.search_similar.return_value = []
 
         query = ContextQuery(
             client=mock_client,
@@ -256,7 +263,7 @@ class TestContextQueryRAG:
 
         await query.ask("Test", rag=RAGArgs())
 
-        call_kwargs = mock_context_builder._facts_client.search_similar.call_args.kwargs
+        call_kwargs = mock_context_builder.facts_client.search_similar.call_args.kwargs
         assert call_kwargs["model_name"] == "test-model"
 
     @pytest.mark.asyncio
@@ -264,7 +271,7 @@ class TestContextQueryRAG:
         self, mock_client, mock_context_builder, mock_embedder, sample_fact
     ):
         """Test that RAG works with multi-turn conversations."""
-        mock_context_builder._facts_client.search_similar.return_value = [
+        mock_context_builder.facts_client.search_similar.return_value = [
             ScoredFact(fact=sample_fact, similarity=0.9)
         ]
 
@@ -290,7 +297,7 @@ class TestContextQueryRAG:
         self, mock_client, mock_context_builder, mock_embedder
     ):
         """Test RAG behavior when no similar facts are found."""
-        mock_context_builder._facts_client.search_similar.return_value = []
+        mock_context_builder.facts_client.search_similar.return_value = []
 
         query = ContextQuery(
             client=mock_client,
@@ -314,14 +321,14 @@ class TestContextQueryRAG:
 
         mock_context_builder.build_system_prompt.assert_called_once()
         # Should not use RAG methods
-        mock_context_builder._facts_client.search_similar.assert_not_called()
+        mock_context_builder.facts_client.search_similar.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_ask_with_rag_ignores_include_facts(
         self, mock_client, mock_context_builder, mock_embedder, sample_fact
     ):
         """Test that RAG ignores include_facts parameter."""
-        mock_context_builder._facts_client.search_similar.return_value = [
+        mock_context_builder.facts_client.search_similar.return_value = [
             ScoredFact(fact=sample_fact, similarity=0.9)
         ]
 
@@ -343,7 +350,7 @@ class TestContextQueryRAG:
         self, mock_client, mock_context_builder, mock_embedder, sample_fact
     ):
         """Test that RAG ignores fact_categories parameter."""
-        mock_context_builder._facts_client.search_similar.return_value = [
+        mock_context_builder.facts_client.search_similar.return_value = [
             ScoredFact(fact=sample_fact, similarity=0.9)
         ]
 
@@ -359,6 +366,84 @@ class TestContextQueryRAG:
         # RAG was used, not static retrieval with categories
         mock_context_builder.build_system_prompt_from_facts.assert_called_once()
         mock_context_builder.build_system_prompt.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ask_with_rag_filters_by_categories(
+        self, mock_client, mock_context_builder, mock_embedder
+    ):
+        """Test that RAGArgs.categories filters retrieved facts."""
+        # Create facts from different categories
+        pref_fact = Fact(
+            id=1,
+            profile_id=1,
+            content="User prefers Python",
+            category="preferences",
+            source="user",
+            confidence=1.0,
+            active=True,
+        )
+        rule_fact = Fact(
+            id=2,
+            profile_id=1,
+            content="Always use type hints",
+            category="rules",
+            source="user",
+            confidence=1.0,
+            active=True,
+        )
+
+        mock_context_builder.facts_client.search_similar.return_value = [
+            ScoredFact(fact=pref_fact, similarity=0.9),
+            ScoredFact(fact=rule_fact, similarity=0.8),
+        ]
+
+        query = ContextQuery(
+            client=mock_client,
+            context_builder=mock_context_builder,
+            embedder=mock_embedder,
+        )
+
+        # Filter to only preferences category
+        await query.ask("Test", rag=RAGArgs(categories=["preferences"]))
+
+        # Should only pass the preferences fact to build_system_prompt_from_facts
+        call_args = mock_context_builder.build_system_prompt_from_facts.call_args
+        facts_passed = call_args[0][1]  # Second positional arg is facts list
+        assert len(facts_passed) == 1
+        assert facts_passed[0].category == "preferences"
+
+    @pytest.mark.asyncio
+    async def test_ask_with_rag_categories_empty_result(
+        self, mock_client, mock_context_builder, mock_embedder
+    ):
+        """Test RAG with categories filter that excludes all retrieved facts."""
+        fact = Fact(
+            id=1,
+            profile_id=1,
+            content="User prefers Python",
+            category="preferences",
+            source="user",
+            confidence=1.0,
+            active=True,
+        )
+
+        mock_context_builder.facts_client.search_similar.return_value = [
+            ScoredFact(fact=fact, similarity=0.9),
+        ]
+
+        query = ContextQuery(
+            client=mock_client,
+            context_builder=mock_context_builder,
+            embedder=mock_embedder,
+        )
+
+        # Filter to a category that doesn't match any retrieved facts
+        await query.ask("Test", rag=RAGArgs(categories=["rules"]))
+
+        # Should pass empty list to build_system_prompt_from_facts
+        call_args = mock_context_builder.build_system_prompt_from_facts.call_args
+        facts_passed = call_args[0][1]
+        assert len(facts_passed) == 0
 
 
 class TestContextQueryBasic:

@@ -28,7 +28,7 @@ class ContextBuilder:
         Args:
             facts_client: Client for retrieving facts from database
         """
-        self._facts_client = facts_client
+        self.facts_client = facts_client
 
     def build_system_prompt(  # cq: max-lines=45
         self,
@@ -55,7 +55,7 @@ class ContextBuilder:
         if categories:
             facts = []
             for category in categories:
-                category_facts = self._facts_client.list_active(
+                category_facts = self.facts_client.list_active(
                     category=category,
                     min_confidence=min_confidence,
                     limit=max_facts,
@@ -70,7 +70,7 @@ class ContextBuilder:
                     unique_facts.append(f)
             facts = unique_facts[:max_facts]
         else:
-            facts = self._facts_client.list_active(
+            facts = self.facts_client.list_active(
                 min_confidence=min_confidence,
                 limit=max_facts,
             )
@@ -178,8 +178,8 @@ class ContextBuilder:
         Returns:
             Dict with counts, categories, and fact list
         """
-        facts = self._facts_client.list_active(limit=max_facts)
-        counts = self._facts_client.count_by_category()
+        facts = self.facts_client.list_active(limit=max_facts)
+        counts = self.facts_client.count_by_category()
 
         return {
             "total_active": len(facts),
