@@ -29,6 +29,7 @@ from .backends import Backend, Message
 from .backends.base import ChatResponse
 from .client import LLMClient
 from .context import ContextBuilder
+from .embed_facts import EmbedFactsResult, embed_missing_facts
 from .embedder import Embedder, EmbeddingResult
 from .query import ContextQuery, Conversation
 
@@ -39,9 +40,12 @@ __all__ = [
     "ContextQuery",
     "Conversation",
     "Embedder",
+    # Utilities
+    "embed_missing_facts",
     # Types
     "Backend",
     "Message",
     "ChatResponse",
     "EmbeddingResult",
+    "EmbedFactsResult",
 ]

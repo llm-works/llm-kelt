@@ -93,7 +93,7 @@ def _write_jsonl(path: Path, data: list[dict]) -> Path:
 
 
 @pytest.fixture(scope="session")
-def model_resolver() -> ModelResolver:
+def model_resolver(logger) -> ModelResolver:
     """Model resolver using llm-learn's models.yaml config."""
     if not MODELS_CONFIG_PATH.exists():
         pytest.skip(f"Models config not found: {MODELS_CONFIG_PATH}")
@@ -101,7 +101,7 @@ def model_resolver() -> ModelResolver:
     # Use appinfra Config to load yaml (resolves !path directives)
     raw_config = Config(str(MODELS_CONFIG_PATH))
     models_config = ModelsConfig.from_dict(raw_config.to_dict())
-    return ModelResolver(models_config.locations)
+    return ModelResolver(logger, models_config.locations)
 
 
 @pytest.fixture(scope="session")
