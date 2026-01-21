@@ -3,13 +3,12 @@
 Tests the full pipeline: train → register → verify inference changes.
 Requires:
 - Training dependencies (torch, transformers, peft, trl)
-- llm-infer running with LoRA support (configured via LEARN_TEST_CONFIG_FILE)
-- Local model: qwen2.5-0.5b-instruct
+- llm-infer running with LoRA support
+- Non-quantized version of the running model available for training
 """
 
 import os
 from pathlib import Path
-from urllib.parse import urlparse
 
 import pytest
 
@@ -22,19 +21,6 @@ pytest.importorskip("torch")
 pytest.importorskip("peft")
 
 from llm_learn.training import AdapterRegistry, LoraConfig, TrainingConfig, train_lora
-
-# Adapter base path (must match llm-infer config)
-ADAPTER_BASE_PATH = Path("~/ops/models/adapters/LoRA").expanduser()
-
-
-def _get_infer_url(llm_config: dict) -> str:
-    """Extract the inference server URL from LLM config (without /v1 suffix)."""
-    local_backend = llm_config.get("backends", {}).get("local", {})
-    base_url = local_backend.get("base_url", "http://localhost:8000/v1")
-    # Remove /v1 suffix for AdapterRegistry
-    parsed = urlparse(base_url)
-    return f"{parsed.scheme}://{parsed.netloc}"
-
 
 # Training data that creates a distinctive behavior
 # Train the model to always mention "PINEAPPLE" when asked about fruit
@@ -61,17 +47,18 @@ def _write_jsonl(path: Path, data: list[dict]) -> Path:
 
 
 @pytest.fixture(scope="module")
-def adapter_registry(llm_config):
+def adapter_registry(logger, adapter_lora_base_path, infer_server_url):
     """Create adapter registry pointing to llm-infer's adapter path."""
     return AdapterRegistry(
-        base_path=ADAPTER_BASE_PATH,
-        infer_url=_get_infer_url(llm_config),
+        lg=logger,
+        base_path=adapter_lora_base_path,
+        infer_url=infer_server_url,
     )
 
 
 @pytest.fixture(scope="module")
-def trained_adapter(local_model_path, tmp_path_factory):
-    """Train a LoRA adapter with distinctive behavior."""
+def trained_adapter(logger, training_model_path, tmp_path_factory):
+    """Train a LoRA adapter with distinctive behavior on the inference server's model."""
     import torch
 
     tmp_path = tmp_path_factory.mktemp("training")
@@ -99,11 +86,12 @@ def trained_adapter(local_model_path, tmp_path_factory):
         bf16=torch.cuda.is_bf16_supported(),
     )
 
-    # Train
+    # Train on the model matching the inference server
     result = train_lora(
+        lg=logger,
         data_path=data_path,
         output_dir=tmp_path / "output",
-        base_model=str(local_model_path),
+        base_model=str(training_model_path),
         lora_config=lora_config,
         training_config=training_config,
         quantize=False,

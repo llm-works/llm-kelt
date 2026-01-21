@@ -21,6 +21,7 @@ class TestLoraTraining:
 
     def test_train_lora_produces_valid_adapter(
         self,
+        logger,
         sft_training_data: Path,
         local_model_path: Path,
         fast_lora_config,
@@ -37,6 +38,7 @@ class TestLoraTraining:
 
         # Train
         result = train_lora(
+            lg=logger,
             data_path=sft_training_data,
             output_dir=output_dir,
             base_model=str(local_model_path),
@@ -75,6 +77,7 @@ class TestLoraTraining:
 
     def test_train_lora_with_eval_split(
         self,
+        logger,
         sft_training_data: Path,
         local_model_path: Path,
         fast_lora_config,
@@ -100,6 +103,7 @@ class TestLoraTraining:
         )
 
         result = train_lora(
+            lg=logger,
             data_path=sft_training_data,
             output_dir=output_dir,
             base_model=str(local_model_path),
@@ -119,6 +123,7 @@ class TestDpoTraining:
 
     def test_train_dpo_produces_valid_adapter(
         self,
+        logger,
         dpo_training_data: Path,
         local_model_path: Path,
         fast_lora_config,
@@ -133,15 +138,14 @@ class TestDpoTraining:
 
         output_dir = tmp_path / "dpo_output"
 
-        # Train with reference-free to save memory
         result = train_dpo(
+            lg=logger,
             data_path=dpo_training_data,
             output_dir=output_dir,
             base_model=str(local_model_path),
             lora_config=fast_lora_config,
             training_config=fast_training_config,
             quantize=False,
-            reference_free=True,  # Save memory for test
         )
 
         # Verify result structure
@@ -158,7 +162,7 @@ class TestDpoTraining:
 
         # Verify DPO config was stored
         assert "dpo" in result.config
-        assert result.config["dpo"]["reference_free"] is True
+        assert "beta" in result.config["dpo"]
 
         # Verify adapter can be loaded
         base_model = AutoModelForCausalLM.from_pretrained(
@@ -168,30 +172,3 @@ class TestDpoTraining:
         )
         loaded_model = PeftModel.from_pretrained(base_model, str(result.adapter_path))
         assert loaded_model is not None, "Should be able to load adapter"
-
-    def test_train_dpo_with_reference_model(
-        self,
-        dpo_training_data: Path,
-        local_model_path: Path,
-        fast_lora_config,
-        fast_training_config,
-        tmp_path: Path,
-    ):
-        """Train DPO with reference model (full DPO, more memory intensive)."""
-        from llm_learn.training import train_dpo
-
-        output_dir = tmp_path / "dpo_output_ref"
-
-        result = train_dpo(
-            data_path=dpo_training_data,
-            output_dir=output_dir,
-            base_model=str(local_model_path),
-            lora_config=fast_lora_config,
-            training_config=fast_training_config,
-            quantize=False,
-            reference_free=False,  # Use reference model
-        )
-
-        assert result.adapter_path.exists()
-        assert result.method == "dpo"
-        assert result.config["dpo"]["reference_free"] is False

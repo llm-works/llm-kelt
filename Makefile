@@ -13,6 +13,9 @@ export LEARN_TEST_CONFIG_FILE := $(local)etc/learn.yaml
 # - false: Report violations but don't fail (development mode)
 INFRA_DEV_CQ_STRICT := true
 
+# Exclude examples from function size checks (demo scripts have longer functions)
+INFRA_DEV_CQ_EXCLUDE := examples/*
+
 # PostgreSQL configuration
 INFRA_PG_CONFIG_FILE := pg.yaml
 

@@ -6,17 +6,15 @@ Handles:
 - Calling llm-infer's refresh API
 """
 
-import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
 import yaml
+from appinfra.log import Logger
 
 from .config import TrainingResult
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -41,21 +39,24 @@ class AdapterRegistry:
 
     def __init__(
         self,
+        lg: Logger,
         base_path: str | Path,
         infer_url: str = "http://localhost:8000",
     ):
         """Initialize adapter registry.
 
         Args:
+            lg: Logger instance
             base_path: Path to llm-infer's adapter directory
             infer_url: Base URL for llm-infer API
         """
+        self._lg = lg
         self.base_path = Path(base_path).expanduser()
         self.infer_url = infer_url.rstrip("/")
 
         if not self.base_path.exists():
             self.base_path.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Created adapter base path: {self.base_path}")
+            self._lg.info(f"Created adapter base path: {self.base_path}")
 
     def _validate_adapter_id(self, adapter_id: str) -> None:
         """Validate adapter_id has no path traversal characters."""
@@ -80,7 +81,7 @@ class AdapterRegistry:
         config_path = adapter_path / "config.yaml"
         with config_path.open("w") as f:
             yaml.safe_dump(config, f)
-        logger.info(f"Wrote config: {config_path}")
+        self._lg.info(f"Wrote config: {config_path}")
 
     def register(
         self,
@@ -121,11 +122,11 @@ class AdapterRegistry:
         # Remove existing if overwriting
         if adapter_path.exists():
             shutil.rmtree(adapter_path)
-            logger.info(f"Removed existing adapter: {adapter_id}")
+            self._lg.info(f"Removed existing adapter: {adapter_id}")
 
         # Copy adapter files
         shutil.copytree(training_result.adapter_path, adapter_path)
-        logger.info(f"Copied adapter to: {adapter_path}")
+        self._lg.info(f"Copied adapter to: {adapter_path}")
 
         desc = description or f"{training_result.method} adapter from {training_result.base_model}"
         self._write_adapter_config(adapter_path, training_result, desc, enabled)
@@ -157,7 +158,7 @@ class AdapterRegistry:
         with config_path.open("w") as f:
             yaml.safe_dump(config, f)
 
-        logger.info(f"Set adapter '{adapter_id}' enabled={enabled}")
+        self._lg.info(f"Set adapter '{adapter_id}' enabled={enabled}")
 
     def remove(self, adapter_id: str) -> None:
         """Remove an adapter from the registry.
@@ -171,7 +172,7 @@ class AdapterRegistry:
             raise ValueError(f"Adapter '{adapter_id}' not found")
 
         shutil.rmtree(adapter_path)
-        logger.info(f"Removed adapter: {adapter_id}")
+        self._lg.info(f"Removed adapter: {adapter_id}")
 
     def list(self) -> list[AdapterInfo]:
         """List all registered adapters.
@@ -248,13 +249,13 @@ class AdapterRegistry:
             response = httpx.post(url, params=params, timeout=timeout)
             response.raise_for_status()
             result: dict[str, object] = response.json()
-            logger.info(f"Refresh response: {result}")
+            self._lg.info(f"Refresh response: {result}")
             return result
         except httpx.ConnectError as e:
-            logger.warning(f"Could not connect to llm-infer at {self.infer_url}: {e}")
+            self._lg.warning(f"Could not connect to llm-infer at {self.infer_url}: {e}")
             raise ConnectionError(f"llm-infer not available at {self.infer_url}") from e
         except httpx.HTTPStatusError as e:
-            logger.error(f"Refresh failed: {e.response.text}")
+            self._lg.error(f"Refresh failed: {e.response.text}")
             raise RuntimeError(f"Refresh failed: {e.response.text}") from e
 
     def register_and_refresh(
