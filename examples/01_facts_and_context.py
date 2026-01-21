@@ -23,6 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from _helpers import (
+    CMD,
     H1,
     H2,
     INFO,
@@ -30,7 +31,6 @@ from _helpers import (
     LLM_Q,
     MUTED,
     OK,
-    CMD,
     RESET,
     WARN,
     ensure_demo_profile,

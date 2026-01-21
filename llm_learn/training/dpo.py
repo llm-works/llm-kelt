@@ -63,7 +63,6 @@ class DpoTrainer:
         self.reference_free = reference_free
 
         self.model = None
-        self.ref_model = None
         self.tokenizer = None
         self.trainer = None
         self.train_dataset = None
@@ -118,22 +117,6 @@ class DpoTrainer:
         trainable, total = self.model.get_nb_trainable_parameters()
         logger.info(f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)")
 
-    def _load_reference_model(self):
-        """Load reference model for DPO (unless using PEFT or reference-free mode).
-
-        When using LoRA/PEFT (which is always the case here), TRL's DPOTrainer
-        automatically computes reference logprobs by disabling the adapter.
-        No separate model is needed, saving significant GPU memory.
-        """
-        # With PEFT, TRL handles reference by disabling adapter - no separate model needed
-        # This saves ~50% GPU memory compared to loading a full reference model
-        if self.reference_free:
-            logger.info("Using reference-free DPO")
-        else:
-            logger.info(
-                "Using PEFT base model as reference (adapter disabled during ref computation)"
-            )
-
     def _load_data(self):
         """Load training and eval datasets."""
         self.train_dataset, self.eval_dataset = _load_dpo_dataset(
@@ -172,12 +155,17 @@ class DpoTrainer:
         )
 
     def _create_trainer(self):
-        """Create the DPOTrainer."""
+        """Create the DPOTrainer.
+
+        Note: ref_model=None is intentional. When model is a PEFT model, TRL's
+        DPOTrainer computes reference logprobs by temporarily disabling the LoRA
+        adapter. This saves ~50% GPU memory vs loading a separate reference model.
+        """
         from trl import DPOTrainer
 
         self.trainer = DPOTrainer(
             model=self.model,
-            ref_model=self.ref_model,
+            ref_model=None,
             args=self._create_training_args(),
             train_dataset=self.train_dataset,
             eval_dataset=self.eval_dataset,
@@ -251,7 +239,6 @@ class DpoTrainer:
 
         self._load_data()
         self._load_model()
-        self._load_reference_model()
         self._create_trainer()
         if self.trainer is None:
             raise RuntimeError("Failed to create trainer")
@@ -282,7 +269,8 @@ def train_dpo(
         training_config: Training hyperparameters. Uses sensible defaults if not provided.
         beta: DPO beta parameter (higher = more conservative).
         quantize: Use 4-bit quantization (QLoRA). Reduces VRAM ~4x.
-        reference_free: Skip reference model to save VRAM (may reduce quality).
+        reference_free: Deprecated, no-op. With PEFT, reference is computed by
+            disabling the adapter (no separate model needed).
 
     Returns:
         TrainingResult with adapter path, metrics, and training metadata.

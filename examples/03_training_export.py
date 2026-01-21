@@ -24,7 +24,7 @@ from tempfile import TemporaryDirectory
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _helpers import H1, H2, INFO, MUTED, OK, CMD, RESET, ensure_demo_profile, psql_cmd
+from _helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, ensure_demo_profile, psql_cmd
 
 from llm_learn import LearnClient
 from llm_learn.training import (

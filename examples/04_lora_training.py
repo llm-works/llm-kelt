@@ -27,7 +27,6 @@ from tempfile import TemporaryDirectory
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from _helpers import H1, H2, INFO, LLM_A, LLM_Q, MUTED, OK, RESET, WARN, ensure_demo_profile
-
 from appinfra.config import Config
 
 from llm_learn import LearnClient
