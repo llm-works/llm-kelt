@@ -47,16 +47,17 @@ def _write_jsonl(path: Path, data: list[dict]) -> Path:
 
 
 @pytest.fixture(scope="module")
-def adapter_registry(adapter_lora_base_path, infer_server_url):
+def adapter_registry(logger, adapter_lora_base_path, infer_server_url):
     """Create adapter registry pointing to llm-infer's adapter path."""
     return AdapterRegistry(
+        lg=logger,
         base_path=adapter_lora_base_path,
         infer_url=infer_server_url,
     )
 
 
 @pytest.fixture(scope="module")
-def trained_adapter(training_model_path, tmp_path_factory):
+def trained_adapter(logger, training_model_path, tmp_path_factory):
     """Train a LoRA adapter with distinctive behavior on the inference server's model."""
     import torch
 
@@ -87,6 +88,7 @@ def trained_adapter(training_model_path, tmp_path_factory):
 
     # Train on the model matching the inference server
     result = train_lora(
+        lg=logger,
         data_path=data_path,
         output_dir=tmp_path / "output",
         base_model=str(training_model_path),

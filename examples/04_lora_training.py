@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from _helpers import H1, H2, INFO, LLM_A, LLM_Q, MUTED, OK, RESET, WARN, ensure_demo_profile
 from appinfra.config import Config
+from appinfra.log import LogConfig, Logger, LoggerFactory
 
 from llm_learn import LearnClient
 from llm_learn.inference import LLMClient
@@ -215,7 +216,7 @@ def export_training_data(learn: LearnClient, output_dir: Path) -> Path:
     return sft_path
 
 
-def run_training(data_path: Path, output_dir: Path, base_model: str) -> TrainingResult:
+def run_training(lg: Logger, data_path: Path, output_dir: Path, base_model: str) -> TrainingResult:
     """Run LoRA training."""
     print(f"\n{H2}▶ Training LoRA Adapter{RESET}")
     print(f"  {MUTED}Base model: {base_model}{RESET}")
@@ -250,6 +251,7 @@ def run_training(data_path: Path, output_dir: Path, base_model: str) -> Training
     )
 
     result = train_lora(
+        lg=lg,
         data_path=data_path,
         output_dir=output_dir,
         base_model=base_model,
@@ -267,7 +269,7 @@ def run_training(data_path: Path, output_dir: Path, base_model: str) -> Training
 
 
 def register_adapter(
-    result: TrainingResult, infer_url: str, adapter_base_path: Path
+    lg: Logger, result: TrainingResult, infer_url: str, adapter_base_path: Path
 ) -> AdapterRegistry:
     """Register adapter with llm-infer."""
     print(f"\n{H2}▶ Registering Adapter{RESET}")
@@ -275,7 +277,7 @@ def register_adapter(
     # Ensure adapter directory exists
     adapter_base_path.mkdir(parents=True, exist_ok=True)
 
-    registry = AdapterRegistry(base_path=adapter_base_path, infer_url=infer_url)
+    registry = AdapterRegistry(lg=lg, base_path=adapter_base_path, infer_url=infer_url)
 
     # Remove existing adapter if present (optional cleanup since overwrite=True handles this)
     existing = registry.get(ADAPTER_ID)
@@ -345,6 +347,9 @@ async def main():
     print(f"{H1}  Example 04: LoRA Fine-Tuning with Before/After Comparison{RESET}")
     print(f"{H1}{'━' * 60}{RESET}")
 
+    # Suppress logging noise
+    lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+
     # Initialize
     config = Config("etc/learn.yaml")
     learn = LearnClient(profile_id=1)
@@ -381,11 +386,11 @@ async def main():
 
             # Step 4: Train adapter
             training_result = run_training(
-                data_path, output_dir / "adapter", str(training_model_path)
+                lg, data_path, output_dir / "adapter", str(training_model_path)
             )
 
             # Step 5: Register with llm-infer
-            registry = register_adapter(training_result, infer_url, adapter_base_path)
+            registry = register_adapter(lg, training_result, infer_url, adapter_base_path)
 
             # Step 6: Show fine-tuned response
             finetuned_response = await show_finetuned(llm_client)

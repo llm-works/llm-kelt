@@ -21,6 +21,7 @@ class TestLoraTraining:
 
     def test_train_lora_produces_valid_adapter(
         self,
+        logger,
         sft_training_data: Path,
         local_model_path: Path,
         fast_lora_config,
@@ -37,6 +38,7 @@ class TestLoraTraining:
 
         # Train
         result = train_lora(
+            lg=logger,
             data_path=sft_training_data,
             output_dir=output_dir,
             base_model=str(local_model_path),
@@ -75,6 +77,7 @@ class TestLoraTraining:
 
     def test_train_lora_with_eval_split(
         self,
+        logger,
         sft_training_data: Path,
         local_model_path: Path,
         fast_lora_config,
@@ -100,6 +103,7 @@ class TestLoraTraining:
         )
 
         result = train_lora(
+            lg=logger,
             data_path=sft_training_data,
             output_dir=output_dir,
             base_model=str(local_model_path),

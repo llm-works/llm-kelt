@@ -5,14 +5,13 @@ Supports QLoRA (4-bit quantization) to reduce VRAM requirements.
 """
 
 import json
-import logging
 from datetime import datetime
 from pathlib import Path
 
+from appinfra.log import Logger
+
 from ..core.utils import utc_now
 from .config import LoraConfig, TrainingConfig, TrainingResult
-
-logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
@@ -58,6 +57,7 @@ class LoraTrainer:
 
     def __init__(
         self,
+        lg: Logger,
         data_path: str | Path,
         output_dir: str | Path,
         base_model: str = DEFAULT_BASE_MODEL,
@@ -65,6 +65,7 @@ class LoraTrainer:
         training_config: TrainingConfig | None = None,
         quantize: bool = True,
     ):
+        self._lg = lg
         self.data_path = Path(data_path)
         self.output_dir = Path(output_dir)
         self.base_model = base_model
@@ -93,18 +94,23 @@ class LoraTrainer:
             bnb_4bit_use_double_quant=True,
         )
 
-    def _load_model(self):
-        """Load base model with optional quantization and apply LoRA."""
-        import torch
-        from peft import get_peft_model, prepare_model_for_kbit_training
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-
-        logger.info(f"Loading base model: {self.base_model}")
+    def _load_tokenizer(self):
+        """Load tokenizer for the base model."""
+        from transformers import AutoTokenizer
 
         # trust_remote_code required for Qwen and other models with custom architectures
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+
+    def _load_model(self):
+        """Load base model with optional quantization and apply LoRA."""
+        import torch
+        from peft import get_peft_model, prepare_model_for_kbit_training
+        from transformers import AutoModelForCausalLM
+
+        self._lg.info(f"Loading base model: {self.base_model}")
+        self._load_tokenizer()
 
         quant_config = self._setup_quantization_config()
         self.model = AutoModelForCausalLM.from_pretrained(
@@ -117,23 +123,24 @@ class LoraTrainer:
 
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
-
         if self.quantize:
             self.model = prepare_model_for_kbit_training(self.model)
 
         peft_config = self.lora_config.to_peft_config()
         self.model = get_peft_model(self.model, peft_config)
         trainable, total = self.model.get_nb_trainable_parameters()
-        logger.info(f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)")
+        self._lg.info(
+            f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
+        )
 
     def _load_data(self):
         """Load training and eval datasets."""
         self.train_dataset, self.eval_dataset = _load_sft_dataset(
             self.data_path, self.training_config.eval_split
         )
-        logger.info(f"Loaded {len(self.train_dataset)} training samples")
+        self._lg.info(f"Loaded {len(self.train_dataset)} training samples")
         if self.eval_dataset:
-            logger.info(f"Loaded {len(self.eval_dataset)} eval samples")
+            self._lg.info(f"Loaded {len(self.eval_dataset)} eval samples")
 
     def _create_training_args(self):
         """Create training arguments for SFT."""
@@ -186,7 +193,7 @@ class LoraTrainer:
         final_path = self.output_dir / "final"
         self.trainer.save_model(str(final_path))
         self.tokenizer.save_pretrained(str(final_path))
-        logger.info(f"Saved adapter to {final_path}")
+        self._lg.info(f"Saved adapter to {final_path}")
 
         metrics: dict = {}
         if self.trainer.state.log_history:
@@ -231,7 +238,7 @@ class LoraTrainer:
         started_at = utc_now()
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Starting LoRA training: {self.data_path} -> {self.output_dir}")
+        self._lg.info(f"Starting LoRA training: {self.data_path} -> {self.output_dir}")
 
         self._load_data()
         self._load_model()
@@ -240,7 +247,7 @@ class LoraTrainer:
             raise RuntimeError("Failed to create trainer")
 
         if resume_from:
-            logger.info(f"Resuming from checkpoint: {resume_from}")
+            self._lg.info(f"Resuming from checkpoint: {resume_from}")
             self.trainer.train(resume_from_checkpoint=str(resume_from))
         else:
             self.trainer.train()
@@ -250,6 +257,7 @@ class LoraTrainer:
 
 
 def train_lora(
+    lg: Logger,
     data_path: str | Path,
     output_dir: str | Path,
     base_model: str = DEFAULT_BASE_MODEL,
@@ -261,6 +269,7 @@ def train_lora(
     """Train a LoRA adapter using supervised fine-tuning.
 
     Args:
+        lg: Logger instance.
         data_path: Path to JSONL file with {"instruction", "output", "input"?} records.
         output_dir: Directory to save the trained adapter.
         base_model: HuggingFace model ID. Defaults to Qwen2.5-7B-Instruct.
@@ -273,6 +282,7 @@ def train_lora(
         TrainingResult with adapter path, metrics, and training metadata.
     """
     trainer = LoraTrainer(
+        lg=lg,
         data_path=data_path,
         output_dir=output_dir,
         base_model=base_model,

@@ -127,10 +127,14 @@ result = export_feedback_sft(
 ### LoRA Fine-Tuning
 
 ```python
+from appinfra.log import LogConfig, LoggerFactory
 from llm_learn.training import train_lora, LoraConfig, TrainingConfig
+
+lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
 
 # Train LoRA adapter (requires pip install llm-learn[training])
 result = train_lora(
+    lg=lg,
     data_path="feedback_sft.jsonl",
     output_dir="./my_adapter",
     base_model="Qwen/Qwen2.5-7B-Instruct",
