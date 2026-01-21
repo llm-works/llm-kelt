@@ -151,7 +151,9 @@ async def demo_context_query(context_builder: ContextBuilder):
 
     except Exception as e:
         print(f"  {MUTED}[Skipped] No LLM backend: {type(e).__name__}{RESET}")
-        print(f"  {MUTED}Start llm-infer or configure OpenAI in etc/llm-learn.yaml to enable.{RESET}")
+        print(
+            f"  {MUTED}Start llm-infer or configure OpenAI in etc/llm-learn.yaml to enable.{RESET}"
+        )
 
 
 def demo_fact_management(learn: LearnClient):

@@ -252,7 +252,9 @@ async def demo_rag_query(learn: LearnClient, config: Config, embedder: Embedder 
 
     except Exception as e:
         print(f"  {MUTED}[Skipped] No LLM backend: {type(e).__name__}{RESET}")
-        print(f"  {MUTED}Start llm-infer or configure OpenAI in etc/llm-learn.yaml to enable.{RESET}")
+        print(
+            f"  {MUTED}Start llm-infer or configure OpenAI in etc/llm-learn.yaml to enable.{RESET}"
+        )
 
 
 async def main():
