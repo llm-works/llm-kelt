@@ -1,5 +1,12 @@
 # llm-learn
 
+![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
+![Type Hints](https://img.shields.io/badge/type%20hints-100%25-brightgreen.svg)
+[![Linting:
+Ruff](https://img.shields.io/badge/linting-ruff-yellowgreen)](https://github.com/astral-sh/ruff)
+[![CI](https://github.com/serendip-ml/llm-learn/actions/workflows/ci.yml/badge.svg)](https://github.com/serendip-ml/llm-learn/actions/workflows/ci.yml)
+![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
+
 A framework for collecting, managing, and leveraging context for LLM applications. Supports fact
 storage, feedback collection, preference pairs, RAG-based retrieval, and fine-tuning workflows.
 
