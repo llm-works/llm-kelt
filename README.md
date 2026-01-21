@@ -237,7 +237,21 @@ See the [`examples/`](examples/) directory for complete working examples:
 
 ## Configuration
 
-Create `etc/learn.yaml`:
+1. Copy the environment template and customize paths:
+
+```bash
+cp .env.yaml.example .env.yaml
+```
+
+Edit `.env.yaml` with your local paths:
+
+```yaml
+paths:
+  models: !path ~/models/huggingface    # HuggingFace models directory
+  adapters: !path ~/models/adapters     # Trained LoRA adapters
+```
+
+2. The main config is in `etc/llm-learn.yaml`. Database and LLM settings:
 
 ```yaml
 dbs:

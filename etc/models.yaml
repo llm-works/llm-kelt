@@ -2,8 +2,7 @@
 # Used by llm-infer's ModelResolver to find local models
 
 locations:
-  # Standard ops models location
-  - !path ~/ops/models/huggingface
+  - !include "../.env.yaml#paths.models"
 
 # Model selection defaults
 selection:

@@ -18,7 +18,7 @@ proxy:
 # Adapter settings (for training integration with llm-infer)
 adapters:
   lora:
-    base_path: !path ~/ops/models/adapters/LoRA
+    base_path: !include "../.env.yaml#paths.adapters"
 
 # Learn-specific settings
 learn:

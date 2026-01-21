@@ -6,7 +6,7 @@ INFRA_DEV_PKG_NAME := llm_learn
 INFRA_PYTEST_COVERAGE_THRESHOLD := 30
 
 # Test configuration file (used by integration and e2e tests)
-export LEARN_TEST_CONFIG_FILE := $(local)etc/learn.yaml
+export LEARN_TEST_CONFIG_FILE := $(local)etc/llm-learn.yaml
 
 # Code quality strictness
 # - true: Fail on any code quality violations (CI mode)

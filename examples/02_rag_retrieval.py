@@ -9,7 +9,7 @@ This example demonstrates:
 
 Prerequisites:
     - PostgreSQL database with pgvector extension
-    - Config file at etc/learn.yaml
+    - Config file at etc/llm-learn.yaml
     - Embedding server running (e.g., llm-infer with embedding model)
     - LLM backend for chat (optional)
 
@@ -252,7 +252,9 @@ async def demo_rag_query(learn: LearnClient, config: Config, embedder: Embedder 
 
     except Exception as e:
         print(f"  {MUTED}[Skipped] No LLM backend: {type(e).__name__}{RESET}")
-        print(f"  {MUTED}Start llm-infer or configure OpenAI in etc/learn.yaml to enable.{RESET}")
+        print(
+            f"  {MUTED}Start llm-infer or configure OpenAI in etc/llm-learn.yaml to enable.{RESET}"
+        )
 
 
 async def main():
@@ -270,7 +272,7 @@ async def main():
     learn = LearnClient(profile_id=profile_id)
     print(f"{MUTED}Using profile_id={RESET}{INFO}{profile_id}{RESET}")
 
-    config = Config("etc/learn.yaml")
+    config = Config("etc/llm-learn.yaml")
 
     # Run demos
     populate_facts(learn)

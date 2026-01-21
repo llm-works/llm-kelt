@@ -17,7 +17,7 @@ from llm_learn.core.models import Base, Profile, Workspace
 
 # Find project root and config paths
 PROJECT_ROOT = Path(__file__).parent.parent
-DEFAULT_CONFIG_PATH = PROJECT_ROOT / "etc" / "learn.yaml"
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "etc" / "llm-learn.yaml"
 
 
 def _get_config_path() -> Path:

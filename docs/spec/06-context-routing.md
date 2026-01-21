@@ -496,7 +496,7 @@ Agent can use this data to improve selection over time.
 ## Configuration
 
 ```yaml
-# learn.yaml - learn's config
+# llm-learn.yaml - learn's config
 adaptation:
   candidate_limit: 30           # Max candidates from vector search
   min_similarity: 0.5           # Minimum embedding similarity

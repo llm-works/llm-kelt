@@ -10,7 +10,7 @@ This example demonstrates the complete LoRA training workflow:
 
 Prerequisites:
     - PostgreSQL database with pgvector extension
-    - Config file at etc/learn.yaml
+    - Config file at etc/llm-learn.yaml
     - llm-infer running with adapter support
     - GPU with CUDA support (training)
 
@@ -351,7 +351,7 @@ async def main():
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
 
     # Initialize
-    config = Config("etc/learn.yaml")
+    config = Config("etc/llm-learn.yaml")
     learn = LearnClient(profile_id=1)
     learn.migrate()
     profile_id = ensure_demo_profile(learn, profile_slug="lora-training")
