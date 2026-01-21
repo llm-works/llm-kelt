@@ -9,7 +9,7 @@ This example demonstrates:
 
 Prerequisites:
     - PostgreSQL database with pgvector extension
-    - Config file at etc/learn.yaml
+    - Config file at etc/llm-learn.yaml
 
 Usage:
     python examples/03_training_export.py

@@ -95,10 +95,10 @@ def create_server(
 
 
 def create_server_from_config(config: dict) -> Server:
-    """Create server from learn.yaml configuration.
+    """Create server from llm-learn.yaml configuration.
 
     Args:
-        config: Configuration dict matching learn.yaml structure:
+        config: Configuration dict matching llm-learn.yaml structure:
             - llm: LLM backend configuration
             - dbs.main: Database configuration
             - proxy: (optional) Proxy-specific settings
@@ -107,7 +107,7 @@ def create_server_from_config(config: dict) -> Server:
     Returns:
         Configured Server instance.
 
-    Example config (learn.yaml):
+    Example config (llm-learn.yaml):
         llm:
           default: local
           backends:

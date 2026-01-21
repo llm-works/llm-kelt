@@ -10,7 +10,7 @@ def main() -> int:
     app = (
         AppBuilder("llm-learn")
         .with_description("LLM learning framework - collect and manage LLM context")
-        .with_config_file("learn.yaml")
+        .with_config_file("llm-learn.yaml")
         .logging.with_level("info")
         .with_location(1)
         .done()

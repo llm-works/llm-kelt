@@ -94,7 +94,7 @@ def _write_jsonl(path: Path, data: list[dict]) -> Path:
 
 @pytest.fixture(scope="session")
 def model_resolver(logger, config) -> ModelResolver:
-    """Model resolver using learn.yaml models config."""
+    """Model resolver using llm-learn.yaml models config."""
     models_config = ModelsConfig.from_dict(config.models.to_dict())
     return ModelResolver(logger, models_config.locations)
 

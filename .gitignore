@@ -52,6 +52,7 @@ htmlcov/
 # Local config
 Makefile.local
 *.local.yaml
+.env.yaml
 
 # Logs
 *.log

@@ -8,7 +8,7 @@ This example demonstrates:
 
 Prerequisites:
     - PostgreSQL database with pgvector extension
-    - Config file at etc/learn.yaml (or set LEARN_CONFIG_FILE env var)
+    - Config file at etc/llm-learn.yaml (or set LEARN_CONFIG_FILE env var)
     - LLM backend configured (local or OpenAI)
 
 Usage:
@@ -111,7 +111,7 @@ async def demo_context_query(context_builder: ContextBuilder):
     try:
         from appinfra.config import Config
 
-        config = Config("etc/learn.yaml")
+        config = Config("etc/llm-learn.yaml")
         llm_client = LLMClient.from_config(config.llm.to_dict())
 
         question = "Show me how to return an error from a Python API endpoint"
@@ -151,7 +151,7 @@ async def demo_context_query(context_builder: ContextBuilder):
 
     except Exception as e:
         print(f"  {MUTED}[Skipped] No LLM backend: {type(e).__name__}{RESET}")
-        print(f"  {MUTED}Start llm-infer or configure OpenAI in etc/learn.yaml to enable.{RESET}")
+        print(f"  {MUTED}Start llm-infer or configure OpenAI in etc/llm-learn.yaml to enable.{RESET}")
 
 
 def demo_fact_management(learn: LearnClient):
