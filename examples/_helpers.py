@@ -12,7 +12,6 @@ BLUE = "\033[34m"
 MAGENTA = "\033[35m"
 CYAN = "\033[36m"
 WHITE = "\033[37m"
-RED = "\033[31m"
 
 # Semantic colors
 H1 = f"{BOLD}{BLUE}"
@@ -24,7 +23,6 @@ MUTED = DIM
 CMD = YELLOW
 LLM_Q = f"{BOLD}{WHITE}"
 LLM_A = GREEN
-ERR = RED
 
 
 def psql_cmd(learn: LearnClient) -> str:

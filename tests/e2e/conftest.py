@@ -101,7 +101,7 @@ def model_resolver(logger, config) -> ModelResolver:
 
 @pytest.fixture(scope="session")
 def local_model_path(model_resolver) -> Path:
-    """Path to local Qwen2.5-0.5B model for fast training tests."""
+    """Path to a small local model for fast training tests (qwen2.5-0.5b-instruct)."""
     path = model_resolver.find_by_name("qwen2.5-0.5b-instruct")
     if path is None:
         pytest.skip("Model 'qwen2.5-0.5b-instruct' not found in local cache")

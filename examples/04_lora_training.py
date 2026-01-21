@@ -278,14 +278,10 @@ def register_adapter(
     registry = AdapterRegistry(base_path=adapter_base_path, infer_url=infer_url)
 
     # Remove existing adapter if present (optional cleanup since overwrite=True handles this)
-    try:
-        existing = registry.get(ADAPTER_ID)
-        if existing:
-            registry.remove(ADAPTER_ID)
-            print(f"  {MUTED}Removed existing adapter: {ADAPTER_ID}{RESET}")
-    except KeyError:
-        # Adapter doesn't exist yet - expected on first run
-        pass
+    existing = registry.get(ADAPTER_ID)
+    if existing:
+        registry.remove(ADAPTER_ID)
+        print(f"  {MUTED}Removed existing adapter: {ADAPTER_ID}{RESET}")
 
     # Register and refresh
     info = registry.register_and_refresh(

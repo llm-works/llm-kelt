@@ -5,14 +5,14 @@ Trains the model to prefer "chosen" responses over "rejected" ones.
 """
 
 import json
-import logging
+import warnings
 from datetime import datetime
 from pathlib import Path
 
+from appinfra.log import Logger
+
 from ..core.utils import utc_now
 from .config import LoraConfig, TrainingConfig, TrainingResult
-
-logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
@@ -44,6 +44,7 @@ class DpoTrainer:
 
     def __init__(
         self,
+        lg: Logger,
         data_path: str | Path,
         output_dir: str | Path,
         base_model: str = DEFAULT_BASE_MODEL,
@@ -51,8 +52,8 @@ class DpoTrainer:
         training_config: TrainingConfig | None = None,
         beta: float = 0.1,
         quantize: bool = True,
-        reference_free: bool = False,
     ):
+        self._lg = lg
         self.data_path = Path(data_path)
         self.output_dir = Path(output_dir)
         self.base_model = base_model
@@ -60,7 +61,6 @@ class DpoTrainer:
         self.training_config = training_config or TrainingConfig()
         self.beta = beta
         self.quantize = quantize
-        self.reference_free = reference_free
 
         self.model = None
         self.tokenizer = None
@@ -84,18 +84,23 @@ class DpoTrainer:
             bnb_4bit_use_double_quant=True,
         )
 
-    def _load_model(self):
-        """Load base model with optional quantization and apply LoRA."""
-        import torch
-        from peft import get_peft_model, prepare_model_for_kbit_training
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-
-        logger.info(f"Loading base model: {self.base_model}")
+    def _load_tokenizer(self):
+        """Load tokenizer for the base model."""
+        from transformers import AutoTokenizer
 
         # trust_remote_code required for Qwen and other models with custom architectures
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+
+    def _load_model(self):
+        """Load base model with optional quantization and apply LoRA."""
+        import torch
+        from peft import get_peft_model, prepare_model_for_kbit_training
+        from transformers import AutoModelForCausalLM
+
+        self._lg.info(f"Loading base model: {self.base_model}")
+        self._load_tokenizer()
 
         self._quant_config = self._setup_quantization_config()
         self.model = AutoModelForCausalLM.from_pretrained(
@@ -108,23 +113,24 @@ class DpoTrainer:
 
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
-
         if self.quantize:
             self.model = prepare_model_for_kbit_training(self.model)
 
         peft_config = self.lora_config.to_peft_config()
         self.model = get_peft_model(self.model, peft_config)
         trainable, total = self.model.get_nb_trainable_parameters()
-        logger.info(f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)")
+        self._lg.info(
+            f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
+        )
 
     def _load_data(self):
         """Load training and eval datasets."""
         self.train_dataset, self.eval_dataset = _load_dpo_dataset(
             self.data_path, self.training_config.eval_split
         )
-        logger.info(f"Loaded {len(self.train_dataset)} training preference pairs")
+        self._lg.info(f"Loaded {len(self.train_dataset)} training preference pairs")
         if self.eval_dataset:
-            logger.info(f"Loaded {len(self.eval_dataset)} eval pairs")
+            self._lg.info(f"Loaded {len(self.eval_dataset)} eval pairs")
 
     def _create_training_args(self):
         """Create DPO training arguments."""
@@ -184,7 +190,7 @@ class DpoTrainer:
         final_path = self.output_dir / "final"
         self.trainer.save_model(str(final_path))
         self.tokenizer.save_pretrained(str(final_path))
-        logger.info(f"Saved adapter to {final_path}")
+        self._lg.info(f"Saved adapter to {final_path}")
 
         metrics: dict = {}
         if self.trainer.state.log_history:
@@ -222,7 +228,7 @@ class DpoTrainer:
                     "learning_rate": self.training_config.learning_rate,
                     "max_seq_length": self.training_config.max_seq_length,
                 },
-                "dpo": {"beta": self.beta, "reference_free": self.reference_free},
+                "dpo": {"beta": self.beta},
                 "quantize": self.quantize,
             },
             started_at=started_at,
@@ -235,7 +241,7 @@ class DpoTrainer:
         started_at = utc_now()
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Starting DPO training: {self.data_path} -> {self.output_dir}")
+        self._lg.info(f"Starting DPO training: {self.data_path} -> {self.output_dir}")
 
         self._load_data()
         self._load_model()
@@ -250,6 +256,7 @@ class DpoTrainer:
 
 
 def train_dpo(
+    lg: Logger,
     data_path: str | Path,
     output_dir: str | Path,
     base_model: str = DEFAULT_BASE_MODEL,
@@ -262,6 +269,7 @@ def train_dpo(
     """Train a LoRA adapter using Direct Preference Optimization.
 
     Args:
+        lg: Logger instance.
         data_path: Path to JSONL file with {"prompt", "chosen", "rejected"} records.
         output_dir: Directory to save the trained adapter.
         base_model: HuggingFace model ID. Defaults to Qwen2.5-7B-Instruct.
@@ -269,13 +277,21 @@ def train_dpo(
         training_config: Training hyperparameters. Uses sensible defaults if not provided.
         beta: DPO beta parameter (higher = more conservative).
         quantize: Use 4-bit quantization (QLoRA). Reduces VRAM ~4x.
-        reference_free: Deprecated, no-op. With PEFT, reference is computed by
-            disabling the adapter (no separate model needed).
+        reference_free: Deprecated, ignored. With PEFT, reference logprobs are computed
+            by disabling the adapter (no separate model needed).
 
     Returns:
         TrainingResult with adapter path, metrics, and training metadata.
     """
+    if reference_free:
+        warnings.warn(
+            "reference_free parameter is deprecated and ignored. "
+            "With PEFT models, TRL computes reference logprobs by disabling the adapter.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     trainer = DpoTrainer(
+        lg=lg,
         data_path=data_path,
         output_dir=output_dir,
         base_model=base_model,
@@ -283,6 +299,5 @@ def train_dpo(
         training_config=training_config,
         beta=beta,
         quantize=quantize,
-        reference_free=reference_free,
     )
     return trainer.train()
