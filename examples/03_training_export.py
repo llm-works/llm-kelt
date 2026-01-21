@@ -24,6 +24,8 @@ from tempfile import TemporaryDirectory
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from _helpers import H1, H2, INFO, MUTED, OK, CMD, RESET, ensure_demo_profile, psql_cmd
+
 from llm_learn import LearnClient
 from llm_learn.training import (
     ExportResult,
@@ -31,25 +33,6 @@ from llm_learn.training import (
     export_feedback_sft,
     export_preferences_dpo,
 )
-
-# Terminal formatting
-BOLD = "\033[1m"
-DIM = "\033[2m"
-RESET = "\033[0m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-BLUE = "\033[34m"
-MAGENTA = "\033[35m"
-CYAN = "\033[36m"
-
-# Semantic colors
-H1 = f"{BOLD}{BLUE}"
-H2 = f"{BOLD}{MAGENTA}"
-OK = GREEN
-WARN = YELLOW
-INFO = CYAN
-MUTED = DIM
-CMD = YELLOW
 
 # Sample content: (text, title)
 _SAMPLE_CONTENT = [
@@ -101,12 +84,6 @@ _PREFERENCE_PAIRS = [
 ]
 
 
-def psql_cmd(learn: LearnClient) -> str:
-    """Build psql command from database config."""
-    url = learn._db.engine.url
-    return f"psql -h {url.host} -p {url.port} -U {url.username} -d {url.database}"
-
-
 def print_export_result(result: ExportResult, show_content: bool = True):
     """Pretty print export result."""
     print(f"    {MUTED}Path:{RESET} {result.path}")
@@ -135,7 +112,7 @@ def record_sample_data(learn: LearnClient):
     # Clear existing data for clean demo
     from llm_learn.core.models import Content, Feedback, PreferencePair
 
-    with learn._db.session() as session:
+    with learn.database.session() as session:
         session.query(Feedback).filter_by(profile_id=learn.profile_id).delete()
         session.query(PreferencePair).filter_by(profile_id=learn.profile_id).delete()
         session.query(Content).filter_by(profile_id=learn.profile_id).delete()
@@ -274,29 +251,6 @@ def print_summary():
     Output: {{text, label}}
     Filters: since, until, min_strength
 """)
-
-
-def ensure_demo_profile(learn: LearnClient) -> int:
-    """Ensure demo workspace and profile exist, return profile_id."""
-    from llm_learn.core.models import Profile, Workspace
-
-    with learn._db.session() as session:
-        workspace = session.query(Workspace).filter_by(slug="demo").first()
-        if not workspace:
-            workspace = Workspace(slug="demo", name="Demo Workspace")
-            session.add(workspace)
-            session.flush()
-
-        profile = (
-            session.query(Profile).filter_by(workspace_id=workspace.id, slug="example").first()
-        )
-        if not profile:
-            profile = Profile(workspace_id=workspace.id, slug="example", name="Example Profile")
-            session.add(profile)
-            session.flush()
-
-        session.commit()
-        return profile.id
 
 
 def main():

@@ -24,8 +24,24 @@ from pathlib import Path
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from _helpers import (
+    H1,
+    H2,
+    INFO,
+    LLM_A,
+    LLM_Q,
+    MUTED,
+    OK,
+    CMD,
+    RESET,
+    WARN,
+    ensure_demo_profile,
+    psql_cmd,
+)
+
 from appinfra.config import Config
 from appinfra.log import LogConfig, Logger, LoggerFactory
+from httpx import ConnectError, ConnectTimeout
 
 from llm_learn import LearnClient
 from llm_learn.inference import (
@@ -36,28 +52,6 @@ from llm_learn.inference import (
     RAGArgs,
     embed_missing_facts,
 )
-
-# Terminal formatting
-BOLD = "\033[1m"
-DIM = "\033[2m"
-RESET = "\033[0m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-BLUE = "\033[34m"
-MAGENTA = "\033[35m"
-CYAN = "\033[36m"
-WHITE = "\033[37m"
-
-# Semantic colors
-H1 = f"{BOLD}{BLUE}"
-H2 = f"{BOLD}{MAGENTA}"
-OK = GREEN
-WARN = YELLOW
-INFO = CYAN
-MUTED = DIM
-CMD = YELLOW
-LLM_Q = f"{BOLD}{WHITE}"
-LLM_A = GREEN
 
 # Sample facts covering different domains for RAG demo
 _SAMPLE_FACTS = [
@@ -78,12 +72,6 @@ _SAMPLE_FACTS = [
     ("Integration tests verify component interactions", "testing"),
     ("Use mocking to isolate external dependencies in tests", "testing"),
 ]
-
-
-def psql_cmd(learn: LearnClient) -> str:
-    """Build psql command from database config."""
-    url = learn._db.engine.url
-    return f"psql -h {url.host} -p {url.port} -U {url.username} -d {url.database}"
 
 
 def populate_facts(learn: LearnClient):
@@ -131,7 +119,8 @@ async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedde
             f'\n  {CMD}▸ Verify embeddings:{RESET} {psql_cmd(learn)} -c "SELECT id, content, (embedding IS NOT NULL) as has_embedding FROM facts WHERE profile_id={learn.profile_id} LIMIT 5;"'
         )
         return embedder
-    except Exception:
+    except (ConnectError, ConnectTimeout, OSError):
+        # Server not running - fall back to synthetic embeddings
         pass
 
     print(f"  {MUTED}[Skipped] Embedding server not available{RESET}")
@@ -265,29 +254,6 @@ async def demo_rag_query(learn: LearnClient, config: Config, embedder: Embedder 
     except Exception as e:
         print(f"  {MUTED}[Skipped] No LLM backend: {type(e).__name__}{RESET}")
         print(f"  {MUTED}Start llm-infer or configure OpenAI in etc/learn.yaml to enable.{RESET}")
-
-
-def ensure_demo_profile(learn: LearnClient) -> int:
-    """Ensure demo workspace and profile exist, return profile_id."""
-    from llm_learn.core.models import Profile, Workspace
-
-    with learn._db.session() as session:
-        workspace = session.query(Workspace).filter_by(slug="demo").first()
-        if not workspace:
-            workspace = Workspace(slug="demo", name="Demo Workspace")
-            session.add(workspace)
-            session.flush()
-
-        profile = (
-            session.query(Profile).filter_by(workspace_id=workspace.id, slug="example").first()
-        )
-        if not profile:
-            profile = Profile(workspace_id=workspace.id, slug="example", name="Example Profile")
-            session.add(profile)
-            session.flush()
-
-        session.commit()
-        return profile.id
 
 
 async def main():

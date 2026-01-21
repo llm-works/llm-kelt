@@ -26,6 +26,8 @@ from tempfile import TemporaryDirectory
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from _helpers import H1, H2, INFO, LLM_A, LLM_Q, MUTED, OK, RESET, WARN, ensure_demo_profile
+
 from appinfra.config import Config
 
 from llm_learn import LearnClient
@@ -38,29 +40,6 @@ from llm_learn.training import (
     export_feedback_sft,
     train_lora,
 )
-
-# Terminal formatting
-BOLD = "\033[1m"
-DIM = "\033[2m"
-RESET = "\033[0m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-BLUE = "\033[34m"
-MAGENTA = "\033[35m"
-CYAN = "\033[36m"
-WHITE = "\033[37m"
-RED = "\033[31m"
-
-# Semantic colors
-H1 = f"{BOLD}{BLUE}"
-H2 = f"{BOLD}{MAGENTA}"
-OK = GREEN
-WARN = YELLOW
-INFO = CYAN
-MUTED = DIM
-LLM_Q = f"{BOLD}{WHITE}"
-LLM_A = GREEN
-ERR = RED
 
 # Adapter configuration
 ADAPTER_ID = "example-concise-adapter"
@@ -180,7 +159,7 @@ def create_training_data(learn: LearnClient):
     # Clear existing data
     from llm_learn.core.models import Content, Feedback, PreferencePair
 
-    with learn._db.session() as session:
+    with learn.database.session() as session:
         session.query(Feedback).filter_by(profile_id=learn.profile_id).delete()
         session.query(PreferencePair).filter_by(profile_id=learn.profile_id).delete()
         session.query(Content).filter_by(profile_id=learn.profile_id).delete()
@@ -299,13 +278,14 @@ def register_adapter(
 
     registry = AdapterRegistry(base_path=adapter_base_path, infer_url=infer_url)
 
-    # Remove existing adapter if present
+    # Remove existing adapter if present (optional cleanup since overwrite=True handles this)
     try:
         existing = registry.get(ADAPTER_ID)
         if existing:
             registry.remove(ADAPTER_ID)
             print(f"  {MUTED}Removed existing adapter: {ADAPTER_ID}{RESET}")
-    except Exception:
+    except KeyError:
+        # Adapter doesn't exist yet - expected on first run
         pass
 
     # Register and refresh
@@ -364,33 +344,6 @@ def cleanup_adapter(registry: AdapterRegistry):
         print(f"  {MUTED}Cleanup skipped: {e}{RESET}")
 
 
-def ensure_demo_profile(learn: LearnClient) -> int:
-    """Ensure demo workspace and profile exist, return profile_id."""
-    from llm_learn.core.models import Profile, Workspace
-
-    with learn._db.session() as session:
-        workspace = session.query(Workspace).filter_by(slug="demo").first()
-        if not workspace:
-            workspace = Workspace(slug="demo", name="Demo Workspace")
-            session.add(workspace)
-            session.flush()
-
-        profile = (
-            session.query(Profile)
-            .filter_by(workspace_id=workspace.id, slug="lora-training")
-            .first()
-        )
-        if not profile:
-            profile = Profile(
-                workspace_id=workspace.id, slug="lora-training", name="LoRA Training Example"
-            )
-            session.add(profile)
-            session.flush()
-
-        session.commit()
-        return profile.id
-
-
 async def main():
     """Run the complete LoRA training workflow."""
     print(f"\n{H1}{'━' * 60}{RESET}")
@@ -401,7 +354,7 @@ async def main():
     config = Config("etc/learn.yaml")
     learn = LearnClient(profile_id=1)
     learn.migrate()
-    profile_id = ensure_demo_profile(learn)
+    profile_id = ensure_demo_profile(learn, profile_slug="lora-training")
     learn = LearnClient(profile_id=profile_id)
     print(f"{MUTED}Using profile_id={RESET}{INFO}{profile_id}{RESET}")
 

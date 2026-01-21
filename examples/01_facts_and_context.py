@@ -22,37 +22,23 @@ from pathlib import Path
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from _helpers import (
+    H1,
+    H2,
+    INFO,
+    LLM_A,
+    LLM_Q,
+    MUTED,
+    OK,
+    CMD,
+    RESET,
+    WARN,
+    ensure_demo_profile,
+    psql_cmd,
+)
+
 from llm_learn import LearnClient
 from llm_learn.inference import ContextBuilder, ContextQuery, LLMClient
-
-# Terminal formatting
-BOLD = "\033[1m"
-DIM = "\033[2m"
-RESET = "\033[0m"
-RED = "\033[31m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-BLUE = "\033[34m"
-MAGENTA = "\033[35m"
-CYAN = "\033[36m"
-WHITE = "\033[37m"
-
-# Semantic colors
-H1 = f"{BOLD}{BLUE}"  # Main title
-H2 = f"{BOLD}{MAGENTA}"  # Section headers
-OK = GREEN  # Success
-WARN = YELLOW  # Warnings
-INFO = CYAN  # Info/categories
-MUTED = DIM  # Secondary info
-CMD = f"{YELLOW}"  # Commands to run
-LLM_Q = f"{BOLD}{WHITE}"  # LLM questions
-LLM_A = f"{GREEN}"  # LLM answers
-
-
-def psql_cmd(learn: LearnClient) -> str:
-    """Build psql command from database config."""
-    url = learn._db.engine.url
-    return f"psql -h {url.host} -p {url.port} -U {url.username} -d {url.database}"
 
 
 def setup_facts(learn: LearnClient):
@@ -205,35 +191,6 @@ def demo_fact_management(learn: LearnClient):
     print(
         f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(learn)} -c "SELECT id, active, content FROM facts WHERE id={fact.id};"'
     )
-
-
-def ensure_demo_profile(learn: LearnClient) -> int:
-    """Ensure demo workspace and profile exist, return profile_id."""
-    from llm_learn.core.models import Profile, Workspace
-
-    with learn._db.session() as session:
-        # Get or create workspace
-        workspace = session.query(Workspace).filter_by(slug="demo").first()
-        if not workspace:
-            workspace = Workspace(slug="demo", name="Demo Workspace")
-            session.add(workspace)
-            session.flush()
-
-        # Get or create profile
-        profile = (
-            session.query(Profile).filter_by(workspace_id=workspace.id, slug="example").first()
-        )
-        if not profile:
-            profile = Profile(
-                workspace_id=workspace.id,
-                slug="example",
-                name="Example Profile",
-            )
-            session.add(profile)
-            session.flush()
-
-        session.commit()
-        return profile.id
 
 
 async def main():
