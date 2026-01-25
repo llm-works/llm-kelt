@@ -16,6 +16,9 @@ INFRA_DEV_CQ_STRICT := true
 # Exclude examples from function size checks (demo scripts have longer functions)
 INFRA_DEV_CQ_EXCLUDE := examples/*
 
+# Skip built-in type target (we define custom one below for mixed dependencies)
+INFRA_DEV_SKIP_TARGETS := type
+
 # PostgreSQL configuration
 INFRA_PG_CONFIG_FILE := pg.yaml
 
@@ -38,6 +41,13 @@ check::
 include $(infra)/make/Makefile.dev
 include $(infra)/make/Makefile.pytest
 include $(infra)/make/Makefile.clean
+include $(infra)/make/Makefile.install
+
+# Custom type checking: core package needs full checking, examples need --follow-imports=skip
+# (examples import torch/transformers which cause mypy to hang without this flag)
+type::
+	@$(PYTHON) -m mypy $(INFRA_DEV_PKG_NAME)/ --exclude 'examples/'
+	@if [ -d "examples" ]; then $(PYTHON) -m mypy examples/ --follow-imports=skip --ignore-missing-imports; fi
 
 # Database migrations
 ALEMBIC := $(PYTHON) -m alembic -c migrations/alembic.ini
