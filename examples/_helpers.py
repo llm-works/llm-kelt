@@ -63,4 +63,4 @@ def ensure_demo_profile(learn: LearnClient, profile_slug: str = "example") -> in
             session.flush()
 
         session.commit()
-        return profile.id
+        return int(profile.id)

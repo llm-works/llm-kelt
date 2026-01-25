@@ -184,7 +184,7 @@ async def query_llm(llm_client: LLMClient, question: str, adapter_id: str | None
         adapter_id=adapter_id,
     )
     # Clean up thinking tags if present
-    return response.replace("<think>\n\n</think>\n\n", "").strip()
+    return str(response).replace("<think>\n\n</think>\n\n", "").strip()
 
 
 async def show_baseline(llm_client: LLMClient):
