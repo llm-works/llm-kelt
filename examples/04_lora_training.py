@@ -119,7 +119,7 @@ def get_running_model(infer_url: str) -> str:
 _QUANTIZATION_SUFFIXES = ("-w4a16", "-w8a16", "-gptq-int4", "-gptq-int8", "-awq", "-gguf")
 
 
-def find_training_model(config: Config, model_name: str) -> Path:
+def find_training_model(lg: Logger, config: Config, model_name: str) -> Path:
     """Find the local non-quantized model path for training.
 
     If the inference model is quantized (e.g., qwen3-0.6b-instruct-w4a16),
@@ -129,7 +129,7 @@ def find_training_model(config: Config, model_name: str) -> Path:
 
     # Set up model resolver from config
     models_config = ModelsConfig.from_dict(config.models.to_dict())
-    resolver = ModelResolver(None, models_config.locations)
+    resolver = ModelResolver(lg, models_config.locations)
 
     # First try exact match (model might not be quantized)
     path = resolver.find_by_name(model_name)
@@ -361,7 +361,7 @@ async def main():
     # Get inference URL and query for running model
     infer_url = get_infer_url(config)
     running_model = get_running_model(infer_url)
-    training_model_path = find_training_model(config, running_model)
+    training_model_path = find_training_model(lg, config, running_model)
     adapter_base_path = Path(config.adapters.lora.base_path)
     print(f"{MUTED}Running model:{RESET} {INFO}{running_model}{RESET}")
     print(f"{MUTED}Training model:{RESET} {INFO}{training_model_path}{RESET}")
