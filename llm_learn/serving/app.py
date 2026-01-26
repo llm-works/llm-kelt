@@ -79,7 +79,7 @@ def create_server(
         streaming_client=streaming_client,
     )
 
-    server = (
+    return (
         ServerBuilder("llm-learn-proxy")
         .with_host(host)
         .with_port(port)
@@ -90,8 +90,6 @@ def create_server(
         .done()
         .build()
     )
-    server._llm_client = llm_client  # Store for cleanup
-    return server
 
 
 def create_server_from_config(config: dict) -> Server:
