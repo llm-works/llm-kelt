@@ -22,7 +22,7 @@ class TestEmbedMissingFactsIntegration:
             val = len(text) / 100.0
             return [val, val + 0.1, val + 0.2]
 
-        async def embed_batch(texts):
+        async def embed_batch_async(texts):
             return [
                 EmbeddingResult(
                     embedding=make_embedding(t),
@@ -32,15 +32,15 @@ class TestEmbedMissingFactsIntegration:
                 for t in texts
             ]
 
-        async def embed(text):
+        async def embed_async(text):
             return EmbeddingResult(
                 embedding=make_embedding(text),
                 model="test-model",
                 prompt_tokens=len(text),
             )
 
-        embedder.embed_batch = AsyncMock(side_effect=embed_batch)
-        embedder.embed = AsyncMock(side_effect=embed)
+        embedder.embed_batch_async = AsyncMock(side_effect=embed_batch_async)
+        embedder.embed_async = AsyncMock(side_effect=embed_async)
         return embedder
 
     @pytest.fixture
@@ -135,7 +135,7 @@ class TestEmbedMissingFactsIntegration:
 
         # With 5 facts and batch_size=2, should have called embed_batch 3 times
         # (2 + 2 + 1)
-        assert mock_embedder.embed_batch.call_count == 3
+        assert mock_embedder.embed_batch_async.call_count == 3
 
     @pytest.mark.asyncio
     async def test_embed_inactive_facts_skipped(
@@ -168,4 +168,4 @@ class TestEmbedMissingFactsIntegration:
 
         assert result.processed == 0
         assert result.failed == 0
-        mock_embedder.embed_batch.assert_not_called()
+        mock_embedder.embed_batch_async.assert_not_called()

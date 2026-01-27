@@ -43,7 +43,7 @@ class ContentClient:
         Returns candidates sorted by similarity score.
         Agent decides final selection from these candidates.
         """
-        query_embedding = await self._embedder.embed(query)
+        query_embedding = await self._embedder.embed_async(query)
         return await self._vector_store.search(
             embedding=query_embedding,
             top_k=top_k,

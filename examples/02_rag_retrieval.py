@@ -153,7 +153,7 @@ async def demo_similarity_search(learn: LearnClient, embedder: Embedder):
     query = "How do I secure my database connections?"
     print(f'\n  {LLM_Q}Query: "{query}"{RESET}')
 
-    query_result = await embedder.embed(query)
+    query_result = await embedder.embed_async(query)
     similar_facts = learn.facts.search_similar(
         embedding=query_result.embedding, model_name="default", top_k=5, min_similarity=0.3
     )
@@ -206,7 +206,7 @@ async def demo_rag_vs_static(learn: LearnClient, config: Config, embedder: Embed
     print(f'  {LLM_Q}Question: "{question}"{RESET}')
 
     if embedder:
-        query_result = await embedder.embed(question)
+        query_result = await embedder.embed_async(question)
         similar = learn.facts.search_similar(
             embedding=query_result.embedding, model_name="default", top_k=3, min_similarity=0.3
         )
@@ -285,7 +285,7 @@ async def main():
     await demo_rag_query(learn, config, embedder)
 
     if embedder:
-        await embedder.close()
+        await embedder.close_async()
 
     print(f"\n{H1}{'━' * 50}{RESET}")
     print(f"{OK}✓ Done!{RESET} Next: {CMD}python examples/03_training_export.py{RESET}")

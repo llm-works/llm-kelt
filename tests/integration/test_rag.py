@@ -41,14 +41,14 @@ class TestRAGIntegration:
             # Default embedding
             return [0.3, 0.3, 0.3]
 
-        async def embed(text):
+        async def embed_async(text):
             return EmbeddingResult(
                 embedding=get_embedding(text),
                 model="test-model",
                 prompt_tokens=len(text),
             )
 
-        embedder.embed = AsyncMock(side_effect=embed)
+        embedder.embed_async = AsyncMock(side_effect=embed_async)
         embedder.model = "test-model"
         return embedder
 
@@ -324,4 +324,4 @@ class TestRAGIntegration:
         assert conv.messages[2].content == "Tell me more about that"
 
         # Embedder should have been called twice (once per question)
-        assert mock_embedder.embed.call_count == 2
+        assert mock_embedder.embed_async.call_count == 2

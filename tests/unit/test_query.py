@@ -92,7 +92,7 @@ class TestContextQueryRAG:
     def mock_embedder(self):
         """Create mock embedder."""
         embedder = MagicMock()
-        embedder.embed = AsyncMock(
+        embedder.embed_async = AsyncMock(
             return_value=EmbeddingResult(
                 embedding=[0.1, 0.2, 0.3],
                 model="test-model",
@@ -132,7 +132,7 @@ class TestContextQueryRAG:
 
         await query.ask("What language should I use?", rag=RAGArgs())
 
-        mock_embedder.embed.assert_called_once_with("What language should I use?")
+        mock_embedder.embed_async.assert_called_once_with("What language should I use?")
 
     @pytest.mark.asyncio
     async def test_ask_with_rag_searches_similar_facts(

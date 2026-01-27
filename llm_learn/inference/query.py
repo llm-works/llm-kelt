@@ -171,7 +171,7 @@ class ContextQuery:
             raise ValueError("RAG requires embedder to be configured")
 
         # Embed the question
-        result = await self._embedder.embed(question)
+        result = await self._embedder.embed_async(question)
 
         # Determine model name for search
         model_name = rag.model_name if rag.model_name else self._embedder.model
