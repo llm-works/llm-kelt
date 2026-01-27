@@ -76,7 +76,7 @@ from llm_learn.inference import (
 )
 
 # 1. Embed facts for semantic search
-embedder = Embedder(base_url="http://localhost:8000/v1")
+embedder = Embedder(base_url="http://localhost:8001/v1")
 await embed_missing_facts(logger, embedder, learn.facts, model_name="default")
 
 # 2. Create context-aware query interface
@@ -99,6 +99,9 @@ response = await query.ask(
     "What rules should I follow?",
     rag=RAGArgs(top_k=5, categories=["rules"]),
 )
+
+# Clean up
+await embedder.close_async()
 ```
 
 ### Training Data Export

@@ -30,8 +30,8 @@ class TestEmbedMissingFacts:
     def mock_embedder(self):
         """Create a mock Embedder."""
         embedder = MagicMock()
-        embedder.embed_batch = AsyncMock()
-        embedder.embed = AsyncMock()
+        embedder.embed_batch_async = AsyncMock()
+        embedder.embed_async = AsyncMock()
         return embedder
 
     @pytest.fixture
@@ -64,7 +64,7 @@ class TestEmbedMissingFacts:
 
         assert result.processed == 0
         assert result.failed == 0
-        mock_embedder.embed_batch.assert_not_called()
+        mock_embedder.embed_batch_async.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_embed_single_batch(
@@ -74,7 +74,7 @@ class TestEmbedMissingFacts:
         # First call returns facts, second call returns empty (done)
         mock_facts_client.list_without_embeddings.side_effect = [sample_facts, []]
 
-        mock_embedder.embed_batch.return_value = [
+        mock_embedder.embed_batch_async.return_value = [
             EmbeddingResult(embedding=[0.1, 0.2], model="test-model", prompt_tokens=5),
             EmbeddingResult(embedding=[0.3, 0.4], model="test-model", prompt_tokens=5),
             EmbeddingResult(embedding=[0.5, 0.6], model="test-model", prompt_tokens=5),
@@ -86,7 +86,7 @@ class TestEmbedMissingFacts:
 
         assert result.processed == 3
         assert result.failed == 0
-        mock_embedder.embed_batch.assert_called_once_with(["Fact 1", "Fact 2", "Fact 3"])
+        mock_embedder.embed_batch_async.assert_called_once_with(["Fact 1", "Fact 2", "Fact 3"])
         assert mock_facts_client.set_embedding.call_count == 3
 
     @pytest.mark.asyncio
@@ -100,7 +100,7 @@ class TestEmbedMissingFacts:
 
         mock_facts_client.list_without_embeddings.side_effect = [batch1, batch2, []]
 
-        mock_embedder.embed_batch.side_effect = [
+        mock_embedder.embed_batch_async.side_effect = [
             [
                 EmbeddingResult(embedding=[0.1], model="m", prompt_tokens=1),
                 EmbeddingResult(embedding=[0.2], model="m", prompt_tokens=1),
@@ -116,7 +116,7 @@ class TestEmbedMissingFacts:
 
         assert result.processed == 3
         assert result.failed == 0
-        assert mock_embedder.embed_batch.call_count == 2
+        assert mock_embedder.embed_batch_async.call_count == 2
 
     @pytest.mark.asyncio
     async def test_embed_batch_failure_falls_back_to_individual(
@@ -126,8 +126,8 @@ class TestEmbedMissingFacts:
         mock_facts_client.list_without_embeddings.side_effect = [sample_facts, []]
 
         # Batch fails, individual calls succeed
-        mock_embedder.embed_batch.side_effect = Exception("Batch API error")
-        mock_embedder.embed.return_value = EmbeddingResult(
+        mock_embedder.embed_batch_async.side_effect = Exception("Batch API error")
+        mock_embedder.embed_async.return_value = EmbeddingResult(
             embedding=[0.1], model="m", prompt_tokens=1
         )
 
@@ -137,7 +137,7 @@ class TestEmbedMissingFacts:
 
         assert result.processed == 3
         assert result.failed == 0
-        assert mock_embedder.embed.call_count == 3
+        assert mock_embedder.embed_async.call_count == 3
 
     @pytest.mark.asyncio
     async def test_embed_individual_failure_counted(
@@ -147,8 +147,8 @@ class TestEmbedMissingFacts:
         mock_facts_client.list_without_embeddings.side_effect = [sample_facts, []]
 
         # Batch fails, then 2 succeed and 1 fails
-        mock_embedder.embed_batch.side_effect = Exception("Batch error")
-        mock_embedder.embed.side_effect = [
+        mock_embedder.embed_batch_async.side_effect = Exception("Batch error")
+        mock_embedder.embed_async.side_effect = [
             EmbeddingResult(embedding=[0.1], model="m", prompt_tokens=1),
             Exception("Individual error"),
             EmbeddingResult(embedding=[0.3], model="m", prompt_tokens=1),
@@ -168,7 +168,7 @@ class TestEmbedMissingFacts:
         """Test that set_embedding failures are counted."""
         mock_facts_client.list_without_embeddings.side_effect = [sample_facts, []]
 
-        mock_embedder.embed_batch.return_value = [
+        mock_embedder.embed_batch_async.return_value = [
             EmbeddingResult(embedding=[0.1], model="m", prompt_tokens=1),
             EmbeddingResult(embedding=[0.2], model="m", prompt_tokens=1),
             EmbeddingResult(embedding=[0.3], model="m", prompt_tokens=1),
@@ -193,7 +193,7 @@ class TestEmbedMissingFacts:
             sample_facts[:1],
             [],
         ]
-        mock_embedder.embed_batch.return_value = [
+        mock_embedder.embed_batch_async.return_value = [
             EmbeddingResult(embedding=[0.1, 0.2, 0.3], model="m", prompt_tokens=1),
         ]
 
@@ -228,7 +228,7 @@ class TestEmbedMissingFacts:
         mock_facts_client.list_without_embeddings.return_value = sample_facts
 
         # Batch succeeds but all storage fails
-        mock_embedder.embed_batch.return_value = [
+        mock_embedder.embed_batch_async.return_value = [
             EmbeddingResult(embedding=[0.1], model="m", prompt_tokens=1),
             EmbeddingResult(embedding=[0.2], model="m", prompt_tokens=1),
             EmbeddingResult(embedding=[0.3], model="m", prompt_tokens=1),
@@ -242,5 +242,5 @@ class TestEmbedMissingFacts:
         # Should have attempted once and stopped
         assert result.processed == 0
         assert result.failed == 3
-        assert mock_embedder.embed_batch.call_count == 1
+        assert mock_embedder.embed_batch_async.call_count == 1
         mock_logger.warning.assert_called()

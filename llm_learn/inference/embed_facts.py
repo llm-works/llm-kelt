@@ -56,7 +56,7 @@ async def _embed_individually(
     failed = 0
     for fact in facts:
         try:
-            result = await embedder.embed(fact.content)
+            result = await embedder.embed_async(fact.content)
             facts_client.set_embedding(fact.id, result.embedding, model_name)
             processed += 1
         except Exception as e:
@@ -100,7 +100,7 @@ async def embed_missing_facts(
             break
 
         try:
-            results = await embedder.embed_batch([f.content for f in facts])
+            results = await embedder.embed_batch_async([f.content for f in facts])
             p, f = _store_embeddings(lg, facts, results, facts_client, model_name)
         except Exception as e:
             lg.warning(
