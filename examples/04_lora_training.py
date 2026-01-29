@@ -145,10 +145,7 @@ def find_training_model(lg: Logger, config: Config, model_name: str) -> Path:
 
     path = resolver.find_by_name(base_name)
     if path is None:
-        raise RuntimeError(
-            f"Training model not found: tried '{model_name}' and '{base_name}'. "
-            f"Download the non-quantized model for training."
-        )
+        raise RuntimeError(f"Training model not found: tried '{model_name}' and '{base_name}'.")
     return Path(path)
 
 
@@ -361,7 +358,30 @@ async def main():
     # Get inference URL and query for running model
     infer_url = get_infer_url(config)
     running_model = get_running_model(infer_url)
-    training_model_path = find_training_model(lg, config, running_model)
+    try:
+        training_model_path = find_training_model(lg, config, running_model)
+    except RuntimeError as e:
+        lg.warning(
+            "cannot run LoRA training example",
+            extra={
+                "exception": e,
+                "running_model": running_model,
+                "infer_url": infer_url,
+            },
+        )
+        print(f"\n{WARN}Cannot run LoRA training example{RESET}")
+        print("\nLoRA training requires local model weights in HuggingFace format.")
+        print(f"The inference server reports model '{running_model}', but no matching")
+        print("local model was found for training.")
+        print(f"\n{MUTED}This can happen when:{RESET}")
+        print("  • Using Ollama (serves GGUF models, not trainable)")
+        print("  • Model weights not downloaded locally")
+        print("  • Model location not configured in etc/models.yaml")
+        print(f"\n{INFO}To run this example:{RESET}")
+        print(f"  1. Download HuggingFace model weights for '{running_model}'")
+        print("  2. Configure the model location in etc/models.yaml")
+        print("  3. Run llm-infer with --model pointing to the local weights")
+        raise SystemExit(1)
     adapter_base_path = Path(config.adapters.lora.base_path)
     print(f"{MUTED}Running model:{RESET} {INFO}{running_model}{RESET}")
     print(f"{MUTED}Training model:{RESET} {INFO}{training_model_path}{RESET}")
