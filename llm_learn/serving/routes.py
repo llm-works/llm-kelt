@@ -177,7 +177,7 @@ class _RouteHandlers:
             async for token in self.llm_client.chat_stream_async(
                 messages=chat_messages,
                 system=system_prompt,
-                temperature=body.temperature if body.temperature else 1.0,
+                temperature=body.temperature if body.temperature is not None else 1.0,
                 max_tokens=body.max_tokens,
             ):
                 yield token
