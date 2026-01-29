@@ -3,7 +3,6 @@
 import os
 import socket
 from pathlib import Path
-from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import pytest
@@ -168,14 +167,14 @@ def pg_test_config(config):
     """
     database_url = os.environ.get("DATABASE_URL")
     if database_url:
-        # Wrap in SimpleNamespace for CI (appinfra uses attribute access)
-        return SimpleNamespace(
-            url=database_url,
-            create_db=True,
-            readonly=False,
-            pool_pre_ping=True,
-            extensions=["vector"],  # pgvector for embeddings
-        )
+        # Return dict for CI (appinfra's pg_migrate_factory expects dict-like config)
+        return {
+            "url": database_url,
+            "create_db": True,
+            "readonly": False,
+            "pool_pre_ping": True,
+            "extensions": ["vector"],  # pgvector for embeddings
+        }
 
     # Fall back to config file
     db_cfg = config.dbs.get("unittest")
