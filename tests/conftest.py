@@ -191,12 +191,6 @@ def pg_with_tables(pg_migrate_factory):
 
 
 @pytest.fixture(scope="session")
-def pg(pg_isolated):
-    """Alias for pg_isolated - PG instance with schema isolation."""
-    return pg_isolated
-
-
-@pytest.fixture(scope="session")
 def database(pg_with_tables):
     """Create Database wrapper from PG with migrations applied."""
     return Database.from_pg(pg_with_tables)
