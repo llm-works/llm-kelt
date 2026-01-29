@@ -68,17 +68,19 @@ LLM interaction with context injection:
 
 | Component | Purpose |
 |-----------|---------|
-| `LLMClient` | Unified client for multiple backends (OpenAI-compatible, Anthropic) |
 | `ContextBuilder` | Builds system prompts with injected facts |
 | `ContextQuery` | High-level interface for context-aware queries |
 
+For LLM client functionality, use `llm_infer.client.LLMClient` directly.
+
 ```python
-from llm_learn.inference import LLMClient, ContextBuilder
+from llm_infer.client import LLMClient
+from llm_learn.inference import ContextBuilder
 
 client = LLMClient.from_config(config["llm"])
 context = ContextBuilder(learn.facts)
 system = context.build_system_prompt("You are a helpful assistant.")
-response = await client.chat(messages, system=system)
+response = await client.chat_async(messages, system=system)
 ```
 
 ### Serving Module

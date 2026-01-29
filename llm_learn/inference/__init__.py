@@ -22,7 +22,7 @@ Usage:
 
     # Build prompt with facts injected
     system = context.build_system_prompt("You are a helpful assistant.")
-    response = client.chat(messages, system=system)
+    response = await client.chat_async(messages, system=system)
 """
 
 from .context import ContextBuilder
