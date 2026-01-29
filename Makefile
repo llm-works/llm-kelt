@@ -16,8 +16,10 @@ INFRA_DEV_CQ_STRICT := true
 # Exclude examples from function size checks (demo scripts have longer functions)
 INFRA_DEV_CQ_EXCLUDE := examples/*
 
-# Skip built-in type target (we define custom one below for mixed dependencies)
-INFRA_DEV_SKIP_TARGETS := type
+# Skip built-in targets (we define custom ones below)
+# - type: examples import torch/transformers which cause mypy to hang
+# - test.e2e: GPU tests must run sequentially to avoid OOM
+INFRA_DEV_SKIP_TARGETS := type test.e2e
 
 # PostgreSQL configuration
 INFRA_PG_CONFIG_FILE := pg.yaml
@@ -29,15 +31,6 @@ include $(infra)/make/Makefile.help
 include $(infra)/make/Makefile.utils
 include $(infra)/make/Makefile.pg
 
-# Integration tests share a DB and cannot run in parallel.
-# Define before Makefile.dev so this runs first and exits.
-check::
-	@echo ""
-	@echo "ERROR: Use 'make check.seq' for this project."
-	@echo "       Integration tests share a database and cannot run in parallel."
-	@echo ""
-	@exit 1
-
 include $(infra)/make/Makefile.dev
 include $(infra)/make/Makefile.pytest
 include $(infra)/make/Makefile.clean
@@ -48,6 +41,13 @@ include $(infra)/make/Makefile.install
 type::
 	@$(PYTHON) -m mypy $(INFRA_DEV_PKG_NAME)/ --exclude 'examples/'
 	@if [ -d "examples" ]; then $(PYTHON) -m mypy examples/ --follow-imports=skip --ignore-missing-imports; fi
+
+# Custom e2e tests: run sequentially (-n 0) because GPU tests can't share GPU memory
+test.e2e::
+	@echo "* running end-to-end tests (sequential for GPU)..."
+	@$(PYTHON) -m pytest tests/ -m e2e -n 0 -qq --tb=short || { ec=$$?; [ $$ec -eq 5 ] && exit 0 || exit $$ec; }
+	@echo "* end-to-end tests done"
+.PHONY: test.e2e
 
 # Database migrations
 ALEMBIC := $(PYTHON) -m alembic -c migrations/alembic.ini

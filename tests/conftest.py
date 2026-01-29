@@ -8,12 +8,33 @@ from urllib.parse import urlparse
 
 import pytest
 from appinfra.config import Config
-from appinfra.db.pg import PG
 from appinfra.log import LogConfig, LoggerFactory
 
 from llm_learn.client import LearnClient
 from llm_learn.core.database import Database
 from llm_learn.core.models import Base, Profile, Workspace
+
+# Enable appinfra's schema isolation fixtures for parallel test execution
+pytest_plugins = ["appinfra.db.pg.testing"]
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_cmdline_main(config):
+    """Force sequential execution for e2e tests (GPU can't be shared).
+
+    Uses pytest_cmdline_main with tryfirst=True because xdist decides to spawn
+    workers in its pytest_cmdline_main hook. We need to set numprocesses=0
+    BEFORE xdist's hook runs.
+    """
+    # Check if running e2e tests
+    markexpr = config.getoption("-m", default="")
+    if "e2e" in markexpr:
+        # Force sequential execution by setting numprocesses to 0
+        if hasattr(config.option, "numprocesses") and config.option.numprocesses:
+            original = config.option.numprocesses
+            config.option.numprocesses = 0
+            print(f"\n*** E2E detected: forcing sequential (was -n {original}) ***\n")
+
 
 # Find project root and config paths
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -139,8 +160,8 @@ def logger():
 
 
 @pytest.fixture(scope="session")
-def db_config(config):
-    """Get test database configuration.
+def pg_test_config(config):
+    """Provide database config to appinfra's schema isolation fixtures.
 
     Checks for DATABASE_URL environment variable first (used in CI),
     otherwise falls back to config file.
@@ -164,17 +185,22 @@ def db_config(config):
 
 
 @pytest.fixture(scope="session")
-def pg(logger, db_config):
-    """Create PG instance for testing."""
-    return PG(logger, db_config)
+def pg_with_tables(pg_migrate_factory):
+    """PG instance with schema isolation and migrations applied."""
+    with pg_migrate_factory(Base, extensions=["vector"]) as pg:
+        yield pg
 
 
 @pytest.fixture(scope="session")
-def database(pg):
-    """Create Database wrapper and run migrations."""
-    db = Database.from_pg(pg)
-    db.migrate()  # Ensure tables exist
-    return db
+def pg(pg_isolated):
+    """Alias for pg_isolated - PG instance with schema isolation."""
+    return pg_isolated
+
+
+@pytest.fixture(scope="session")
+def database(pg_with_tables):
+    """Create Database wrapper from PG with migrations applied."""
+    return Database.from_pg(pg_with_tables)
 
 
 @pytest.fixture(scope="session")
