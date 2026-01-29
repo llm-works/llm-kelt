@@ -17,19 +17,17 @@ from llm_infer.api import (
     ModelList,
     Role,
 )
-from llm_infer.client import OpenAIClient
-
-# Import directly to avoid circular import in llm_infer.serving.api
-from llm_infer.serving.api.openai.streaming import stream_chat_completion
-
-from ..inference.backends import (
+from llm_infer.client import (
     BackendError,
     BackendRequestError,
     BackendTimeoutError,
     BackendUnavailableError,
+    LLMClient,
 )
-from ..inference.backends.base import Message
-from ..inference.client import LLMClient
+
+# Import directly to avoid circular import in llm_infer.serving.api
+from llm_infer.serving.api.openai.streaming import stream_chat_completion
+
 from ..inference.context import ContextBuilder
 
 
@@ -40,7 +38,7 @@ def _raise_http_for_backend_error(e: BackendError) -> NoReturn:
     if isinstance(e, BackendTimeoutError):
         raise HTTPException(status_code=504, detail=f"Backend timeout: {e}")
     if isinstance(e, BackendRequestError):
-        raise HTTPException(status_code=502, detail=f"Backend error: {e.detail}")
+        raise HTTPException(status_code=502, detail=f"Backend error: {e}")
     raise HTTPException(status_code=500, detail=f"Unexpected backend error: {e}")
 
 
@@ -77,8 +75,8 @@ def _inject_facts_into_system(
 
 def _convert_to_backend_messages(
     messages: list[ChatMessage],
-) -> tuple[list[Message], str | None]:
-    """Convert ChatMessage list to backend Message list.
+) -> tuple[list[dict[str, str]], str | None]:
+    """Convert ChatMessage list to backend message dicts.
 
     Extracts system message separately as backends handle it differently.
     Returns (messages without system, system prompt or None).
@@ -90,7 +88,7 @@ def _convert_to_backend_messages(
         if msg.role == Role.SYSTEM:
             system_prompt = msg.content
         else:
-            backend_messages.append(Message(role=msg.role.value, content=msg.content))
+            backend_messages.append({"role": msg.role.value, "content": msg.content})
 
     return backend_messages, system_prompt
 
@@ -98,14 +96,14 @@ def _convert_to_backend_messages(
 def _build_chat_response(
     model_name: str,
     content: str,
-    usage: dict | None,
+    usage: ChatCompletionUsage | None,
 ) -> ChatCompletionResponse:
     """Build OpenAI-compatible chat completion response.
 
     Args:
         model_name: Model name to include in response.
         content: Assistant's response content.
-        usage: Token usage dict from backend, or None.
+        usage: Token usage from backend, or None.
 
     Returns:
         Formatted ChatCompletionResponse.
@@ -122,9 +120,9 @@ def _build_chat_response(
             )
         ],
         usage=ChatCompletionUsage(
-            prompt_tokens=usage.get("prompt_tokens", 0) if usage else 0,
-            completion_tokens=usage.get("completion_tokens", 0) if usage else 0,
-            total_tokens=usage.get("total_tokens", 0) if usage else 0,
+            prompt_tokens=usage.prompt_tokens if usage else 0,
+            completion_tokens=usage.completion_tokens if usage else 0,
+            total_tokens=usage.total_tokens if usage else 0,
         ),
     )
 
@@ -137,12 +135,10 @@ class _RouteHandlers:
         model_name: str,
         llm_client: LLMClient,
         context_builder: ContextBuilder,
-        streaming_client: OpenAIClient | None = None,
     ) -> None:
         self.model_name = model_name
         self.llm_client = llm_client
         self.context_builder = context_builder
-        self.streaming_client = streaming_client
 
     async def chat_completions(
         self, body: ChatCompletionRequest
@@ -151,7 +147,7 @@ class _RouteHandlers:
         facts_prompt = self.context_builder.build_system_prompt("")
         enhanced_messages = _inject_facts_into_system(body.messages, facts_prompt)
 
-        if body.stream and self.streaming_client:
+        if body.stream:
             return await self._handle_streaming(enhanced_messages, body)
 
         backend_messages, system_prompt = _convert_to_backend_messages(enhanced_messages)
@@ -178,7 +174,7 @@ class _RouteHandlers:
         request_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
 
         async def token_generator():
-            async for token in self.streaming_client.chat_stream(
+            async for token in self.llm_client.chat_stream_async(
                 messages=chat_messages,
                 system=system_prompt,
                 temperature=body.temperature if body.temperature else 1.0,
@@ -198,14 +194,14 @@ class _RouteHandlers:
 
     async def _call_backend(
         self,
-        messages: list[Message],
+        messages: list[dict[str, str]],
         system: str | None,
         temperature: float | None,
         max_tokens: int | None,
-    ) -> tuple[str, dict | None]:
+    ) -> tuple[str, ChatCompletionUsage | None]:
         """Call backend LLM with error translation."""
         try:
-            response = await self.llm_client.chat_full(
+            response = await self.llm_client.chat_full_async(
                 messages=messages,
                 system=system,
                 temperature=temperature if temperature is not None else 0.7,
@@ -236,7 +232,6 @@ def create_router(
     model_name: str,
     llm_client: LLMClient,
     context_builder: ContextBuilder,
-    streaming_client: OpenAIClient | None = None,
 ) -> APIRouter:
     """Create API router with chat completions endpoint.
 
@@ -244,13 +239,12 @@ def create_router(
         model_name: Name of the backend model for responses.
         llm_client: LLM client for backend calls.
         context_builder: Context builder for facts injection.
-        streaming_client: OpenAI client for streaming requests (optional).
 
     Returns:
         FastAPI router with OpenAI-compatible endpoints.
     """
     router = APIRouter()
-    handlers = _RouteHandlers(model_name, llm_client, context_builder, streaming_client)
+    handlers = _RouteHandlers(model_name, llm_client, context_builder)
 
     router.post("/v1/chat/completions", response_model=None)(handlers.chat_completions)
     router.get("/v1/models", response_model=ModelList)(handlers.list_models)

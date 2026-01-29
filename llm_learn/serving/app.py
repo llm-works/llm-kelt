@@ -1,33 +1,12 @@
 """FastAPI application factory for llm-learn proxy server using appinfra."""
 
 from appinfra.app.fastapi import Server, ServerBuilder
-from llm_infer.client import OpenAIClient
+from llm_infer.client import LLMClient
 
 from ..client import LearnClient
 from ..core.database import Database
-from ..inference.client import LLMClient
 from ..inference.context import ContextBuilder
 from .routes import create_router
-
-
-def _create_streaming_client(llm_config: dict) -> OpenAIClient | None:
-    """Create streaming client for OpenAI-compatible backends.
-
-    Returns None if the default backend is not OpenAI-compatible.
-    """
-    default_backend = llm_config.get("default", "local")
-    backends = llm_config.get("backends", {})
-    backend_config = backends.get(default_backend, {})
-
-    backend_type = backend_config.get("type", "openai_compatible")
-    if backend_type not in ("openai_compatible", "openai"):
-        return None
-
-    return OpenAIClient(
-        base_url=backend_config.get("base_url", "http://localhost:8000/v1"),
-        api_key=backend_config.get("api_key"),
-        timeout=backend_config.get("timeout", 120.0),
-    )
 
 
 def create_server(
@@ -68,15 +47,11 @@ def create_server(
     learn_client = LearnClient(profile_id=profile_id, database=database)
     context_builder = ContextBuilder(learn_client.facts)
 
-    # Create streaming client from backend config (for OpenAI-compatible backends)
-    streaming_client = _create_streaming_client(llm_config)
-
     # Create router with dependencies
     router = create_router(
         model_name=model_name,
         llm_client=llm_client,
         context_builder=context_builder,
-        streaming_client=streaming_client,
     )
 
     return (

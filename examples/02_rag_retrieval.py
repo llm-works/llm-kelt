@@ -41,13 +41,13 @@ from _helpers import (
 from appinfra.config import Config
 from appinfra.log import LogConfig, Logger, LoggerFactory
 from httpx import ConnectError, ConnectTimeout
+from llm_infer.client import LLMClient
 
 from llm_learn import LearnClient
 from llm_learn.inference import (
     ContextBuilder,
     ContextQuery,
     Embedder,
-    LLMClient,
     RAGArgs,
     embed_missing_facts,
 )
@@ -248,7 +248,7 @@ async def demo_rag_query(learn: LearnClient, config: Config, embedder: Embedder 
         if len(response_clean) > 500:
             print(f"  {MUTED}[...truncated]{RESET}")
 
-        await llm_client.close()
+        await llm_client.aclose()
 
     except Exception as e:
         print(f"  {MUTED}[Skipped] No LLM backend: {type(e).__name__}{RESET}")

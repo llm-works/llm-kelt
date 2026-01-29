@@ -56,8 +56,8 @@ class TestRAGIntegration:
     def mock_llm_client(self):
         """Create a mock LLM client."""
         client = MagicMock()
-        client.chat = AsyncMock(return_value="Test response from LLM")
-        client.close = AsyncMock()
+        client.chat_async = AsyncMock(return_value="Test response from LLM")
+        client.aclose = AsyncMock()
         return client
 
     @pytest.fixture
@@ -102,7 +102,7 @@ class TestRAGIntegration:
         )
 
         # Check what was passed to the LLM
-        call_kwargs = mock_llm_client.chat.call_args.kwargs
+        call_kwargs = mock_llm_client.chat_async.call_args.kwargs
         system_prompt = call_kwargs["system"]
 
         # Should include Python-related facts
@@ -131,7 +131,7 @@ class TestRAGIntegration:
             rag=RAGArgs(top_k=10, min_similarity=0.8),  # High threshold
         )
 
-        call_kwargs = mock_llm_client.chat.call_args.kwargs
+        call_kwargs = mock_llm_client.chat_async.call_args.kwargs
         system_prompt = call_kwargs["system"] or ""
 
         # With high similarity threshold, should get facts with similar embeddings
@@ -167,7 +167,7 @@ class TestRAGIntegration:
             rag=RAGArgs(top_k=5, min_similarity=0.3),
         )
 
-        call_kwargs = mock_llm_client.chat.call_args.kwargs
+        call_kwargs = mock_llm_client.chat_async.call_args.kwargs
         system_prompt = call_kwargs["system"] or ""
 
         # No facts should be included (they have no embeddings)
@@ -192,7 +192,7 @@ class TestRAGIntegration:
             rag=RAGArgs(top_k=2, min_similarity=0.0),
         )
 
-        call_kwargs = mock_llm_client.chat.call_args.kwargs
+        call_kwargs = mock_llm_client.chat_async.call_args.kwargs
         system_prompt = call_kwargs["system"]
 
         # Count how many facts are in the prompt (each starts with "- ")
@@ -218,7 +218,7 @@ class TestRAGIntegration:
             rag=RAGArgs(top_k=10, min_similarity=0.99),
         )
 
-        call_kwargs = mock_llm_client.chat.call_args.kwargs
+        call_kwargs = mock_llm_client.chat_async.call_args.kwargs
         system_prompt = call_kwargs["system"] or ""
 
         # With 0.99 similarity threshold, no facts should match
@@ -256,7 +256,7 @@ class TestRAGIntegration:
             rag=RAGArgs(top_k=10, min_similarity=0.3),
         )
 
-        call_kwargs = mock_llm_client.chat.call_args.kwargs
+        call_kwargs = mock_llm_client.chat_async.call_args.kwargs
         system_prompt = call_kwargs["system"]
 
         # Only active fact should be included
@@ -281,7 +281,7 @@ class TestRAGIntegration:
             rag=RAGArgs(top_k=5, min_similarity=0.5),
         )
 
-        call_kwargs = mock_llm_client.chat.call_args.kwargs
+        call_kwargs = mock_llm_client.chat_async.call_args.kwargs
         system_prompt = call_kwargs["system"]
 
         # Should include both base prompt and facts
@@ -320,8 +320,8 @@ class TestRAGIntegration:
 
         # Conversation should have all messages
         assert len(conv.messages) == 4  # 2 user + 2 assistant
-        assert conv.messages[0].content == "What language should I use?"
-        assert conv.messages[2].content == "Tell me more about that"
+        assert conv.messages[0]["content"] == "What language should I use?"
+        assert conv.messages[2]["content"] == "Tell me more about that"
 
         # Embedder should have been called twice (once per question)
         assert mock_embedder.embed_async.call_count == 2

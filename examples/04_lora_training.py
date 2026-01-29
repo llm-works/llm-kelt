@@ -29,9 +29,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from _helpers import H1, H2, INFO, LLM_A, LLM_Q, MUTED, OK, RESET, WARN, ensure_demo_profile
 from appinfra.config import Config
 from appinfra.log import LogConfig, Logger, LoggerFactory
+from llm_infer.client import LLMClient
 
 from llm_learn import LearnClient
-from llm_learn.inference import LLMClient
 from llm_learn.training import (
     AdapterRegistry,
     LoraConfig,
@@ -178,7 +178,7 @@ def create_training_data(learn: LearnClient):
 
 async def query_llm(llm_client: LLMClient, question: str, adapter_id: str | None = None) -> str:
     """Query LLM with optional adapter."""
-    response = await llm_client.chat(
+    response = await llm_client.chat_async(
         messages=[{"role": "user", "content": question}],
         system="You are a helpful AI assistant. Answer questions clearly and accurately.",
         adapter_id=adapter_id,
@@ -402,7 +402,7 @@ async def main():
             cleanup_adapter(registry)
 
     finally:
-        await llm_client.close()
+        await llm_client.aclose()
 
     print(f"\n{H1}{'━' * 60}{RESET}")
     print(f"{OK}✓ Done!{RESET}")

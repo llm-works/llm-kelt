@@ -126,7 +126,7 @@ def llm_config(config):
 @pytest.fixture
 def llm_client(llm_config):
     """Create LLM client from test config."""
-    from llm_learn.inference.client import LLMClient
+    from llm_infer.client import LLMClient
 
     return LLMClient.from_config(llm_config)
 
