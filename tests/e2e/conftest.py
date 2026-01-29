@@ -7,16 +7,6 @@ from urllib.parse import urlparse
 import httpx
 import pytest
 
-# Skip all training tests if dependencies not available
-torch = pytest.importorskip("torch")
-pytest.importorskip("transformers")
-pytest.importorskip("peft")
-pytest.importorskip("trl")
-
-from llm_infer.models import ModelResolver, ModelsConfig  # noqa: E402
-
-from llm_learn.training import LoraConfig, TrainingConfig  # noqa: E402
-
 # Quantization suffixes to strip when finding training models
 QUANTIZATION_SUFFIXES = ("-w4a16", "-w8a16", "-gptq-int4", "-gptq-int8", "-awq", "-gguf")
 
@@ -92,9 +82,23 @@ def _write_jsonl(path: Path, data: list[dict]) -> Path:
     return path
 
 
+def _strip_quantization_suffix(model_name: str) -> str:
+    """Strip quantization suffix from model name to find base model."""
+    for suffix in QUANTIZATION_SUFFIXES:
+        if model_name.endswith(suffix):
+            return model_name[: -len(suffix)]
+    return model_name
+
+
+# Training-specific fixtures - only used by tests that request them
+# These fixtures lazy-load torch to avoid GPU memory allocation for non-GPU tests
+
+
 @pytest.fixture(scope="session")
-def model_resolver(logger, config) -> ModelResolver:
+def model_resolver(logger, config):
     """Model resolver using llm-learn.yaml models config."""
+    from llm_infer.models import ModelResolver, ModelsConfig
+
     models_config = ModelsConfig.from_dict(config.models.to_dict())
     return ModelResolver(logger, models_config.locations)
 
@@ -129,14 +133,6 @@ def infer_model_name(infer_server_url) -> str:
     return models[0]["id"]
 
 
-def _strip_quantization_suffix(model_name: str) -> str:
-    """Strip quantization suffix from model name to find base model."""
-    for suffix in QUANTIZATION_SUFFIXES:
-        if model_name.endswith(suffix):
-            return model_name[: -len(suffix)]
-    return model_name
-
-
 @pytest.fixture(scope="session")
 def training_model_path(model_resolver, infer_model_name) -> Path:
     """Find the non-quantized training model matching the inference server model."""
@@ -163,8 +159,10 @@ def adapter_lora_base_path(config) -> Path:
 
 
 @pytest.fixture
-def fast_lora_config() -> LoraConfig:
+def fast_lora_config():
     """Minimal LoRA config for fast tests."""
+    from llm_learn.training import LoraConfig
+
     return LoraConfig(
         r=8,
         lora_alpha=16,
@@ -174,8 +172,12 @@ def fast_lora_config() -> LoraConfig:
 
 
 @pytest.fixture
-def fast_training_config() -> TrainingConfig:
+def fast_training_config():
     """Minimal training config for fast tests."""
+    import torch
+
+    from llm_learn.training import TrainingConfig
+
     return TrainingConfig(
         num_epochs=1,
         batch_size=2,

@@ -9,11 +9,6 @@ from pathlib import Path
 
 import pytest
 
-# Training tests are marked automatically by conftest imports
-# Skip entire module if training deps not available
-pytest.importorskip("torch")
-pytest.importorskip("peft")
-
 
 @pytest.mark.training
 class TestLoraTraining:

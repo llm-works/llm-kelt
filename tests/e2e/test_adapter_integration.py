@@ -16,12 +16,6 @@ import pytest
 if os.environ.get("STANDALONE_TRAINING"):
     pytest.skip("Skipping integration tests in standalone mode", allow_module_level=True)
 
-# Skip if training deps not available
-pytest.importorskip("torch")
-pytest.importorskip("peft")
-
-from llm_learn.training import AdapterRegistry, LoraConfig, TrainingConfig, train_lora
-
 # Training data that creates a distinctive behavior
 # Train the model to always mention "PINEAPPLE" when asked about fruit
 DISTINCTIVE_SFT_DATA = [
@@ -49,6 +43,8 @@ def _write_jsonl(path: Path, data: list[dict]) -> Path:
 @pytest.fixture(scope="module")
 def adapter_registry(logger, adapter_lora_base_path, infer_server_url):
     """Create adapter registry pointing to llm-infer's adapter path."""
+    from llm_learn.training import AdapterRegistry
+
     return AdapterRegistry(
         lg=logger,
         base_path=adapter_lora_base_path,
@@ -60,6 +56,8 @@ def adapter_registry(logger, adapter_lora_base_path, infer_server_url):
 def trained_adapter(logger, training_model_path, tmp_path_factory):
     """Train a LoRA adapter with distinctive behavior on the inference server's model."""
     import torch
+
+    from llm_learn.training import LoraConfig, TrainingConfig, train_lora
 
     tmp_path = tmp_path_factory.mktemp("training")
 
