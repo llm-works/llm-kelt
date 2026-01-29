@@ -147,7 +147,7 @@ class ContextQuery:
         messages = self._build_messages(question, conversation)
 
         # Get response
-        response = await self._client.chat_async(
+        response: str = await self._client.chat_async(
             messages=messages,
             system=system if system else None,
             temperature=temperature if temperature is not None else self._temperature,
