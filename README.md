@@ -71,13 +71,14 @@ system_prompt = builder.build_system_prompt(
 RAG (Retrieval-Augmented Generation) finds facts relevant to each query using semantic similarity.
 
 ```python
+from llm_infer.client import LLMClient
 from llm_learn.inference import (
-    ContextBuilder, ContextQuery, Embedder, LLMClient, RAGArgs, embed_missing_facts
+    ContextBuilder, ContextQuery, Embedder, RAGArgs, embed_missing_facts
 )
 
-# 1. Embed facts for semantic search
+# 1. Embed facts for semantic search (model name discovered from server)
 embedder = Embedder(base_url="http://localhost:8001/v1")
-await embed_missing_facts(logger, embedder, learn.facts, model_name="default")
+await embed_missing_facts(logger, embedder, learn.facts)
 
 # 2. Create context-aware query interface
 llm_client = LLMClient.from_config(config)

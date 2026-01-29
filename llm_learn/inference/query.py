@@ -3,8 +3,8 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .backends import Message
-from .client import LLMClient
+from llm_infer.client import LLMClient
+
 from .context import ContextBuilder
 
 if TYPE_CHECKING:
@@ -29,15 +29,15 @@ class Conversation:
     Tracks messages for multi-turn conversations.
     """
 
-    messages: list[Message] = field(default_factory=list)
+    messages: list[dict[str, str]] = field(default_factory=list)
 
     def add_user(self, content: str) -> None:
         """Add a user message."""
-        self.messages.append(Message(role="user", content=content))
+        self.messages.append({"role": "user", "content": content})
 
     def add_assistant(self, content: str) -> None:
         """Add an assistant message."""
-        self.messages.append(Message(role="assistant", content=content))
+        self.messages.append({"role": "assistant", "content": content})
 
     def clear(self) -> None:
         """Clear conversation history."""
@@ -147,7 +147,7 @@ class ContextQuery:
         messages = self._build_messages(question, conversation)
 
         # Get response
-        response = await self._client.chat(
+        response: str = await self._client.chat_async(
             messages=messages,
             system=system if system else None,
             temperature=temperature if temperature is not None else self._temperature,
@@ -195,12 +195,12 @@ class ContextQuery:
         self,
         question: str,
         conversation: Conversation | None,
-    ) -> list[Message]:
+    ) -> list[dict[str, str]]:
         """Build message list, updating conversation if provided."""
         if conversation:
             conversation.add_user(question)
             return conversation.messages
-        return [Message(role="user", content=question)]
+        return [{"role": "user", "content": question}]
 
     async def ask_without_facts(
         self,
@@ -256,7 +256,7 @@ class ContextQuery:
 
     async def close(self) -> None:
         """Close the underlying LLM client."""
-        await self._client.close()
+        await self._client.aclose()
 
     async def __aenter__(self) -> "ContextQuery":
         """Async context manager entry."""

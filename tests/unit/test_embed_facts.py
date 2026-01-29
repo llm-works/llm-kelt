@@ -32,6 +32,7 @@ class TestEmbedMissingFacts:
         embedder = MagicMock()
         embedder.embed_batch_async = AsyncMock()
         embedder.embed_async = AsyncMock()
+        embedder.discover_async = AsyncMock(return_value="test-model")
         return embedder
 
     @pytest.fixture
@@ -58,9 +59,7 @@ class TestEmbedMissingFacts:
         """Test when no facts need embedding."""
         mock_facts_client.list_without_embeddings.return_value = []
 
-        result = await embed_missing_facts(
-            mock_logger, mock_embedder, mock_facts_client, "test-model"
-        )
+        result = await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
 
         assert result.processed == 0
         assert result.failed == 0
@@ -80,9 +79,7 @@ class TestEmbedMissingFacts:
             EmbeddingResult(embedding=[0.5, 0.6], model="test-model", prompt_tokens=5),
         ]
 
-        result = await embed_missing_facts(
-            mock_logger, mock_embedder, mock_facts_client, "test-model"
-        )
+        result = await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
 
         assert result.processed == 3
         assert result.failed == 0
@@ -111,7 +108,7 @@ class TestEmbedMissingFacts:
         ]
 
         result = await embed_missing_facts(
-            mock_logger, mock_embedder, mock_facts_client, "test-model", batch_size=2
+            mock_logger, mock_embedder, mock_facts_client, batch_size=2
         )
 
         assert result.processed == 3
@@ -131,9 +128,7 @@ class TestEmbedMissingFacts:
             embedding=[0.1], model="m", prompt_tokens=1
         )
 
-        result = await embed_missing_facts(
-            mock_logger, mock_embedder, mock_facts_client, "test-model"
-        )
+        result = await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
 
         assert result.processed == 3
         assert result.failed == 0
@@ -154,9 +149,7 @@ class TestEmbedMissingFacts:
             EmbeddingResult(embedding=[0.3], model="m", prompt_tokens=1),
         ]
 
-        result = await embed_missing_facts(
-            mock_logger, mock_embedder, mock_facts_client, "test-model"
-        )
+        result = await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
 
         assert result.processed == 2
         assert result.failed == 1
@@ -177,18 +170,19 @@ class TestEmbedMissingFacts:
         # Second set_embedding fails
         mock_facts_client.set_embedding.side_effect = [None, Exception("DB error"), None]
 
-        result = await embed_missing_facts(
-            mock_logger, mock_embedder, mock_facts_client, "test-model"
-        )
+        result = await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
 
         assert result.processed == 2
         assert result.failed == 1
 
     @pytest.mark.asyncio
-    async def test_embed_uses_correct_model_name(
+    async def test_embed_uses_discovered_model_name(
         self, mock_logger, mock_embedder, mock_facts_client, sample_facts
     ):
-        """Test that model_name is passed correctly to set_embedding."""
+        """Test that discovered model_name is used for queries and storage."""
+        # Override the default discover_async to return a custom model name
+        mock_embedder.discover_async = AsyncMock(return_value="discovered-model")
+
         mock_facts_client.list_without_embeddings.side_effect = [
             sample_facts[:1],
             [],
@@ -197,13 +191,12 @@ class TestEmbedMissingFacts:
             EmbeddingResult(embedding=[0.1, 0.2, 0.3], model="m", prompt_tokens=1),
         ]
 
-        await embed_missing_facts(
-            mock_logger, mock_embedder, mock_facts_client, "custom-model-name"
-        )
+        await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
 
-        mock_facts_client.list_without_embeddings.assert_called_with("custom-model-name", limit=50)
+        mock_embedder.discover_async.assert_called_once()
+        mock_facts_client.list_without_embeddings.assert_called_with("discovered-model", limit=50)
         mock_facts_client.set_embedding.assert_called_once_with(
-            1, [0.1, 0.2, 0.3], "custom-model-name"
+            1, [0.1, 0.2, 0.3], "discovered-model"
         )
 
     @pytest.mark.asyncio
@@ -213,9 +206,7 @@ class TestEmbedMissingFacts:
         """Test that custom batch_size is used."""
         mock_facts_client.list_without_embeddings.return_value = []
 
-        await embed_missing_facts(
-            mock_logger, mock_embedder, mock_facts_client, "test-model", batch_size=25
-        )
+        await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client, batch_size=25)
 
         mock_facts_client.list_without_embeddings.assert_called_once_with("test-model", limit=25)
 
@@ -235,9 +226,7 @@ class TestEmbedMissingFacts:
         ]
         mock_facts_client.set_embedding.side_effect = Exception("DB unavailable")
 
-        result = await embed_missing_facts(
-            mock_logger, mock_embedder, mock_facts_client, "test-model"
-        )
+        result = await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
 
         # Should have attempted once and stopped
         assert result.processed == 0

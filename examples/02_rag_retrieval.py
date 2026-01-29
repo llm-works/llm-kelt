@@ -41,13 +41,13 @@ from _helpers import (
 from appinfra.config import Config
 from appinfra.log import LogConfig, Logger, LoggerFactory
 from httpx import ConnectError, ConnectTimeout
+from llm_infer.client import LLMClient
 
 from llm_learn import LearnClient
 from llm_learn.inference import (
     ContextBuilder,
     ContextQuery,
     Embedder,
-    LLMClient,
     RAGArgs,
     embed_missing_facts,
 )
@@ -108,7 +108,7 @@ async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedde
     try:
         print(f"  {MUTED}Connecting to embedding server...{RESET}")
         result = await embed_missing_facts(
-            lg=lg, embedder=embedder, facts_client=learn.facts, model_name="default", batch_size=50
+            lg=lg, embedder=embedder, facts_client=learn.facts, batch_size=50
         )
         print(f"  {OK}✓ Embedded {result.processed} facts{RESET}")
         if result.failed:
@@ -155,7 +155,7 @@ async def demo_similarity_search(learn: LearnClient, embedder: Embedder):
 
     query_result = await embedder.embed_async(query)
     similar_facts = learn.facts.search_similar(
-        embedding=query_result.embedding, model_name="default", top_k=5, min_similarity=0.3
+        embedding=query_result.embedding, model_name=embedder.model, top_k=5, min_similarity=0.3
     )
 
     print(f"  {OK}Top matches:{RESET}")
@@ -169,7 +169,7 @@ async def demo_similarity_search(learn: LearnClient, embedder: Embedder):
 
     similar_security = learn.facts.search_similar(
         embedding=query_result.embedding,
-        model_name="default",
+        model_name=embedder.model,
         top_k=5,
         min_similarity=0.3,
         categories=["security"],
@@ -208,7 +208,7 @@ async def demo_rag_vs_static(learn: LearnClient, config: Config, embedder: Embed
     if embedder:
         query_result = await embedder.embed_async(question)
         similar = learn.facts.search_similar(
-            embedding=query_result.embedding, model_name="default", top_k=3, min_similarity=0.3
+            embedding=query_result.embedding, model_name=embedder.model, top_k=3, min_similarity=0.3
         )
         print(f"  {OK}Selected facts:{RESET}")
         for sf in similar:
@@ -248,7 +248,7 @@ async def demo_rag_query(learn: LearnClient, config: Config, embedder: Embedder 
         if len(response_clean) > 500:
             print(f"  {MUTED}[...truncated]{RESET}")
 
-        await llm_client.close()
+        await llm_client.aclose()
 
     except Exception as e:
         print(f"  {MUTED}[Skipped] No LLM backend: {type(e).__name__}{RESET}")

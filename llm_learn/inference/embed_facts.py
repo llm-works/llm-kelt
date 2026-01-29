@@ -68,29 +68,49 @@ async def _embed_individually(
     return processed, failed
 
 
+async def _process_batch(
+    lg: Logger,
+    facts: "Sequence[Fact]",
+    embedder: Embedder,
+    facts_client: FactsClient,
+    model_name: str,
+) -> tuple[int, int]:
+    """Process a single batch of facts, with fallback to individual embedding."""
+    try:
+        results = await embedder.embed_batch_async([f.content for f in facts])
+        return _store_embeddings(lg, facts, results, facts_client, model_name)
+    except Exception as e:
+        lg.warning(
+            "batch embedding failed, falling back to individual",
+            extra={"batch_size": len(facts), "exception": e},
+        )
+        return await _embed_individually(lg, facts, embedder, facts_client, model_name)
+
+
 async def embed_missing_facts(
     lg: Logger,
     embedder: Embedder,
     facts_client: FactsClient,
-    model_name: str,
     batch_size: int = 50,
 ) -> EmbedFactsResult:
     """
-    Embed all facts that don't have embeddings for the specified model.
+    Embed all facts that don't have embeddings for the embedder's model.
 
     Finds facts missing embeddings and generates them in batches.
     Continues processing even if individual embeddings fail.
+
+    The model name is discovered from the embedding server automatically.
 
     Args:
         lg: Logger instance.
         embedder: Embedder client for generating embeddings.
         facts_client: FactsClient for retrieving and updating facts.
-        model_name: Name of the embedding model (stored with embeddings).
         batch_size: Number of facts to embed per batch.
 
     Returns:
         EmbedFactsResult with counts of processed and failed facts.
     """
+    model_name = await embedder.discover_async()
     processed = 0
     failed = 0
 
@@ -99,20 +119,10 @@ async def embed_missing_facts(
         if not facts:
             break
 
-        try:
-            results = await embedder.embed_batch_async([f.content for f in facts])
-            p, f = _store_embeddings(lg, facts, results, facts_client, model_name)
-        except Exception as e:
-            lg.warning(
-                "batch embedding failed, falling back to individual",
-                extra={"batch_size": len(facts), "exception": e},
-            )
-            p, f = await _embed_individually(lg, facts, embedder, facts_client, model_name)
-
+        p, f = await _process_batch(lg, facts, embedder, facts_client, model_name)
         processed += p
         failed += f
 
-        # Break if no progress to avoid infinite loop on persistent failures
         if p == 0:
             lg.warning(
                 "no progress made in batch, stopping to avoid infinite loop",

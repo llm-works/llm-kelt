@@ -36,9 +36,10 @@ from _helpers import (
     ensure_demo_profile,
     psql_cmd,
 )
+from llm_infer.client import LLMClient
 
 from llm_learn import LearnClient
-from llm_learn.inference import ContextBuilder, ContextQuery, LLMClient
+from llm_learn.inference import ContextBuilder, ContextQuery
 
 
 def setup_facts(learn: LearnClient):
@@ -119,7 +120,7 @@ async def demo_context_query(context_builder: ContextBuilder):
         # First: Query WITHOUT context injection
         print(f"\n  {MUTED}Without context (plain LLM query):{RESET}")
         print(f"  {LLM_Q}Q: {question}{RESET}")
-        response_plain = await llm_client.chat(
+        response_plain = await llm_client.chat_async(
             messages=[{"role": "user", "content": question}],
             system="You are a coding assistant.",
         )
@@ -147,7 +148,7 @@ async def demo_context_query(context_builder: ContextBuilder):
             f"\n  {INFO}ℹ With context: response follows ERR-XXX format, includes request_id{RESET}"
         )
 
-        await llm_client.close()
+        await llm_client.aclose()
 
     except Exception as e:
         print(f"  {MUTED}[Skipped] No LLM backend: {type(e).__name__}{RESET}")

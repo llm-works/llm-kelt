@@ -43,16 +43,16 @@ class TestConversation:
         conv = Conversation()
         conv.add_user("Hello")
         assert len(conv.messages) == 1
-        assert conv.messages[0].role == "user"
-        assert conv.messages[0].content == "Hello"
+        assert conv.messages[0]["role"] == "user"
+        assert conv.messages[0]["content"] == "Hello"
 
     def test_add_assistant_message(self):
         """Test adding assistant message."""
         conv = Conversation()
         conv.add_assistant("Hi there")
         assert len(conv.messages) == 1
-        assert conv.messages[0].role == "assistant"
-        assert conv.messages[0].content == "Hi there"
+        assert conv.messages[0]["role"] == "assistant"
+        assert conv.messages[0]["content"] == "Hi there"
 
     def test_clear(self):
         """Test clearing conversation."""
@@ -70,8 +70,8 @@ class TestContextQueryRAG:
     def mock_client(self):
         """Create mock LLM client."""
         client = MagicMock()
-        client.chat = AsyncMock(return_value="Test response")
-        client.close = AsyncMock()
+        client.chat_async = AsyncMock(return_value="Test response")
+        client.aclose = AsyncMock()
         return client
 
     @pytest.fixture
@@ -180,8 +180,8 @@ class TestContextQueryRAG:
         mock_context_builder.build_system_prompt_from_facts.assert_called_once_with(
             "You are helpful.", [sample_fact]
         )
-        mock_client.chat.assert_called_once()
-        call_kwargs = mock_client.chat.call_args.kwargs
+        mock_client.chat_async.assert_called_once()
+        call_kwargs = mock_client.chat_async.call_args.kwargs
         assert call_kwargs["system"] == "RAG system prompt"
 
     @pytest.mark.asyncio
@@ -288,10 +288,10 @@ class TestContextQueryRAG:
 
         # Conversation should have both exchanges
         assert len(conv.messages) == 4
-        assert conv.messages[0].content == "First question"
-        assert conv.messages[1].content == "Test response"
-        assert conv.messages[2].content == "Follow up"
-        assert conv.messages[3].content == "Test response"
+        assert conv.messages[0]["content"] == "First question"
+        assert conv.messages[1]["content"] == "Test response"
+        assert conv.messages[2]["content"] == "Follow up"
+        assert conv.messages[3]["content"] == "Test response"
 
     @pytest.mark.asyncio
     async def test_ask_with_rag_no_facts_found(
@@ -441,8 +441,8 @@ class TestContextQueryBasic:
     def mock_client(self):
         """Create mock LLM client."""
         client = MagicMock()
-        client.chat = AsyncMock(return_value="Response")
-        client.close = AsyncMock()
+        client.chat_async = AsyncMock(return_value="Response")
+        client.aclose = AsyncMock()
         return client
 
     @pytest.fixture
@@ -463,7 +463,7 @@ class TestContextQueryBasic:
         response = await query.ask("Hello")
 
         assert response == "Response"
-        mock_client.chat.assert_called_once()
+        mock_client.chat_async.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_ask_without_facts(self, mock_client, mock_context_builder):
@@ -476,7 +476,7 @@ class TestContextQueryBasic:
 
         await query.ask("Hello", include_facts=False)
 
-        call_kwargs = mock_client.chat.call_args.kwargs
+        call_kwargs = mock_client.chat_async.call_args.kwargs
         assert call_kwargs["system"] == "Base prompt"
         mock_context_builder.build_system_prompt.assert_not_called()
 
@@ -489,7 +489,7 @@ class TestContextQueryBasic:
         ) as query:
             await query.ask("Test")
 
-        mock_client.close.assert_called_once()
+        mock_client.aclose.assert_called_once()
 
 
 class TestBuildSystemPromptFromFacts:

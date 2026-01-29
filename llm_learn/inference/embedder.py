@@ -43,19 +43,53 @@ class Embedder:
 
         Args:
             base_url: Base URL for the embedding API (e.g., "http://localhost:8001/v1").
-            model: Model name to use for embeddings.
+            model: Model name to send in requests (server may override).
             timeout: Request timeout in seconds.
         """
         self._base_url = base_url.rstrip("/")
-        self._model = model
+        self._request_model = model
+        self._discovered_model: str | None = None
         self._timeout = timeout
         self._client = httpx.Client(timeout=timeout)
         self._async_client: httpx.AsyncClient | None = None
 
     @property
     def model(self) -> str:
-        """Return the model name used for embeddings."""
-        return self._model
+        """Return the actual model name (discovered from server, or request model if not yet known)."""
+        return self._discovered_model or self._request_model
+
+    def _update_model(self, response_model: str | None) -> None:
+        """Cache the model name returned by the server."""
+        if response_model and self._discovered_model is None:
+            self._discovered_model = response_model
+
+    def discover(self) -> str:
+        """
+        Discover the actual model name from the server.
+
+        Makes a lightweight probe request to get the model name.
+        Caches the result for subsequent calls.
+
+        Returns:
+            The actual model name from the server.
+        """
+        if self._discovered_model is None:
+            self.embed("")  # Probe with empty string
+        return self._discovered_model or self._request_model
+
+    async def discover_async(self) -> str:
+        """
+        Discover the actual model name from the server (async).
+
+        Makes a lightweight probe request to get the model name.
+        Caches the result for subsequent calls.
+
+        Returns:
+            The actual model name from the server.
+        """
+        if self._discovered_model is None:
+            await self.embed_async("")  # Probe with empty string
+        return self._discovered_model or self._request_model
 
     def _get_async_client(self) -> httpx.AsyncClient:
         """Get or create the async HTTP client (lazy initialization)."""
@@ -113,14 +147,17 @@ class Embedder:
         """
         response = self._client.post(
             f"{self._base_url}/embeddings",
-            json={"model": self._model, "input": text},
+            json={"model": self._request_model, "input": text},
         )
         response.raise_for_status()
         data = response.json()
 
+        response_model = data.get("model", self._request_model)
+        self._update_model(response_model)
+
         return EmbeddingResult(
             embedding=data["data"][0]["embedding"],
-            model=data.get("model", self._model),
+            model=response_model,
             prompt_tokens=data.get("usage", {}).get("prompt_tokens", 0),
         )
 
@@ -142,11 +179,12 @@ class Embedder:
 
         response = self._client.post(
             f"{self._base_url}/embeddings",
-            json={"model": self._model, "input": texts},
+            json={"model": self._request_model, "input": texts},
         )
         response.raise_for_status()
         data = response.json()
 
+        self._update_model(data.get("model"))
         return self._parse_batch_response(data, len(texts))
 
     # -------------------------------------------------------------------------
@@ -169,14 +207,17 @@ class Embedder:
         client = self._get_async_client()
         response = await client.post(
             f"{self._base_url}/embeddings",
-            json={"model": self._model, "input": text},
+            json={"model": self._request_model, "input": text},
         )
         response.raise_for_status()
         data = response.json()
 
+        response_model = data.get("model", self._request_model)
+        self._update_model(response_model)
+
         return EmbeddingResult(
             embedding=data["data"][0]["embedding"],
-            model=data.get("model", self._model),
+            model=response_model,
             prompt_tokens=data.get("usage", {}).get("prompt_tokens", 0),
         )
 
@@ -199,11 +240,12 @@ class Embedder:
         client = self._get_async_client()
         response = await client.post(
             f"{self._base_url}/embeddings",
-            json={"model": self._model, "input": texts},
+            json={"model": self._request_model, "input": texts},
         )
         response.raise_for_status()
         data = response.json()
 
+        self._update_model(data.get("model"))
         return self._parse_batch_response(data, len(texts))
 
     # -------------------------------------------------------------------------
@@ -212,7 +254,7 @@ class Embedder:
 
     def _parse_batch_response(self, data: dict, num_texts: int) -> list[EmbeddingResult]:
         """Parse batch embedding response into EmbeddingResult list."""
-        model = data.get("model", self._model)
+        model = data.get("model", self.model)
         prompt_tokens = data.get("usage", {}).get("prompt_tokens", 0)
         tokens_per_text = prompt_tokens // num_texts if num_texts else 0
 

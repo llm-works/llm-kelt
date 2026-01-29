@@ -41,6 +41,7 @@ class TestEmbedMissingFactsIntegration:
 
         embedder.embed_batch_async = AsyncMock(side_effect=embed_batch_async)
         embedder.embed_async = AsyncMock(side_effect=embed_async)
+        embedder.discover_async = AsyncMock(return_value="test-model")
         return embedder
 
     @pytest.fixture
@@ -67,7 +68,7 @@ class TestEmbedMissingFactsIntegration:
         assert len(without) == 5
 
         # Run embedding
-        result = await embed_missing_facts(logger, mock_embedder, learn_client.facts, "test-model")
+        result = await embed_missing_facts(logger, mock_embedder, learn_client.facts)
 
         assert result.processed == 5
         assert result.failed == 0
@@ -94,7 +95,7 @@ class TestEmbedMissingFactsIntegration:
         learn_client.facts.set_embedding(sample_facts[1], [0.4, 0.5, 0.6], "test-model")
 
         # Run embedding
-        result = await embed_missing_facts(logger, mock_embedder, learn_client.facts, "test-model")
+        result = await embed_missing_facts(logger, mock_embedder, learn_client.facts)
 
         # Should only process the 3 without embeddings
         assert result.processed == 3
@@ -109,8 +110,11 @@ class TestEmbedMissingFactsIntegration:
         for fact_id in sample_facts:
             learn_client.facts.set_embedding(fact_id, [0.1, 0.2, 0.3], "model-a")
 
-        # Run embedding for model-b
-        result = await embed_missing_facts(logger, mock_embedder, learn_client.facts, "model-b")
+        # Update embedder to discover model-b
+        mock_embedder.discover_async = AsyncMock(return_value="model-b")
+
+        # Run embedding - should discover model-b and embed all for it
+        result = await embed_missing_facts(logger, mock_embedder, learn_client.facts)
 
         # Should embed all 5 for the new model
         assert result.processed == 5
@@ -127,9 +131,7 @@ class TestEmbedMissingFactsIntegration:
         self, logger, learn_client, mock_embedder, sample_facts
     ):
         """Test that batch_size controls how many facts are processed per batch."""
-        result = await embed_missing_facts(
-            logger, mock_embedder, learn_client.facts, "test-model", batch_size=2
-        )
+        result = await embed_missing_facts(logger, mock_embedder, learn_client.facts, batch_size=2)
 
         assert result.processed == 5
 
@@ -147,7 +149,7 @@ class TestEmbedMissingFactsIntegration:
         inactive_id = learn_client.facts.add("Inactive fact")
         learn_client.facts.deactivate(inactive_id)
 
-        result = await embed_missing_facts(logger, mock_embedder, learn_client.facts, "test-model")
+        result = await embed_missing_facts(logger, mock_embedder, learn_client.facts)
 
         # Only active fact should be embedded
         assert result.processed == 1
@@ -164,7 +166,7 @@ class TestEmbedMissingFactsIntegration:
     @pytest.mark.asyncio
     async def test_embed_empty_profile(self, logger, learn_client, mock_embedder, clean_tables):
         """Test embedding when profile has no facts."""
-        result = await embed_missing_facts(logger, mock_embedder, learn_client.facts, "test-model")
+        result = await embed_missing_facts(logger, mock_embedder, learn_client.facts)
 
         assert result.processed == 0
         assert result.failed == 0
