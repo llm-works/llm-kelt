@@ -1,5 +1,6 @@
 """Assertions client for simple facts about the user."""
 
+import math
 from dataclasses import dataclass
 from typing import cast
 
@@ -10,6 +11,84 @@ from ....core.exceptions import ValidationError
 from ....core.utils import utc_now
 from ..models import Fact
 from .base import FactClient
+
+
+def _validate_embedding(embedding: list[float]) -> None:
+    """Validate embedding vector contains valid finite numeric values."""
+    if not embedding:
+        raise ValidationError("Embedding cannot be empty")
+    for i, val in enumerate(embedding):
+        if not isinstance(val, (int, float)):
+            raise ValidationError(f"Embedding[{i}] must be numeric, got {type(val).__name__}")
+        if not math.isfinite(val):
+            raise ValidationError(f"Embedding[{i}] must be finite, got {val}")
+
+
+# Similarity search queries - separate constants to avoid f-string SQL construction
+# Note: Using CAST() instead of ::vector to avoid conflict with SQLAlchemy's :param syntax
+_SIMILARITY_QUERY_ACTIVE = text("""
+    SELECT
+        f.id, f.profile_id, f.type, f.content, f.category,
+        f.source, f.confidence, f.active, f.created_at, f.updated_at,
+        1 - (e.embedding <=> CAST(:embedding AS vector)) as similarity
+    FROM memv1_facts f
+    JOIN memv1_fact_embeddings e ON e.fact_id = f.id
+    WHERE f.profile_id = :profile_id
+      AND f.type = :fact_type
+      AND e.model_name = :model_name
+      AND f.active = true
+      AND 1 - (e.embedding <=> CAST(:embedding AS vector)) >= :min_similarity
+    ORDER BY e.embedding <=> CAST(:embedding AS vector)
+    LIMIT :top_k
+""")
+
+_SIMILARITY_QUERY_ACTIVE_WITH_CATEGORIES = text("""
+    SELECT
+        f.id, f.profile_id, f.type, f.content, f.category,
+        f.source, f.confidence, f.active, f.created_at, f.updated_at,
+        1 - (e.embedding <=> CAST(:embedding AS vector)) as similarity
+    FROM memv1_facts f
+    JOIN memv1_fact_embeddings e ON e.fact_id = f.id
+    WHERE f.profile_id = :profile_id
+      AND f.type = :fact_type
+      AND e.model_name = :model_name
+      AND f.active = true
+      AND f.category = ANY(:categories)
+      AND 1 - (e.embedding <=> CAST(:embedding AS vector)) >= :min_similarity
+    ORDER BY e.embedding <=> CAST(:embedding AS vector)
+    LIMIT :top_k
+""")
+
+_SIMILARITY_QUERY_ALL = text("""
+    SELECT
+        f.id, f.profile_id, f.type, f.content, f.category,
+        f.source, f.confidence, f.active, f.created_at, f.updated_at,
+        1 - (e.embedding <=> CAST(:embedding AS vector)) as similarity
+    FROM memv1_facts f
+    JOIN memv1_fact_embeddings e ON e.fact_id = f.id
+    WHERE f.profile_id = :profile_id
+      AND f.type = :fact_type
+      AND e.model_name = :model_name
+      AND 1 - (e.embedding <=> CAST(:embedding AS vector)) >= :min_similarity
+    ORDER BY e.embedding <=> CAST(:embedding AS vector)
+    LIMIT :top_k
+""")
+
+_SIMILARITY_QUERY_ALL_WITH_CATEGORIES = text("""
+    SELECT
+        f.id, f.profile_id, f.type, f.content, f.category,
+        f.source, f.confidence, f.active, f.created_at, f.updated_at,
+        1 - (e.embedding <=> CAST(:embedding AS vector)) as similarity
+    FROM memv1_facts f
+    JOIN memv1_fact_embeddings e ON e.fact_id = f.id
+    WHERE f.profile_id = :profile_id
+      AND f.type = :fact_type
+      AND e.model_name = :model_name
+      AND f.category = ANY(:categories)
+      AND 1 - (e.embedding <=> CAST(:embedding AS vector)) >= :min_similarity
+    ORDER BY e.embedding <=> CAST(:embedding AS vector)
+    LIMIT :top_k
+""")
 
 
 @dataclass
@@ -330,8 +409,11 @@ class AssertionsClient(FactClient[None]):
             model_name: Name of the embedding model
 
         Raises:
-            ValidationError: If fact doesn't exist or doesn't belong to this profile
+            ValidationError: If fact doesn't exist, doesn't belong to this profile,
+                or embedding is invalid (empty, non-numeric, NaN, or Inf)
         """
+        _validate_embedding(embedding)
+
         from ..models import FactEmbedding
 
         with self._session_factory() as session:
@@ -440,30 +522,12 @@ class AssertionsClient(FactClient[None]):
             return [self._row_to_scored_fact(row) for row in rows]
 
     def _get_similarity_query(self, active_only: bool, has_categories: bool):
-        """Build the similarity search SQL query."""
-        where_clauses = [
-            "f.profile_id = :profile_id",
-            "f.type = :fact_type",
-            "e.model_name = :model_name",
-        ]
+        """Return the appropriate similarity search SQL query constant."""
         if active_only:
-            where_clauses.append("f.active = true")
-        if has_categories:
-            where_clauses.append("f.category = ANY(:categories)")
-
-        where_sql = " AND ".join(where_clauses)
-
-        # Note: Using CAST() instead of ::vector to avoid conflict with
-        # SQLAlchemy's :param syntax which treats ::vector as part of param name
-        return text(f"""
-            SELECT
-                f.id, f.profile_id, f.type, f.content, f.category,
-                f.source, f.confidence, f.active, f.created_at, f.updated_at,
-                1 - (e.embedding <=> CAST(:embedding AS vector)) as similarity
-            FROM memv1_facts f
-            JOIN memv1_fact_embeddings e ON e.fact_id = f.id
-            WHERE {where_sql}
-            AND 1 - (e.embedding <=> CAST(:embedding AS vector)) >= :min_similarity
-            ORDER BY e.embedding <=> CAST(:embedding AS vector)
-            LIMIT :top_k
-        """)
+            if has_categories:
+                return _SIMILARITY_QUERY_ACTIVE_WITH_CATEGORIES
+            return _SIMILARITY_QUERY_ACTIVE
+        else:
+            if has_categories:
+                return _SIMILARITY_QUERY_ALL_WITH_CATEGORIES
+            return _SIMILARITY_QUERY_ALL
