@@ -1,6 +1,7 @@
 """Core infrastructure for Learn framework.
 
 Provides database, models, exceptions, and export utilities.
+Memory models (facts, predictions, etc.) are in memory.v1.
 """
 
 from .database import Database
@@ -14,12 +15,6 @@ from .exceptions import (
 from .models import (
     Base,
     Content,
-    Directive,
-    Fact,
-    Feedback,
-    Interaction,
-    Prediction,
-    PreferencePair,
     Profile,
     Workspace,
 )
@@ -28,17 +23,11 @@ from .utils import utc_now
 __all__ = [
     # Database
     "Database",
-    # Models
+    # Core Models (memory models are in memory.v1)
     "Base",
     "Workspace",
     "Profile",
     "Content",
-    "Directive",
-    "Fact",
-    "Feedback",
-    "Interaction",
-    "Prediction",
-    "PreferencePair",
     # Exceptions
     "LearnError",
     "ValidationError",

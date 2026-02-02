@@ -110,11 +110,21 @@ def record_sample_data(learn: LearnClient):
     print(f"\n{H2}▶ Recording Sample Data{RESET}")
 
     # Clear existing data for clean demo
-    from llm_learn.core.models import Content, Feedback, PreferencePair
+    from llm_learn.core.models import Content
+    from llm_learn.memory.v1.models import Fact, FeedbackDetails, PreferenceDetails
 
     with learn.database.session() as session:
-        session.query(Feedback).filter_by(profile_id=learn.profile_id).delete()
-        session.query(PreferencePair).filter_by(profile_id=learn.profile_id).delete()
+        session.query(FeedbackDetails).filter(
+            FeedbackDetails.fact_id.in_(
+                session.query(Fact.id).filter_by(profile_id=learn.profile_id, type="feedback")
+            )
+        ).delete(synchronize_session=False)
+        session.query(PreferenceDetails).filter(
+            PreferenceDetails.fact_id.in_(
+                session.query(Fact.id).filter_by(profile_id=learn.profile_id, type="preference")
+            )
+        ).delete(synchronize_session=False)
+        session.query(Fact).filter_by(profile_id=learn.profile_id).delete()
         session.query(Content).filter_by(profile_id=learn.profile_id).delete()
         session.commit()
     print(f"  {MUTED}Cleared existing data for clean demo{RESET}")
@@ -128,18 +138,12 @@ def record_sample_data(learn: LearnClient):
     # Positive feedback for good responses
     for cid in content_ids[:4]:
         learn.feedback.record(
-            content_text=_SAMPLE_CONTENT[content_ids.index(cid)][0],
-            signal="positive",
-            strength=0.9,
-            tags=["clear", "concise"],
+            signal="positive", content_id=cid, strength=0.9, tags=["clear", "concise"]
         )
 
     # Negative feedback for bad response
     learn.feedback.record(
-        content_text=_SAMPLE_CONTENT[4][0],
-        signal="negative",
-        strength=0.8,
-        tags=["verbose", "unclear"],
+        signal="negative", content_id=content_ids[4], strength=0.8, tags=["verbose", "unclear"]
     )
 
     print(f"  {OK}✓ Recorded {learn.feedback.count()} feedback entries{RESET}")
@@ -147,18 +151,24 @@ def record_sample_data(learn: LearnClient):
     # Record preference pairs
     for context, chosen, rejected in _PREFERENCE_PAIRS:
         learn.preferences.record(
-            context=context, chosen=chosen, rejected=rejected, domain="ml_explanations", margin=0.8
+            context=context,
+            chosen=chosen,
+            rejected=rejected,
+            category="ml_explanations",
+            margin=0.8,
         )
 
     print(f"  {OK}✓ Recorded {learn.preferences.count()} preference pairs{RESET}")
 
     print(
-        f'\n  {CMD}▸ Verify feedback:{RESET} {psql_cmd(learn)} -c "SELECT id, signal, strength '
-        f'FROM feedback WHERE profile_id={learn.profile_id} LIMIT 5;"'
+        f'\n  {CMD}▸ Verify feedback:{RESET} {psql_cmd(learn)} -c "SELECT f.id, d.signal, d.strength '
+        f"FROM memv1_facts f JOIN memv1_feedback_details d ON f.id = d.fact_id "
+        f'WHERE f.profile_id={learn.profile_id} LIMIT 5;"'
     )
     print(
-        f'  {CMD}▸ Verify preferences:{RESET} {psql_cmd(learn)} -c "SELECT id, domain, margin '
-        f'FROM preferences WHERE profile_id={learn.profile_id} LIMIT 5;"'
+        f'  {CMD}▸ Verify preferences:{RESET} {psql_cmd(learn)} -c "SELECT f.id, f.category, d.margin '
+        f"FROM memv1_facts f JOIN memv1_preference_details d ON f.id = d.fact_id "
+        f'WHERE f.profile_id={learn.profile_id} LIMIT 5;"'
     )
 
 
@@ -172,7 +182,7 @@ def demo_dpo_export(output_dir: Path, learn: LearnClient):
         session_factory=learn.database.session,
         profile_id=learn.profile_id,
         output_path=output_dir / "preferences_dpo.jsonl",
-        domain="ml_explanations",
+        category="ml_explanations",
     )
     print_export_result(result)
 

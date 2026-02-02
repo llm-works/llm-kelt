@@ -154,19 +154,29 @@ def create_training_data(learn: LearnClient):
     print(f"\n{H2}▶ Creating Training Data{RESET}")
 
     # Clear existing data
-    from llm_learn.core.models import Content, Feedback, PreferencePair
+    from llm_learn.core.models import Content
+    from llm_learn.memory.v1.models import Fact, FeedbackDetails, PreferenceDetails
 
     with learn.database.session() as session:
-        session.query(Feedback).filter_by(profile_id=learn.profile_id).delete()
-        session.query(PreferencePair).filter_by(profile_id=learn.profile_id).delete()
+        session.query(FeedbackDetails).filter(
+            FeedbackDetails.fact_id.in_(
+                session.query(Fact.id).filter_by(profile_id=learn.profile_id, type="feedback")
+            )
+        ).delete(synchronize_session=False)
+        session.query(PreferenceDetails).filter(
+            PreferenceDetails.fact_id.in_(
+                session.query(Fact.id).filter_by(profile_id=learn.profile_id, type="preference")
+            )
+        ).delete(synchronize_session=False)
+        session.query(Fact).filter_by(profile_id=learn.profile_id).delete()
         session.query(Content).filter_by(profile_id=learn.profile_id).delete()
         session.commit()
 
     # Create training examples with positive feedback
     for title, response in _TRAINING_DATA:
-        learn.content.create(content_text=response, source="example", title=title)
+        cid = learn.content.create(content_text=response, source="example", title=title)
         learn.feedback.record(
-            content_text=response, signal="positive", strength=0.95, tags=["concise", "structured"]
+            signal="positive", content_id=cid, strength=0.95, tags=["concise", "structured"]
         )
 
     print(f"  {OK}✓ Created {len(_TRAINING_DATA)} training examples{RESET}")

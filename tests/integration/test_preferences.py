@@ -10,50 +10,50 @@ class TestPreferencesClient:
 
     def test_record_preference_pair(self, learn_client, clean_tables):
         """Test recording a preference pair."""
-        pair_id = learn_client.preferences.record(
+        fact_id = learn_client.preferences.record(
             context="Summarize this article",
             chosen="Concise 3-bullet summary",
             rejected="Verbose 500-word essay",
             margin=0.7,
-            domain="synthesis",
+            category="synthesis",
         )
 
-        assert pair_id > 0
+        assert fact_id > 0
 
-        pair = learn_client.preferences.get(pair_id)
-        assert pair is not None
-        assert pair.context == "Summarize this article"
-        assert pair.chosen == "Concise 3-bullet summary"
-        assert pair.rejected == "Verbose 500-word essay"
-        assert pair.margin == 0.7
-        assert pair.domain == "synthesis"
+        fact = learn_client.preferences.get(fact_id)
+        assert fact is not None
+        assert fact.preference_details.context == "Summarize this article"
+        assert fact.preference_details.chosen == "Concise 3-bullet summary"
+        assert fact.preference_details.rejected == "Verbose 500-word essay"
+        assert fact.preference_details.margin == 0.7
+        assert fact.category == "synthesis"
 
     def test_record_without_margin(self, learn_client, clean_tables):
         """Test recording pair without margin."""
-        pair_id = learn_client.preferences.record(
+        fact_id = learn_client.preferences.record(
             context="Context",
             chosen="Good response",
             rejected="Bad response",
         )
 
-        pair = learn_client.preferences.get(pair_id)
-        assert pair.margin is None
+        fact = learn_client.preferences.get(fact_id)
+        assert fact.preference_details.margin is None
 
     def test_record_with_metadata(self, learn_client, clean_tables):
         """Test recording pair with metadata."""
-        pair_id = learn_client.preferences.record(
+        fact_id = learn_client.preferences.record(
             context="Context",
             chosen="Good",
             rejected="Bad",
             metadata={"model": "gpt-4", "temperature": 0.7},
         )
 
-        pair = learn_client.preferences.get(pair_id)
-        assert pair.metadata_ == {"model": "gpt-4", "temperature": 0.7}
+        fact = learn_client.preferences.get(fact_id)
+        assert fact.preference_details.metadata_ == {"model": "gpt-4", "temperature": 0.7}
 
     def test_empty_context_raises(self, learn_client, clean_tables):
         """Test that empty context raises ValidationError."""
-        with pytest.raises(ValidationError, match="Context cannot be empty"):
+        with pytest.raises(ValidationError, match="context cannot be empty"):
             learn_client.preferences.record(
                 context="",
                 chosen="Good",
@@ -62,7 +62,7 @@ class TestPreferencesClient:
 
     def test_empty_chosen_raises(self, learn_client, clean_tables):
         """Test that empty chosen raises ValidationError."""
-        with pytest.raises(ValidationError, match="Chosen response cannot be empty"):
+        with pytest.raises(ValidationError, match="chosen cannot be empty"):
             learn_client.preferences.record(
                 context="Context",
                 chosen="",
@@ -71,7 +71,7 @@ class TestPreferencesClient:
 
     def test_empty_rejected_raises(self, learn_client, clean_tables):
         """Test that empty rejected raises ValidationError."""
-        with pytest.raises(ValidationError, match="Rejected response cannot be empty"):
+        with pytest.raises(ValidationError, match="rejected cannot be empty"):
             learn_client.preferences.record(
                 context="Context",
                 chosen="Good",
@@ -80,7 +80,7 @@ class TestPreferencesClient:
 
     def test_invalid_margin_raises(self, learn_client, clean_tables):
         """Test that invalid margin raises ValidationError."""
-        with pytest.raises(ValidationError, match="Margin must be"):
+        with pytest.raises(ValidationError, match="margin must be"):
             learn_client.preferences.record(
                 context="Context",
                 chosen="Good",
@@ -88,26 +88,26 @@ class TestPreferencesClient:
                 margin=1.5,
             )
 
-    def test_list_by_domain(self, learn_client, clean_tables):
-        """Test listing pairs by domain."""
-        learn_client.preferences.record(context="A", chosen="G", rejected="B", domain="synthesis")
-        learn_client.preferences.record(context="B", chosen="G", rejected="B", domain="analysis")
-        learn_client.preferences.record(context="C", chosen="G", rejected="B", domain="synthesis")
+    def test_list_by_category(self, learn_client, clean_tables):
+        """Test listing pairs by category."""
+        learn_client.preferences.record(context="A", chosen="G", rejected="B", category="synthesis")
+        learn_client.preferences.record(context="B", chosen="G", rejected="B", category="analysis")
+        learn_client.preferences.record(context="C", chosen="G", rejected="B", category="synthesis")
 
-        synthesis = learn_client.preferences.list_by_domain("synthesis")
+        synthesis = learn_client.preferences.list_by_category("synthesis")
         assert len(synthesis) == 2
 
-        analysis = learn_client.preferences.list_by_domain("analysis")
+        analysis = learn_client.preferences.list_by_category("analysis")
         assert len(analysis) == 1
 
-    def test_list_domains(self, learn_client, clean_tables):
-        """Test listing unique domains."""
-        learn_client.preferences.record(context="A", chosen="G", rejected="B", domain="synthesis")
-        learn_client.preferences.record(context="B", chosen="G", rejected="B", domain="analysis")
-        learn_client.preferences.record(context="C", chosen="G", rejected="B", domain="synthesis")
+    def test_get_categories(self, learn_client, clean_tables):
+        """Test getting unique categories."""
+        learn_client.preferences.record(context="A", chosen="G", rejected="B", category="synthesis")
+        learn_client.preferences.record(context="B", chosen="G", rejected="B", category="analysis")
+        learn_client.preferences.record(context="C", chosen="G", rejected="B", category="synthesis")
 
-        domains = learn_client.preferences.list_domains()
-        assert set(domains) == {"analysis", "synthesis"}
+        categories = learn_client.preferences.get_categories()
+        assert set(categories) == {"analysis", "synthesis"}
 
     def test_count(self, learn_client, clean_tables):
         """Test counting preference pairs."""

@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING
 
 from appinfra.log import Logger
 
-from ..collection.facts import FactsClient
-from ..core.models import Fact
+from ..memory.v1.clients import AssertionsClient
+from ..memory.v1.models import Fact
 from .embedder import Embedder, EmbeddingResult
 
 if TYPE_CHECKING:
@@ -25,7 +25,7 @@ def _store_embeddings(
     lg: Logger,
     facts: "Sequence[Fact]",
     results: list[EmbeddingResult],
-    facts_client: FactsClient,
+    facts_client: AssertionsClient,
     model_name: str,
 ) -> tuple[int, int]:
     """Store embeddings for facts, returning (processed, failed) counts."""
@@ -48,7 +48,7 @@ async def _embed_individually(
     lg: Logger,
     facts: "Sequence[Fact]",
     embedder: Embedder,
-    facts_client: FactsClient,
+    facts_client: AssertionsClient,
     model_name: str,
 ) -> tuple[int, int]:
     """Embed facts one at a time as fallback, returning (processed, failed) counts."""
@@ -72,7 +72,7 @@ async def _process_batch(
     lg: Logger,
     facts: "Sequence[Fact]",
     embedder: Embedder,
-    facts_client: FactsClient,
+    facts_client: AssertionsClient,
     model_name: str,
 ) -> tuple[int, int]:
     """Process a single batch of facts, with fallback to individual embedding."""
@@ -90,7 +90,7 @@ async def _process_batch(
 async def embed_missing_facts(
     lg: Logger,
     embedder: Embedder,
-    facts_client: FactsClient,
+    facts_client: AssertionsClient,
     batch_size: int = 50,
 ) -> EmbedFactsResult:
     """
@@ -104,7 +104,7 @@ async def embed_missing_facts(
     Args:
         lg: Logger instance.
         embedder: Embedder client for generating embeddings.
-        facts_client: FactsClient for retrieving and updating facts.
+        facts_client: AssertionsClient for retrieving and updating facts.
         batch_size: Number of facts to embed per batch.
 
     Returns:

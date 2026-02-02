@@ -10,15 +10,13 @@ For LLM client functionality, use llm_infer.client directly:
 
 Usage:
     from llm_infer.client import LLMClient
-    from llm_learn.core import Database
-    from llm_learn.collection import FactsClient
+    from llm_learn import LearnClient
     from llm_learn.inference import ContextBuilder
 
     # Setup
-    db = Database(config)
-    facts = FactsClient(db.session, profile_id=1)
+    learn = LearnClient(profile_id=1)
     client = LLMClient.from_config(config["llm"])
-    context = ContextBuilder(facts)
+    context = ContextBuilder(learn.assertions)
 
     # Build prompt with facts injected
     system = context.build_system_prompt("You are a helpful assistant.")

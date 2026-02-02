@@ -71,7 +71,8 @@ def setup_facts(learn: LearnClient):
         print(f"    {MUTED}id={fact.id}{RESET} {INFO}[{fact.category}]{RESET} {fact.content}")
 
     print(
-        f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(learn)} -c "SELECT id, category, content FROM facts WHERE profile_id={learn.profile_id} AND active=true;"'
+        f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(learn)} -c "SELECT id, category, content '
+        f'FROM memv1_facts WHERE profile_id={learn.profile_id} AND active=true;"'
     )
 
 
@@ -187,12 +188,15 @@ def demo_fact_management(learn: LearnClient):
 
     # Get statistics
     stats = learn.get_stats()
+    v1_stats = stats["v1"]
     print(
-        f"  {INFO}ℹ{RESET} Profile stats: facts={stats['facts']}, feedback={stats['feedback']}, content={stats['content']}"
+        f"  {INFO}ℹ{RESET} Profile stats: assertions={v1_stats['assertions']}, "
+        f"feedback={v1_stats['feedback']}, content={stats['content']}"
     )
 
     print(
-        f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(learn)} -c "SELECT id, active, content FROM facts WHERE id={fact.id};"'
+        f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(learn)} -c "SELECT id, active, content '
+        f'FROM memv1_facts WHERE id={fact.id};"'
     )
 
 

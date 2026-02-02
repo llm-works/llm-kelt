@@ -15,8 +15,9 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..core.models import Content, Feedback, PreferencePair
+from ..core.models import Content
 from ..core.utils import utc_now
+from ..memory.v1.models import Fact, FeedbackDetails, PreferenceDetails
 
 
 @dataclass
@@ -30,20 +31,20 @@ class ExportResult:
     exported_at: datetime
 
 
-def _build_sft_instruction(feedback: Feedback, content: Content) -> str:
+def _build_sft_instruction(fact: Fact, details: FeedbackDetails, content: Content) -> str:
     """Build instruction string from feedback tags, comment, and content title."""
     parts = []
-    if feedback.tags:
-        parts.append(f"Tags: {', '.join(feedback.tags)}")
-    if feedback.comment:
-        parts.append(feedback.comment)
+    if details.tags:
+        parts.append(f"Tags: {', '.join(details.tags)}")
+    if details.comment:
+        parts.append(details.comment)
     if content.title:
         parts.append(f"Topic: {content.title}")
     return " | ".join(parts) if parts else "Generate"
 
 
 def _build_sft_record(
-    feedback: Feedback, content: Content, include_context: bool
+    fact: Fact, details: FeedbackDetails, content: Content, include_context: bool
 ) -> dict[str, str] | None:
     """Build a single SFT training record from feedback and content.
 
@@ -52,14 +53,14 @@ def _build_sft_record(
     if not content.content_text:
         return None
     record: dict[str, str] = {
-        "instruction": _build_sft_instruction(feedback, content),
+        "instruction": _build_sft_instruction(fact, details, content),
         "output": content.content_text,
     }
-    if include_context and feedback.context:
+    if include_context and details.context:
         context_str = (
-            json.dumps(feedback.context)
-            if isinstance(feedback.context, dict)
-            else str(feedback.context)
+            json.dumps(details.context)
+            if isinstance(details.context, dict)
+            else str(details.context)
         )
         record["input"] = context_str
     return record
@@ -76,24 +77,28 @@ def _write_jsonl(f, records_iter, record_builder) -> int:
     return count
 
 
-def _dpo_record_from_pair(pair: PreferencePair) -> dict[str, str]:
+def _dpo_record_from_row(row: tuple[Fact, PreferenceDetails]) -> dict[str, str]:
     """Convert preference pair to DPO training record."""
-    return {"prompt": pair.context, "chosen": pair.chosen, "rejected": pair.rejected}
+    fact, details = row
+    return {"prompt": details.context, "chosen": details.chosen, "rejected": details.rejected}
 
 
-def _classifier_record_from_row(row: tuple[Feedback, Content]) -> dict[str, str | int] | None:
+def _classifier_record_from_row(
+    row: tuple[Fact, FeedbackDetails, Content],
+) -> dict[str, str | int] | None:
     """Convert feedback+content to classifier record. Returns None if no content text."""
-    feedback, content = row
+    fact, details, content = row
     if not content.content_text:
         return None
-    return {"text": content.content_text, "label": 1 if feedback.signal == "positive" else 0}
+    return {"text": content.content_text, "label": 1 if details.signal == "positive" else 0}
 
 
 def _sft_record_builder(include_context: bool):
     """Return a function that builds SFT records with the given context setting."""
 
-    def builder(row: tuple[Feedback, Content]) -> dict[str, str] | None:
-        return _build_sft_record(row[0], row[1], include_context)
+    def builder(row: tuple[Fact, FeedbackDetails, Content]) -> dict[str, str] | None:
+        fact, details, content = row
+        return _build_sft_record(fact, details, content, include_context)
 
     return builder
 
@@ -107,17 +112,46 @@ def _build_feedback_query(
 ):
     """Build SQLAlchemy query for feedback with content."""
     stmt = (
-        select(Feedback, Content)
-        .join(Content, Feedback.content_id == Content.id)
-        .where(Feedback.profile_id == profile_id, Feedback.strength >= min_strength)
+        select(Fact, FeedbackDetails, Content)
+        .join(FeedbackDetails, Fact.id == FeedbackDetails.fact_id)
+        .join(Content, FeedbackDetails.content_id == Content.id)
+        .where(
+            Fact.profile_id == profile_id,
+            Fact.type == "feedback",
+            FeedbackDetails.strength >= min_strength,
+        )
     )
     if signals is not None:
-        stmt = stmt.where(Feedback.signal.in_(signals))
+        stmt = stmt.where(FeedbackDetails.signal.in_(signals))
     if since is not None:
-        stmt = stmt.where(Feedback.created_at >= since)
+        stmt = stmt.where(Fact.created_at >= since)
     if until is not None:
-        stmt = stmt.where(Feedback.created_at <= until)
-    return stmt.order_by(Feedback.created_at)
+        stmt = stmt.where(Fact.created_at <= until)
+    return stmt.order_by(Fact.created_at)
+
+
+def _build_preferences_query(
+    profile_id: int,
+    category: str | None,
+    since: datetime | None,
+    until: datetime | None,
+    min_margin: float | None,
+):
+    """Build SQLAlchemy query for preference pairs."""
+    stmt = (
+        select(Fact, PreferenceDetails)
+        .join(PreferenceDetails, Fact.id == PreferenceDetails.fact_id)
+        .where(Fact.profile_id == profile_id, Fact.type == "preference")
+    )
+    if category is not None:
+        stmt = stmt.where(Fact.category == category)
+    if since is not None:
+        stmt = stmt.where(Fact.created_at >= since)
+    if until is not None:
+        stmt = stmt.where(Fact.created_at <= until)
+    if min_margin is not None:
+        stmt = stmt.where(PreferenceDetails.margin >= min_margin)
+    return stmt.order_by(Fact.created_at)
 
 
 def export_preferences_dpo(
@@ -125,55 +159,22 @@ def export_preferences_dpo(
     profile_id: int,
     output_path: str | Path,
     *,
-    domain: str | None = None,
+    category: str | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
     min_margin: float | None = None,
 ) -> ExportResult:
-    """
-    Export preference pairs in TRL DPO format.
-
-    Output format (JSONL):
-        {"prompt": str, "chosen": str, "rejected": str}
-
-    Args:
-        session_factory: Database session factory
-        profile_id: Profile to export from
-        output_path: Path to write JSONL file
-        domain: Filter by domain (optional)
-        since: Only export pairs created after this time
-        until: Only export pairs created before this time
-        min_margin: Only export pairs with margin >= this value
-
-    Returns:
-        ExportResult with path, count, and metadata
-    """
+    """Export preference pairs in TRL DPO format: {prompt, chosen, rejected}."""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with session_factory() as session:
-        stmt = select(PreferencePair).where(PreferencePair.profile_id == profile_id)
-
-        if domain is not None:
-            stmt = stmt.where(PreferencePair.domain == domain)
-        if since is not None:
-            stmt = stmt.where(PreferencePair.created_at >= since)
-        if until is not None:
-            stmt = stmt.where(PreferencePair.created_at <= until)
-        if min_margin is not None:
-            stmt = stmt.where(PreferencePair.margin >= min_margin)
-
-        stmt = stmt.order_by(PreferencePair.created_at)
-
+        stmt = _build_preferences_query(profile_id, category, since, until, min_margin)
         with output_path.open("w", encoding="utf-8") as f:
-            count = _write_jsonl(f, session.scalars(stmt), _dpo_record_from_pair)
+            count = _write_jsonl(f, session.execute(stmt), _dpo_record_from_row)
 
     return ExportResult(
-        path=output_path,
-        count=count,
-        profile_id=profile_id,
-        format="dpo",
-        exported_at=utc_now(),
+        path=output_path, count=count, profile_id=profile_id, format="dpo", exported_at=utc_now()
     )
 
 
