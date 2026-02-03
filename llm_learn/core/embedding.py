@@ -132,7 +132,12 @@ class EmbeddingStore:
 
         Returns:
             The stored Embedding record.
+
+        Raises:
+            ValidationError: If embedding is empty or contains non-finite values.
         """
+        _validate_embedding(embedding)
+
         with self._session_factory() as session:
             # Check for existing
             stmt = select(Embedding).where(
