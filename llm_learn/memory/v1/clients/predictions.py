@@ -79,7 +79,6 @@ class PredictionsClient(FactClient[PredictionDetails]):
         resolution_metric: dict | None = None,
         category: str | None = None,
         tags: list[str] | None = None,
-        confidence_reasoning: str | None = None,
         verification_source: str | None = None,
         verification_url: str | None = None,
     ) -> int:
@@ -284,6 +283,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
                 .where(
                     Fact.profile_id == self.profile_id,
                     Fact.type == self.fact_type,
+                    Fact.active == True,  # noqa: E712
                     PredictionDetails.status == "resolved",
                     PredictionDetails.outcome.in_(["correct", "incorrect"]),
                 )
