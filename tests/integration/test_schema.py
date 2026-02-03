@@ -57,7 +57,13 @@ class TestSchemaManager:
         assert status1.current_version == status2.current_version == status3.current_version
 
     def test_ensure_schema_concurrent(self, logger, database):
-        """Test that concurrent ensure_schema calls are safe."""
+        """Test that concurrent ensure_schema calls are safe.
+
+        Note: This tests thread-safety within a single process. Cross-process safety
+        relies on PostgreSQL advisory locks with a fixed lock key (not Python's hash()).
+        Multi-process testing would require subprocess spawning which is more complex
+        and typically done in integration/e2e test suites.
+        """
         results = []
         errors = []
         lock = threading.Lock()
@@ -137,18 +143,19 @@ class TestSchemaManager:
 
     def test_lock_timeout_non_blocking(self, logger, database):
         """Test that non-blocking lock fails fast when lock is held."""
+        from llm_learn.core.schema import _ADVISORY_LOCK_KEY
+
         manager = SchemaManager(logger, database.engine)
 
-        # Acquire lock manually
-        with database.engine.connect() as conn:
-            # Use the same lock key as SchemaManager
-            lock_key = hash("llm_learn_schema_migration") & 0x7FFFFFFFFFFFFFFF
-            conn.execute(text(f"SELECT pg_advisory_lock({lock_key})"))
+        # Acquire lock manually using the same fixed key as SchemaManager
+        with database.engine.connect() as holder_conn:
+            holder_conn.execute(text(f"SELECT pg_advisory_lock({_ADVISORY_LOCK_KEY})"))
 
             try:
-                # Non-blocking attempt should fail
-                acquired = manager._acquire_lock(wait=False, timeout_seconds=1.0)
-                assert acquired is False
+                # Non-blocking attempt on a different connection should fail
+                with database.engine.connect() as test_conn:
+                    acquired = manager._acquire_lock(test_conn, wait=False, timeout_seconds=1.0)
+                    assert acquired is False
             finally:
-                conn.execute(text(f"SELECT pg_advisory_unlock({lock_key})"))
-                conn.commit()
+                holder_conn.execute(text(f"SELECT pg_advisory_unlock({_ADVISORY_LOCK_KEY})"))
+                holder_conn.commit()

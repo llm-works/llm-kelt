@@ -23,9 +23,11 @@ if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
 
 
-# Advisory lock key: hash of "llm_learn_schema_migration" truncated to 64-bit signed int
-# Using a consistent key ensures all processes coordinate on the same lock
-_ADVISORY_LOCK_KEY = hash("llm_learn_schema_migration") & 0x7FFFFFFFFFFFFFFF
+# Advisory lock key for schema migrations.
+# IMPORTANT: This must be a fixed constant, not computed with hash(), because Python's
+# hash() uses a randomized seed (since 3.3) that differs between processes.
+# Value chosen arbitrarily but must remain stable across all library versions.
+_ADVISORY_LOCK_KEY = 7829104563218907456
 
 
 class SchemaState(Enum):
@@ -149,42 +151,45 @@ class SchemaManager:
             head_version=head_version,
         )
 
-    def _acquire_lock(self, wait: bool, timeout_seconds: float) -> bool:
+    def _acquire_lock(self, conn, wait: bool, timeout_seconds: float) -> bool:
         """Acquire advisory lock for schema operations.
 
+        IMPORTANT: The lock is session-level, meaning it's held until the connection
+        closes or pg_advisory_unlock is called. The caller must keep `conn` open
+        for the duration of the protected operation.
+
         Args:
+            conn: SQLAlchemy connection to acquire lock on (must stay open!)
             wait: If True, block until lock acquired. If False, return immediately.
             timeout_seconds: Max time to wait if blocking.
 
         Returns:
             True if lock acquired, False if not (only when wait=False or timeout)
         """
-        with self._engine.connect() as conn:
-            if wait:
-                # Set statement timeout and use blocking lock
-                conn.execute(
-                    text(f"SET LOCAL statement_timeout = '{int(timeout_seconds * 1000)}ms'")
-                )
-                try:
-                    conn.execute(text(f"SELECT pg_advisory_lock({_ADVISORY_LOCK_KEY})"))
-                    conn.commit()
-                    return True
-                except Exception as e:
-                    self._lg.warning("Failed to acquire schema lock", extra={"exception": e})
-                    return False
-            else:
-                # Non-blocking attempt
-                result = conn.execute(
-                    text(f"SELECT pg_try_advisory_lock({_ADVISORY_LOCK_KEY})")
-                ).scalar()
-                conn.commit()
-                return bool(result)
+        if wait:
+            # Set statement timeout and use blocking lock
+            conn.execute(text(f"SET LOCAL statement_timeout = '{int(timeout_seconds * 1000)}ms'"))
+            try:
+                conn.execute(text(f"SELECT pg_advisory_lock({_ADVISORY_LOCK_KEY})"))
+                return True
+            except Exception as e:
+                self._lg.warning("Failed to acquire schema lock", extra={"exception": e})
+                return False
+        else:
+            # Non-blocking attempt
+            result = conn.execute(
+                text(f"SELECT pg_try_advisory_lock({_ADVISORY_LOCK_KEY})")
+            ).scalar()
+            return bool(result)
 
-    def _release_lock(self) -> None:
-        """Release advisory lock."""
-        with self._engine.connect() as conn:
-            conn.execute(text(f"SELECT pg_advisory_unlock({_ADVISORY_LOCK_KEY})"))
-            conn.commit()
+    def _release_lock(self, conn) -> None:
+        """Release advisory lock.
+
+        Args:
+            conn: The same connection that acquired the lock.
+        """
+        conn.execute(text(f"SELECT pg_advisory_unlock({_ADVISORY_LOCK_KEY})"))
+        conn.commit()
 
     def _bootstrap_fresh_database(self) -> None:
         """Bootstrap a fresh database with schema from models."""
@@ -266,21 +271,24 @@ class SchemaManager:
 
         self._check_version_compatible(status)
 
-        # Acquire lock for modification
-        if not self._acquire_lock(wait, timeout_seconds):
-            raise TimeoutError(
-                f"Could not acquire schema lock within {timeout_seconds}s. "
-                "Another process may be running migrations."
-            )
+        # Acquire lock for modification.
+        # IMPORTANT: We must keep this connection open for the duration of the migration,
+        # because pg_advisory_lock is session-level and releases when the connection closes.
+        with self._engine.connect() as conn:
+            if not self._acquire_lock(conn, wait, timeout_seconds):
+                raise TimeoutError(
+                    f"Could not acquire schema lock within {timeout_seconds}s. "
+                    "Another process may be running migrations."
+                )
 
-        try:
-            # Re-check under lock (another process may have migrated)
-            status = self.get_status()
-            if status.state == SchemaState.CURRENT:
-                return status
+            try:
+                # Re-check under lock (another process may have migrated)
+                status = self.get_status()
+                if status.state == SchemaState.CURRENT:
+                    return status
 
-            self._check_version_compatible(status)
-            self._apply_migration(status)
-            return self.get_status()
-        finally:
-            self._release_lock()
+                self._check_version_compatible(status)
+                self._apply_migration(status)
+                return self.get_status()
+            finally:
+                self._release_lock(conn)
