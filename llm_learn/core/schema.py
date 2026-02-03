@@ -105,13 +105,14 @@ class SchemaManager:
         head = script.get_current_head()
         if head is None:
             raise SchemaVersionError("No migrations found in migrations directory")
-        return head
+        return str(head)
 
     def _get_current_version(self) -> str | None:
         """Get current database schema version, or None if not initialized."""
         with self._engine.connect() as conn:
             context = MigrationContext.configure(conn)
-            return context.get_current_revision()
+            revision = context.get_current_revision()
+            return str(revision) if revision is not None else None
 
     def _is_version_in_chain(self, version: str) -> bool:
         """Check if a version exists in our migration chain."""

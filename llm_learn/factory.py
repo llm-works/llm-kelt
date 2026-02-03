@@ -5,7 +5,7 @@ from __future__ import annotations
 from appinfra.db.pg import PG
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
-from llm_infer.client import Factory as LLMClientFactory
+from llm_infer.client import Factory as LLMClientFactory  # type: ignore[attr-defined]
 from llm_infer.client import LLMClient
 
 from .client import LearnClient
@@ -53,7 +53,8 @@ class LearnClientFactory:
         if llm_cfg is None:
             return None
         llm_factory = LLMClientFactory(self._lg)
-        return llm_factory.from_config(llm_cfg.to_dict())
+        client: LLMClient = llm_factory.from_config(llm_cfg.to_dict())
+        return client
 
     def create_from_config(
         self,
