@@ -29,3 +29,9 @@ class ConfigurationError(LearnError):
     """Raised when configuration is invalid or missing."""
 
     pass
+
+
+class SchemaVersionError(LearnError):
+    """Raised when schema version is incompatible (e.g., newer than library)."""
+
+    pass

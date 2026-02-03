@@ -147,11 +147,12 @@ def llm_config(config):
 
 
 @pytest.fixture
-def llm_client(llm_config):
+def llm_client(llm_config, logger):
     """Create LLM client from test config."""
-    from llm_infer.client import LLMClient
+    from llm_infer.client import Factory as LLMClientFactory
 
-    return LLMClient.from_config(llm_config)
+    factory = LLMClientFactory(logger)
+    return factory.from_config(llm_config)
 
 
 @pytest.fixture(scope="session")
@@ -194,9 +195,9 @@ def pg_with_tables(pg_migrate_factory):
 
 
 @pytest.fixture(scope="session")
-def database(pg_with_tables):
+def database(logger, pg_with_tables):
     """Create Database wrapper from PG with migrations applied."""
-    return Database.from_pg(pg_with_tables)
+    return Database(logger, pg_with_tables)
 
 
 def _ensure_workspace(session, workspace_id: str, slug: str) -> None:
@@ -242,9 +243,9 @@ def test_profile(database):
 
 
 @pytest.fixture
-def learn_client(database, test_profile):
+def learn_client(logger, database, test_profile):
     """Create LearnClient for testing, scoped to test profile."""
-    return LearnClient(profile_id=test_profile, database=database)
+    return LearnClient(logger, profile_id=test_profile, database=database, ensure_schema=False)
 
 
 @pytest.fixture

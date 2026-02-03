@@ -1,18 +1,16 @@
 """FastAPI application factory for llm-learn proxy server using appinfra."""
 
 from appinfra.app.fastapi import Server, ServerBuilder
-from llm_infer.client import LLMClient
+from appinfra.dot_dict import DotDict
+from appinfra.log import LogConfig, Logger, LoggerFactory
 
 from ..client import LearnClient
-from ..core.database import Database
-from ..inference.context import ContextBuilder
+from ..factory import LearnClientFactory
 from .routes import create_router
 
 
 def create_server(
-    llm_config: dict,
-    database: Database,
-    profile_id: str,
+    learn_client: LearnClient,
     model_name: str = "llm-learn-proxy",
     host: str = "0.0.0.0",
     port: int = 8001,
@@ -20,9 +18,7 @@ def create_server(
     """Create server with learning-enhanced LLM proxy.
 
     Args:
-        llm_config: LLM backend configuration (see LLMClient.from_config).
-        database: Database instance for learning data.
-        profile_id: Profile ID (32-char hash) to load facts from.
+        learn_client: Configured LearnClient instance.
         model_name: Model name to report in responses.
         host: Host to bind to.
         port: Port to bind to (default 8001, since llm-infer uses 8000).
@@ -31,27 +27,28 @@ def create_server(
         Configured Server instance.
 
     Example:
+        from appinfra.config import Config
+        from appinfra.log import LogConfig, LoggerFactory
+        from llm_learn import LearnClientFactory
         from llm_learn.serving import create_server
-        from llm_learn.core.database import Database
 
-        db = Database.from_config(db_config)
-        server = create_server(
-            llm_config={"default": "local", "backends": {...}},
-            database=db,
-            profile_id="a3f8b2c1d4e5f6a7b8c9d0e1f2a3b4c5",
-        )
+        config = Config("etc/llm-learn.yaml")
+        lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
+        factory = LearnClientFactory(lg)
+        learn_client = factory.create_from_config(profile_id="a3f8...", config=config)
+
+        server = create_server(learn_client)
         server.start()
     """
-    # Initialize clients
-    llm_client = LLMClient.from_config(llm_config)
-    learn_client = LearnClient(profile_id=profile_id, database=database)
-    context_builder = ContextBuilder(learn_client.facts)
+    # Ensure LLM client is configured
+    if learn_client.llm_client is None:
+        raise ValueError("LearnClient must have llm_client configured for serving")
 
-    # Create router with dependencies
+    # Create router with dependencies from learn_client
     router = create_router(
         model_name=model_name,
-        llm_client=llm_client,
-        context_builder=context_builder,
+        llm_client=learn_client.llm_client,
+        context_builder=learn_client.context_builder,
     )
 
     return (
@@ -67,47 +64,41 @@ def create_server(
     )
 
 
-def _setup_database_from_config(config: dict) -> Database:
-    """Create and migrate database from config."""
-    from appinfra import DotDict
-    from appinfra.db.pg import PG
-    from appinfra.log import LogConfig, LoggerFactory
-
-    log_config = LogConfig.from_params(level="info")
-    logger = LoggerFactory.create_root(log_config)
-
-    dbs = config.get("dbs", {})
-    db_config = DotDict(**dbs.get("main", {}))
-    pg = PG(logger, db_config)
-    database = Database.from_pg(pg)
-    database.migrate()
-    return database
-
-
-def create_server_from_config(config: dict) -> Server:
+def create_server_from_config(config: dict, lg: Logger | None = None) -> Server:
     """Create server from llm-learn.yaml configuration.
 
     Args:
         config: Configuration dict matching llm-learn.yaml structure:
-            - llm: LLM backend configuration
             - dbs.main: Database configuration
-            - proxy: (optional) Proxy-specific settings
-            - profile_id: (optional) Profile ID to use
+            - llm: LLM backend configuration
+            - embedding: Embedding service configuration
+            - learn: Learn-specific settings
+            - proxy: Proxy-specific settings (host, port, profile_id, model_name)
+        lg: Optional logger. If not provided, creates one.
 
     Returns:
         Configured Server instance.
     """
-    database = _setup_database_from_config(config)
+    # Create logger if not provided
+    if lg is None:
+        log_config = LogConfig.from_params(level="info")
+        lg = LoggerFactory.create_root(log_config)
+
     proxy_config = config.get("proxy", {})
 
     profile_id = proxy_config.get("profile_id") or config.get("profile_id")
     if profile_id is None or not str(profile_id).strip():
         raise ValueError("profile_id is required in config (proxy.profile_id or profile_id)")
 
-    return create_server(
-        llm_config=config.get("llm", {}),
-        database=database,
+    # Use factory to create LearnClient from config
+    factory = LearnClientFactory(lg)
+    learn_client = factory.create_from_config(
         profile_id=str(profile_id),
+        config=DotDict(**config),
+    )
+
+    return create_server(
+        learn_client=learn_client,
         model_name=proxy_config.get("model_name", "llm-learn-proxy"),
         host=proxy_config.get("host", config.get("host", "0.0.0.0")),
         port=proxy_config.get("port", config.get("port", 8001)),

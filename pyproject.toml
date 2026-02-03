@@ -110,12 +110,18 @@ exclude_lines = [
 ]
 
 [tool.setuptools.package-data]
-llm_learn = ["py.typed"]
+llm_learn = [
+    "py.typed",
+    "migrations/alembic.ini",
+    "migrations/env.py",
+    "migrations/script.py.mako",
+    "migrations/versions/*.py",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["llm_learn*"]
-exclude = ["tests*", "migrations*", "docs*", "etc*"]
+exclude = ["tests*", "docs*", "etc*"]
 
 [tool.setuptools_scm]
 fallback_version = "0.0.0.dev0"

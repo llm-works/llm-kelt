@@ -8,8 +8,8 @@ from alembic import context
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
+# Add project root to path (migrations is now inside llm_learn package)
+project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from appinfra.config import Config  # noqa: E402
@@ -95,7 +95,7 @@ def run_migrations_online() -> None:
                 context.run_migrations()
     except OperationalError as e:
         # Database doesn't exist - bootstrap it (PostgreSQL error code 3D000)
-        if hasattr(e.orig, "pgcode") and e.orig.pgcode == "3D000":
+        if e.orig is not None and hasattr(e.orig, "pgcode") and e.orig.pgcode == "3D000":
             _bootstrap_fresh_database(pg)
         else:
             raise

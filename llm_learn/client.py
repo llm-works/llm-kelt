@@ -4,13 +4,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from appinfra.dot_dict import DotDict
+from appinfra.log import Logger
+from llm_infer.client import LLMClient
+
 from .core.content import ContentStore
 from .core.database import Database
 from .core.embedding import EmbeddingStore
+from .core.schema import SchemaManager, SchemaStatus
+from .inference.context import ContextBuilder
+from .inference.embedder import Embedder
+from .inference.query import ContextQuery
 from .memory import atomic
 
 if TYPE_CHECKING:
-    from .inference.embedder import Embedder
     from .memory.atomic import (
         AssertionsClient,
         DirectivesClient,
@@ -28,70 +35,99 @@ class LearnClient:
     """
     Main client for the Learn framework, scoped to a profile.
 
-    Provides unified access to all memory APIs for a specific profile.
-    All operations are automatically filtered by profile_id.
+    Provides unified access to all framework capabilities:
+    - Memory storage (facts, feedback, solutions, preferences, etc.)
+    - Embeddings for semantic search
+    - Context-aware LLM queries
 
-    The atomic memory model uses a fact-based architecture where all knowledge
-    is stored in atomic_facts with type-specific detail tables.
+    Usage (via factory - recommended):
+        from appinfra.config import Config
+        from appinfra.log import LogConfig, LoggerFactory
+        from llm_learn import LearnClientFactory
 
-    Usage:
+        config = Config("etc/llm-learn.yaml")
+        lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
+
+        factory = LearnClientFactory(lg)
+        learn = factory.create_from_config(profile_id="a3f8...", config=config)
+
+    Usage (direct - for testing or shared resources):
         from llm_learn import LearnClient
 
-        # Create client scoped to a profile (32-char hash ID)
-        learn = LearnClient(profile_id="a3f8b2c1d4e5f6a7b8c9d0e1f2a3b4c5")
+        learn = LearnClient(
+            lg, profile_id="a3f8...", database=db,
+            embedder=embedder, llm_client=llm_client,
+        )
 
-        # Access atomic memory primitives
-        learn.atomic.assertions.add("Prefers concise explanations", category="preferences")
-        learn.atomic.solutions.record(agent_name="reviewer", problem="...", ...)
-        learn.atomic.predictions.record(hypothesis="X will happen", confidence=0.7)
-        learn.atomic.feedback.record(signal="positive", content_id=456)
-        learn.atomic.preferences.record(context="...", chosen="...", rejected="...")
+    Memory API:
+        learn.assertions.add("Prefers concise explanations", category="preferences")
+        learn.solutions.record(agent_name="reviewer", problem="...", ...)
+        learn.feedback.record(signal="positive", content_id=456)
 
-        # Convenience aliases (shorthand for learn.atomic.*)
-        learn.assertions.add(...)
-        learn.solutions.record(...)
+    Query API (requires llm_client):
+        response = await learn.query.ask("What's a good approach?")
     """
 
     def __init__(
         self,
+        lg: Logger,
         profile_id: str,
-        config_path: str | None = None,
-        db_key: str = "main",
-        database: Database | None = None,
+        database: Database,
         embedder: Embedder | None = None,
+        llm_client: LLMClient | None = None,
+        learn_config: DotDict | None = None,
+        ensure_schema: bool = True,
     ) -> None:
         """
         Initialize LearnClient scoped to a specific profile.
 
         Args:
+            lg: Logger instance
             profile_id: Profile ID (32-char hash) to scope all operations to
-            config_path: Path to config file. If None, uses etc/infra.yaml
-            db_key: Database configuration key (default: "main")
-            database: Optional pre-configured Database instance
+            database: Database instance
             embedder: Optional embedder for generating embeddings
+            llm_client: Optional LLM client for context-aware queries
+            learn_config: Optional learn settings (config.learn section).
+                         Contains memory, embedding, default_system_prompt, etc.
+            ensure_schema: If True (default), auto-migrate schema on init.
+                          Set False for tests or when schema is known current.
         """
+        self._lg = lg
         self._profile_id = profile_id
+        self._db = database
+        self._embedder = embedder
+        self._llm_client = llm_client
+        self._learn_config = learn_config
 
-        if database is not None:
-            self._db = database
-        else:
-            if config_path is None:
-                config_path = "etc/infra.yaml"
-            self._db = Database.from_config(config_path, db_key)
+        if ensure_schema:
+            self._ensure_schema()
 
-        # Core embedding store (always available)
+        self._setup_stores()
+        self._setup_query_interface()
+
+    def _setup_stores(self) -> None:
+        """Initialize storage components."""
         self._embedding_store = EmbeddingStore(self._db.session)
-
-        # Content store
-        self._content = ContentStore(self._db.session, profile_id)
-
-        # Atomic memory protocol with embedding support
+        self._content = ContentStore(self._db.session, self._profile_id)
         self._atomic = atomic.Protocol(
             self._db.session,
-            profile_id,
-            embedder=embedder,
+            self._profile_id,
+            embedder=self._embedder,
             embedding_store=self._embedding_store,
         )
+        self._context_builder = ContextBuilder(self._atomic.assertions)
+
+    def _setup_query_interface(self) -> None:
+        """Initialize context query interface if LLM client is available."""
+        self._context_query: ContextQuery | None = None
+        if self._llm_client is not None:
+            self._context_query = ContextQuery(
+                client=self._llm_client,
+                context_builder=self._context_builder,
+                base_system_prompt=self._get_default_system_prompt(),
+                embedder=self._embedder,
+                embedding_adapter=self._atomic.embeddings,
+            )
 
     @property
     def profile_id(self) -> str:
@@ -159,9 +195,52 @@ class LearnClient:
         """Access underlying database."""
         return self._db
 
-    def migrate(self) -> None:
-        """Run database migrations to create all tables."""
-        self._db.migrate()
+    @property
+    def llm_client(self) -> LLMClient | None:
+        """Access underlying LLM client (None if not configured)."""
+        return self._llm_client
+
+    @property
+    def embedder(self) -> Embedder | None:
+        """Access underlying embedder (None if not configured)."""
+        return self._embedder
+
+    @property
+    def learn_config(self) -> DotDict | None:
+        """Access learn configuration (memory, embedding, default_system_prompt, etc.)."""
+        return self._learn_config
+
+    @property
+    def context_builder(self) -> ContextBuilder:
+        """Access context builder for prompt construction."""
+        return self._context_builder
+
+    @property
+    def query(self) -> ContextQuery:
+        """Access context-aware query interface.
+
+        Raises:
+            RuntimeError: If llm_client was not provided during init.
+        """
+        if self._context_query is None:
+            raise RuntimeError("LLM client not configured. Pass llm_client to LearnClient.")
+        return self._context_query
+
+    def _get_default_system_prompt(self) -> str:
+        """Get default system prompt from learn config."""
+        if self._learn_config is None:
+            return ""
+        return getattr(self._learn_config, "default_system_prompt", "") or ""
+
+    def _ensure_schema(self) -> None:
+        """Ensure database schema is current (called during init)."""
+        manager = SchemaManager(self._lg, self._db.engine)
+        manager.ensure_schema()
+
+    def get_schema_status(self) -> SchemaStatus:
+        """Get current schema status for diagnostics."""
+        manager = SchemaManager(self._lg, self._db.engine)
+        return manager.get_status()
 
     def health_check(self) -> dict[str, Any]:
         """

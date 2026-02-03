@@ -81,14 +81,14 @@ def _convert_to_backend_messages(
     Extracts system message separately as backends handle it differently.
     Returns (messages without system, system prompt or None).
     """
-    system_prompt = None
-    backend_messages = []
+    system_prompt: str | None = None
+    backend_messages: list[dict[str, str]] = []
 
     for msg in messages:
         if msg.role == Role.SYSTEM:
             system_prompt = msg.content
         else:
-            backend_messages.append({"role": msg.role.value, "content": msg.content})
+            backend_messages.append({"role": msg.role.value, "content": msg.content or ""})
 
     return backend_messages, system_prompt
 

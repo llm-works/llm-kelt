@@ -41,9 +41,9 @@ from _helpers import (
 from appinfra.config import Config
 from appinfra.log import LogConfig, Logger, LoggerFactory
 from httpx import ConnectError, ConnectTimeout
-from llm_infer.client import LLMClient
+from llm_infer.client import Factory as LLMClientFactory
 
-from llm_learn import LearnClient
+from llm_learn import LearnClient, LearnClientFactory
 from llm_learn.inference import (
     ContextBuilder,
     ContextQuery,
@@ -102,8 +102,8 @@ async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedde
     """Embed facts for semantic search. Returns embedder if successful."""
     print(f"\n{H2}▶ Embedding Facts for Semantic Search{RESET}")
 
-    embedding_config = config.learn.embedding
-    embedder = Embedder(base_url=embedding_config.base_url, model="default")
+    embedding_config = config.embedding
+    embedder = Embedder(base_url=embedding_config.base_url, model=embedding_config.model_name)
 
     try:
         print(f"  {MUTED}Connecting to embedding server...{RESET}")
@@ -223,12 +223,13 @@ async def demo_rag_vs_static(learn: LearnClient, config: Config, embedder: Embed
     )
 
 
-async def demo_rag_query(learn: LearnClient, config: Config, embedder: Embedder | None):
+async def demo_rag_query(learn: LearnClient, config: Config, lg: Logger, embedder: Embedder | None):
     """Demonstrate full RAG query with LLM."""
     print(f"\n{H2}▶ Full RAG Query (LLM + Context){RESET}")
 
     try:
-        llm_client = LLMClient.from_config(config.llm.to_dict())
+        llm_factory = LLMClientFactory(lg)
+        llm_client = llm_factory.from_config(config.llm.to_dict())
         context_builder = ContextBuilder(learn.facts)
 
         query = ContextQuery(
@@ -266,14 +267,14 @@ async def main():
 
     # Suppress logging noise
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
-
-    learn = LearnClient(profile_id=1)
-    learn.migrate()
-    profile_id = ensure_demo_profile(learn)
-    learn = LearnClient(profile_id=profile_id)
-    print(f"{MUTED}Using profile_id={RESET}{INFO}{profile_id}{RESET}")
-
     config = Config("etc/llm-learn.yaml")
+    factory = LearnClientFactory(lg)
+
+    # Create initial client to get/create profile
+    learn = factory.create_from_config(profile_id="1", config=config)
+    profile_id = ensure_demo_profile(learn)
+    learn = factory.create_from_config(profile_id=profile_id, config=config)
+    print(f"{MUTED}Using profile_id={RESET}{INFO}{profile_id}{RESET}")
 
     # Run demos
     populate_facts(learn)
@@ -283,7 +284,7 @@ async def main():
         await demo_similarity_search(learn, embedder)
 
     await demo_rag_vs_static(learn, config, embedder)
-    await demo_rag_query(learn, config, embedder)
+    await demo_rag_query(learn, config, lg, embedder)
 
     if embedder:
         await embedder.close_async()

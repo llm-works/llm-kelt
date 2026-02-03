@@ -4,11 +4,8 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
-from appinfra.config import Config
 from appinfra.db.pg import PG
-from appinfra.log import LogConfig, LoggerFactory
-
-from .models import Base
+from appinfra.log import Logger
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -22,57 +19,21 @@ class Database:
     and model management.
 
     Usage:
-        db = Database.from_config("etc/infra.yaml")
+        from appinfra.db.pg import PG
+        from appinfra.log import LogConfig, LoggerFactory
+
+        lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
+        pg = PG(lg, db_config)
+        db = Database(lg, pg)
+
         with db.session() as session:
             session.add(Feedback(...))
             session.commit()
     """
 
-    def __init__(self, pg: PG) -> None:
+    def __init__(self, lg: Logger, pg: PG) -> None:
+        self._lg = lg
         self._pg = pg
-
-    @classmethod
-    def from_config(
-        cls,
-        config_path: str,
-        db_key: str = "main",
-        log_level: str = "info",
-    ) -> "Database":
-        """
-        Create Database from configuration file.
-
-        Args:
-            config_path: Path to YAML config file
-            db_key: Database configuration key (default: "main")
-            log_level: Logging level
-
-        Returns:
-            Configured Database instance
-        """
-        config = Config(config_path)
-        db_config = config.dbs[db_key]
-
-        if db_config is None:
-            raise ValueError(f"Database config 'dbs.{db_key}' not found in {config_path}")
-
-        # Create logger
-        log_config = LogConfig.from_params(level=log_level)
-        logger = LoggerFactory.create_root(log_config)
-
-        # Create PG instance
-        pg = PG(logger, db_config)
-
-        return cls(pg)
-
-    @classmethod
-    def from_pg(cls, pg: PG) -> "Database":
-        """Create Database from existing PG instance."""
-        return cls(pg)
-
-    def migrate(self) -> None:
-        """Run migrations to create all tables from SQLAlchemy models."""
-        # Extensions (e.g., vector) are auto-created via pg.yaml config
-        self._pg.migrate(Base)
 
     @contextmanager
     def session(self) -> Generator["Session", None, None]:
@@ -90,7 +51,8 @@ class Database:
         try:
             yield session
             session.commit()
-        except Exception:
+        except Exception as e:
+            self._lg.warning("session rollback", extra={"exception": e})
             session.rollback()
             raise
         finally:

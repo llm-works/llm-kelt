@@ -29,9 +29,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from _helpers import H1, H2, INFO, LLM_A, LLM_Q, MUTED, OK, RESET, WARN, ensure_demo_profile
 from appinfra.config import Config
 from appinfra.log import LogConfig, Logger, LoggerFactory
+from llm_infer.client import Factory as LLMClientFactory
 from llm_infer.client import LLMClient
 
-from llm_learn import LearnClient
+from llm_learn import LearnClient, LearnClientFactory
 from llm_learn.training import (
     AdapterRegistry,
     LoraConfig,
@@ -359,10 +360,12 @@ async def main():
 
     # Initialize
     config = Config("etc/llm-learn.yaml")
-    learn = LearnClient(profile_id=1)
-    learn.migrate()
+    factory = LearnClientFactory(lg)
+
+    # Create initial client to get/create profile
+    learn = factory.create_from_config(profile_id="1", config=config)
     profile_id = ensure_demo_profile(learn, profile_slug="lora-training")
-    learn = LearnClient(profile_id=profile_id)
+    learn = factory.create_from_config(profile_id=profile_id, config=config)
     print(f"{MUTED}Using profile_id={RESET}{INFO}{profile_id}{RESET}")
 
     # Get inference URL and query for running model
@@ -399,7 +402,8 @@ async def main():
     print(f"{MUTED}Adapter path:{RESET} {INFO}{adapter_base_path}{RESET}")
 
     # Create LLM client
-    llm_client = LLMClient.from_config(config.llm.to_dict())
+    llm_factory = LLMClientFactory(lg)
+    llm_client = llm_factory.from_config(config.llm.to_dict())
 
     try:
         # Step 1: Show baseline
