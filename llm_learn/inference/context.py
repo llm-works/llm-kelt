@@ -2,8 +2,8 @@
 
 from typing import Literal
 
-from ..memory.v1.clients import AssertionsClient
-from ..memory.v1.models import Fact
+from ..memory.atomic.clients import AssertionsClient
+from ..memory.atomic.models import Fact
 
 
 class ContextBuilder:

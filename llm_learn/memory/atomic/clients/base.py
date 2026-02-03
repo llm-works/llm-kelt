@@ -1,4 +1,4 @@
-"""Base client for memory v1 fact-based storage."""
+"""Base client for atomic memory fact-based storage."""
 
 from collections.abc import Callable
 from typing import Any, Generic, TypeVar, cast
@@ -7,7 +7,8 @@ from appinfra.db.utils import detach, detach_all
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ....core.utils import utc_now
+from llm_learn.core.base import utc_now
+
 from ..models import Fact
 
 T = TypeVar("T")  # Details model type
@@ -15,14 +16,14 @@ T = TypeVar("T")  # Details model type
 
 class FactClient(Generic[T]):
     """
-    Base client for memory v1 collections.
+    Base client for atomic memory collections.
 
     Handles the fact + details pattern where each record consists of:
-    - A base fact record (in memv1_facts)
-    - A details record (in memv1_*_details)
+    - A base fact record (in atomic_facts)
+    - A details record (in atomic_*_details)
 
     Subclasses must set:
-    - fact_type: The type string for memv1_facts.type
+    - fact_type: The type string for atomic_facts.type
     - details_model: The SQLAlchemy model for the details table
     - details_relationship: The relationship name on Fact model
     """
@@ -31,13 +32,13 @@ class FactClient(Generic[T]):
     details_model: type[T]  # e.g., SolutionDetails
     details_relationship: str  # e.g., "solution_details"
 
-    def __init__(self, session_factory: Callable[[], Any], profile_id: int) -> None:
+    def __init__(self, session_factory: Callable[[], Any], profile_id: str) -> None:
         """
         Initialize client scoped to a specific profile.
 
         Args:
             session_factory: Callable that returns a context manager for database sessions.
-            profile_id: Profile ID to scope all operations to.
+            profile_id: Profile ID (32-char hash) to scope all operations to.
         """
         self._session_factory = session_factory
         self.profile_id = profile_id
@@ -56,17 +57,16 @@ class FactClient(Generic[T]):
         Get a fact with its details by ID.
 
         Args:
-            fact_id: The fact ID
+            fact_id: The fact ID.
 
         Returns:
-            Fact with details loaded, or None if not found
+            Fact with details loaded, or None if not found.
         """
         with self._session_factory() as session:
             fact = self._get_fact(session, fact_id)
             if fact is None:
                 return None
             # Eagerly load the details relationship (if any)
-            # Guard against empty details_relationship (e.g., AssertionsClient)
             if self.details_relationship:
                 details = getattr(fact, self.details_relationship)
                 if details is not None:
@@ -86,13 +86,13 @@ class FactClient(Generic[T]):
         List facts of this type for the profile.
 
         Args:
-            limit: Maximum records to return
-            offset: Records to skip
-            descending: Order by created_at descending (newest first)
-            active_only: Only return active facts
+            limit: Maximum records to return.
+            offset: Records to skip.
+            descending: Order by created_at descending (newest first).
+            active_only: Only return active facts.
 
         Returns:
-            List of facts with details loaded
+            List of facts with details loaded.
         """
         with self._session_factory() as session:
             stmt = select(Fact).where(
@@ -109,7 +109,6 @@ class FactClient(Generic[T]):
             facts = list(session.scalars(stmt).all())
             # Load and detach details for each fact
             for fact in facts:
-                # Guard against empty details_relationship (e.g., AssertionsClient)
                 if self.details_relationship:
                     details = getattr(fact, self.details_relationship)
                     if details is not None:
@@ -121,10 +120,10 @@ class FactClient(Generic[T]):
         Count facts of this type for the profile.
 
         Args:
-            active_only: Only count active facts
+            active_only: Only count active facts.
 
         Returns:
-            Count of matching facts
+            Count of matching facts.
         """
         with self._session_factory() as session:
             stmt = (
@@ -146,10 +145,10 @@ class FactClient(Generic[T]):
         Delete a fact and its details (hard delete).
 
         Args:
-            fact_id: The fact ID to delete
+            fact_id: The fact ID to delete.
 
         Returns:
-            True if deleted, False if not found
+            True if deleted, False if not found.
         """
         with self._session_factory() as session:
             fact = self._get_fact(session, fact_id)
@@ -163,10 +162,10 @@ class FactClient(Generic[T]):
         Deactivate a fact (soft delete).
 
         Args:
-            fact_id: The fact ID to deactivate
+            fact_id: The fact ID to deactivate.
 
         Returns:
-            True if deactivated, False if not found
+            True if deactivated, False if not found.
         """
         with self._session_factory() as session:
             fact = self._get_fact(session, fact_id)
@@ -181,10 +180,10 @@ class FactClient(Generic[T]):
         Activate a fact (undo soft delete).
 
         Args:
-            fact_id: The fact ID to activate
+            fact_id: The fact ID to activate.
 
         Returns:
-            True if activated, False if not found
+            True if activated, False if not found.
         """
         with self._session_factory() as session:
             fact = self._get_fact(session, fact_id)
@@ -199,10 +198,10 @@ class FactClient(Generic[T]):
         Check if a fact exists and belongs to this profile.
 
         Args:
-            fact_id: The fact ID
+            fact_id: The fact ID.
 
         Returns:
-            True if exists and belongs to profile
+            True if exists and belongs to profile.
         """
         with self._session_factory() as session:
             stmt = (

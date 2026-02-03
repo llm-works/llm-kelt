@@ -1,7 +1,6 @@
-"""Memory v1 clients."""
+"""Atomic memory clients."""
 
-from .assertions import AssertionsClient, ScoredFact
-from .base import FactClient
+from .assertions import AssertionsClient
 from .directives import DirectivesClient
 from .feedback import FeedbackClient
 from .interactions import InteractionsClient
@@ -12,11 +11,9 @@ from .solutions import SolutionsClient
 __all__ = [
     "AssertionsClient",
     "DirectivesClient",
-    "FactClient",
     "FeedbackClient",
     "InteractionsClient",
     "PredictionsClient",
     "PreferencesClient",
-    "ScoredFact",
     "SolutionsClient",
 ]

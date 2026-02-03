@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from ..core.models import Content
 from ..core.utils import utc_now
-from ..memory.v1.models import Fact, FeedbackDetails, PreferenceDetails
+from ..memory.atomic.models import Fact, FeedbackDetails, PreferenceDetails
 
 
 @dataclass
@@ -26,7 +26,7 @@ class ExportResult:
 
     path: Path
     count: int
-    profile_id: int
+    profile_id: str
     format: str
     exported_at: datetime
 
@@ -104,7 +104,7 @@ def _sft_record_builder(include_context: bool):
 
 
 def _build_feedback_query(
-    profile_id: int,
+    profile_id: str,
     min_strength: float,
     since: datetime | None,
     until: datetime | None,
@@ -131,7 +131,7 @@ def _build_feedback_query(
 
 
 def _build_preferences_query(
-    profile_id: int,
+    profile_id: str,
     category: str | None,
     since: datetime | None,
     until: datetime | None,
@@ -156,7 +156,7 @@ def _build_preferences_query(
 
 def export_preferences_dpo(
     session_factory: Callable[[], AbstractContextManager[Session]],
-    profile_id: int,
+    profile_id: str,
     output_path: str | Path,
     *,
     category: str | None = None,
@@ -180,7 +180,7 @@ def export_preferences_dpo(
 
 def export_feedback_sft(
     session_factory: Callable[[], AbstractContextManager[Session]],
-    profile_id: int,
+    profile_id: str,
     output_path: str | Path,
     *,
     signal: str = "positive",
@@ -237,7 +237,7 @@ def export_feedback_sft(
 
 def export_feedback_classifier(
     session_factory: Callable[[], AbstractContextManager[Session]],
-    profile_id: int,
+    profile_id: str,
     output_path: str | Path,
     *,
     since: datetime | None = None,

@@ -108,7 +108,7 @@ async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedde
     try:
         print(f"  {MUTED}Connecting to embedding server...{RESET}")
         result = await embed_missing_facts(
-            lg=lg, embedder=embedder, facts_client=learn.facts, batch_size=50
+            lg=lg, embedder=embedder, embedding_adapter=learn.embeddings, batch_size=50
         )
         print(f"  {OK}✓ Embedded {result.processed} facts{RESET}")
         if result.failed:
@@ -139,7 +139,7 @@ async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedde
         if "test" in content_lower or "mock" in content_lower:
             embedding[3] = 0.9
         embedding[i % 384] = 0.5  # Ensure uniqueness
-        learn.facts.set_embedding(fact.id, embedding, "demo-model")
+        learn.embeddings.set_embedding(fact.id, embedding, "demo-model")
 
     print(f"  {OK}✓ Set synthetic embeddings for all facts{RESET}")
     return None
@@ -154,21 +154,21 @@ async def demo_similarity_search(learn: LearnClient, embedder: Embedder):
     print(f'\n  {LLM_Q}Query: "{query}"{RESET}')
 
     query_result = await embedder.embed_async(query)
-    similar_facts = learn.facts.search_similar(
-        embedding=query_result.embedding, model_name=embedder.model, top_k=5, min_similarity=0.3
+    similar_facts = learn.embeddings.search_similar(
+        query=query_result.embedding, model_name=embedder.model, top_k=5, min_similarity=0.3
     )
 
     print(f"  {OK}Top matches:{RESET}")
     for sf in similar_facts:
         print(
-            f"    {MUTED}[{sf.similarity:.3f}]{RESET} {INFO}[{sf.fact.category}]{RESET} {sf.fact.content}"
+            f"    {MUTED}[{sf.score:.3f}]{RESET} {INFO}[{sf.entity.category}]{RESET} {sf.entity.content}"
         )
 
     # Search with category filter
     print(f"\n  {LLM_Q}Query: \"{query}\" {MUTED}(filtered to 'security' category){RESET}")
 
-    similar_security = learn.facts.search_similar(
-        embedding=query_result.embedding,
+    similar_security = learn.embeddings.search_similar(
+        query=query_result.embedding,
         model_name=embedder.model,
         top_k=5,
         min_similarity=0.3,
@@ -178,7 +178,7 @@ async def demo_similarity_search(learn: LearnClient, embedder: Embedder):
     print(f"  {OK}Security-only matches:{RESET}")
     for sf in similar_security:
         print(
-            f"    {MUTED}[{sf.similarity:.3f}]{RESET} {INFO}[{sf.fact.category}]{RESET} {sf.fact.content}"
+            f"    {MUTED}[{sf.score:.3f}]{RESET} {INFO}[{sf.entity.category}]{RESET} {sf.entity.content}"
         )
 
 
@@ -207,13 +207,13 @@ async def demo_rag_vs_static(learn: LearnClient, config: Config, embedder: Embed
 
     if embedder:
         query_result = await embedder.embed_async(question)
-        similar = learn.facts.search_similar(
-            embedding=query_result.embedding, model_name=embedder.model, top_k=3, min_similarity=0.3
+        similar = learn.embeddings.search_similar(
+            query=query_result.embedding, model_name=embedder.model, top_k=3, min_similarity=0.3
         )
         print(f"  {OK}Selected facts:{RESET}")
         for sf in similar:
             print(
-                f"    {MUTED}[{sf.similarity:.3f}]{RESET} {INFO}[{sf.fact.category}]{RESET} {sf.fact.content}"
+                f"    {MUTED}[{sf.score:.3f}]{RESET} {INFO}[{sf.entity.category}]{RESET} {sf.entity.content}"
             )
     else:
         print(f"    {MUTED}(Requires embedding server for live demo){RESET}")
@@ -236,6 +236,7 @@ async def demo_rag_query(learn: LearnClient, config: Config, embedder: Embedder 
             context_builder=context_builder,
             base_system_prompt="You are a coding assistant.",
             embedder=embedder,
+            embedding_adapter=learn.embeddings,
         )
 
         question = "What are best practices for API security?"

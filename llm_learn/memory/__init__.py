@@ -1,5 +1,9 @@
-"""Memory module - versioned knowledge storage."""
+"""Memory module - knowledge storage implementations.
 
-from . import v1
+Each submodule implements a different knowledge representation model:
+- atomic: Fact-based storage with type-specific detail tables
+"""
 
-__all__ = ["v1"]
+from . import atomic
+
+__all__ = ["atomic"]

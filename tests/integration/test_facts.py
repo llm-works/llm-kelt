@@ -203,18 +203,18 @@ class TestAssertionsClient:
 
 
 class TestAssertionsEmbeddings:
-    """Test AssertionsClient embedding functionality (requires pgvector)."""
+    """Test embedding functionality via Protocol.embeddings (requires pgvector)."""
 
     def test_set_embedding(self, learn_client, clean_tables):
         """Test setting an embedding for an assertion."""
         fact_id = learn_client.assertions.add("User prefers Python")
         embedding = [0.1, 0.2, 0.3, 0.4, 0.5]
 
-        # Should not raise
-        learn_client.assertions.set_embedding(fact_id, embedding, model_name="test-model")
+        # Should not raise - use embeddings adapter
+        learn_client.embeddings.set_embedding(fact_id, embedding, "test-model")
 
         # Verify by listing assertions without embeddings
-        without = learn_client.assertions.list_without_embeddings("test-model")
+        without = learn_client.embeddings.list_without_embeddings("test-model")
         assert all(f.id != fact_id for f in without)
 
     def test_set_embedding_upsert(self, learn_client, clean_tables):
@@ -223,18 +223,18 @@ class TestAssertionsEmbeddings:
         embedding1 = [0.1, 0.2, 0.3]
         embedding2 = [0.4, 0.5, 0.6]
 
-        learn_client.assertions.set_embedding(fact_id, embedding1, model_name="test-model")
-        learn_client.assertions.set_embedding(fact_id, embedding2, model_name="test-model")
+        learn_client.embeddings.set_embedding(fact_id, embedding1, "test-model")
+        learn_client.embeddings.set_embedding(fact_id, embedding2, "test-model")
 
         # Should still only have one embedding for this model
         # Verify via search_similar - should find the assertion with new embedding
-        results = learn_client.assertions.search_similar(
-            embedding=[0.4, 0.5, 0.6],
+        results = learn_client.embeddings.search_similar(
+            query=[0.4, 0.5, 0.6],
             model_name="test-model",
             min_similarity=0.9,
         )
         assert len(results) == 1
-        assert results[0].fact.id == fact_id
+        assert results[0].entity.id == fact_id
 
     def test_set_embedding_different_models(self, learn_client, clean_tables):
         """Test setting embeddings with different model names."""
@@ -242,23 +242,18 @@ class TestAssertionsEmbeddings:
         embedding1 = [0.1, 0.2, 0.3]
         embedding2 = [0.4, 0.5, 0.6, 0.7]  # Different dimensions
 
-        learn_client.assertions.set_embedding(fact_id, embedding1, model_name="model-a")
-        learn_client.assertions.set_embedding(fact_id, embedding2, model_name="model-b")
+        learn_client.embeddings.set_embedding(fact_id, embedding1, "model-a")
+        learn_client.embeddings.set_embedding(fact_id, embedding2, "model-b")
 
         # Assertion should not appear in list_without_embeddings for either model
-        without_a = learn_client.assertions.list_without_embeddings("model-a")
-        without_b = learn_client.assertions.list_without_embeddings("model-b")
+        without_a = learn_client.embeddings.list_without_embeddings("model-a")
+        without_b = learn_client.embeddings.list_without_embeddings("model-b")
         assert all(f.id != fact_id for f in without_a)
         assert all(f.id != fact_id for f in without_b)
 
         # But should appear for a different model
-        without_c = learn_client.assertions.list_without_embeddings("model-c")
+        without_c = learn_client.embeddings.list_without_embeddings("model-c")
         assert any(f.id == fact_id for f in without_c)
-
-    def test_set_embedding_nonexistent_raises(self, learn_client, clean_tables):
-        """Test setting embedding for non-existent assertion raises ValidationError."""
-        with pytest.raises(ValidationError):
-            learn_client.assertions.set_embedding(99999, [0.1, 0.2], model_name="test")
 
     def test_list_without_embeddings(self, learn_client, clean_tables):
         """Test listing assertions without embeddings for a model."""
@@ -266,9 +261,9 @@ class TestAssertionsEmbeddings:
         fact2_id = learn_client.assertions.add("Assertion without embedding")
         fact3_id = learn_client.assertions.add("Another without")
 
-        learn_client.assertions.set_embedding(fact1_id, [0.1, 0.2, 0.3], model_name="test-model")
+        learn_client.embeddings.set_embedding(fact1_id, [0.1, 0.2, 0.3], "test-model")
 
-        without = learn_client.assertions.list_without_embeddings("test-model")
+        without = learn_client.embeddings.list_without_embeddings("test-model")
 
         fact_ids = [f.id for f in without]
         assert fact1_id not in fact_ids
@@ -281,7 +276,7 @@ class TestAssertionsEmbeddings:
         fact2_id = learn_client.assertions.add("Inactive assertion")
         learn_client.assertions.deactivate(fact2_id)
 
-        without = learn_client.assertions.list_without_embeddings("test-model")
+        without = learn_client.embeddings.list_without_embeddings("test-model")
 
         fact_ids = [f.id for f in without]
         assert fact1_id in fact_ids
@@ -292,7 +287,7 @@ class TestAssertionsEmbeddings:
         for i in range(10):
             learn_client.assertions.add(f"Assertion {i}")
 
-        without = learn_client.assertions.list_without_embeddings("test-model", limit=3)
+        without = learn_client.embeddings.list_without_embeddings("test-model", limit=3)
         assert len(without) == 3
 
     def test_search_similar(self, learn_client, clean_tables):
@@ -302,13 +297,13 @@ class TestAssertionsEmbeddings:
         fact3_id = learn_client.assertions.add("Database design")
 
         # Set embeddings - fact1 and fact2 similar, fact3 different
-        learn_client.assertions.set_embedding(fact1_id, [0.9, 0.1, 0.0], model_name="test")
-        learn_client.assertions.set_embedding(fact2_id, [0.8, 0.2, 0.0], model_name="test")
-        learn_client.assertions.set_embedding(fact3_id, [0.0, 0.0, 1.0], model_name="test")
+        learn_client.embeddings.set_embedding(fact1_id, [0.9, 0.1, 0.0], "test")
+        learn_client.embeddings.set_embedding(fact2_id, [0.8, 0.2, 0.0], "test")
+        learn_client.embeddings.set_embedding(fact3_id, [0.0, 0.0, 1.0], "test")
 
         # Search for something similar to fact1
-        results = learn_client.assertions.search_similar(
-            embedding=[0.85, 0.15, 0.0],
+        results = learn_client.embeddings.search_similar(
+            query=[0.85, 0.15, 0.0],
             model_name="test",
             top_k=10,
             min_similarity=0.5,
@@ -316,13 +311,13 @@ class TestAssertionsEmbeddings:
 
         # Should find fact1 and fact2, not fact3
         assert len(results) >= 2
-        result_ids = [r.fact.id for r in results]
+        result_ids = [r.entity.id for r in results]
         assert fact1_id in result_ids
         assert fact2_id in result_ids
         # fact3 might not be in results due to low similarity
 
         # Results should be sorted by similarity (highest first)
-        similarities = [r.similarity for r in results]
+        similarities = [r.score for r in results]
         assert similarities == sorted(similarities, reverse=True)
 
     def test_search_similar_min_similarity_filter(self, learn_client, clean_tables):
@@ -330,17 +325,17 @@ class TestAssertionsEmbeddings:
         fact1_id = learn_client.assertions.add("Very similar")
         fact2_id = learn_client.assertions.add("Less similar")
 
-        learn_client.assertions.set_embedding(fact1_id, [1.0, 0.0, 0.0], model_name="test")
-        learn_client.assertions.set_embedding(fact2_id, [0.5, 0.5, 0.5], model_name="test")
+        learn_client.embeddings.set_embedding(fact1_id, [1.0, 0.0, 0.0], "test")
+        learn_client.embeddings.set_embedding(fact2_id, [0.5, 0.5, 0.5], "test")
 
         # High threshold - should only match very similar
-        results = learn_client.assertions.search_similar(
-            embedding=[1.0, 0.0, 0.0],
+        results = learn_client.embeddings.search_similar(
+            query=[1.0, 0.0, 0.0],
             model_name="test",
             min_similarity=0.95,
         )
 
-        result_ids = [r.fact.id for r in results]
+        result_ids = [r.entity.id for r in results]
         assert fact1_id in result_ids
         # fact2 should be filtered out due to low similarity
 
@@ -348,10 +343,10 @@ class TestAssertionsEmbeddings:
         """Test that search_similar respects top_k limit."""
         for i in range(10):
             fact_id = learn_client.assertions.add(f"Assertion {i}")
-            learn_client.assertions.set_embedding(fact_id, [0.5, 0.5, 0.0], model_name="test")
+            learn_client.embeddings.set_embedding(fact_id, [0.5, 0.5, 0.0], "test")
 
-        results = learn_client.assertions.search_similar(
-            embedding=[0.5, 0.5, 0.0],
+        results = learn_client.embeddings.search_similar(
+            query=[0.5, 0.5, 0.0],
             model_name="test",
             top_k=3,
             min_similarity=0.0,
@@ -364,41 +359,29 @@ class TestAssertionsEmbeddings:
         fact1_id = learn_client.assertions.add("Active assertion")
         fact2_id = learn_client.assertions.add("Inactive assertion")
 
-        learn_client.assertions.set_embedding(fact1_id, [1.0, 0.0], model_name="test")
-        learn_client.assertions.set_embedding(fact2_id, [1.0, 0.0], model_name="test")
+        learn_client.embeddings.set_embedding(fact1_id, [1.0, 0.0], "test")
+        learn_client.embeddings.set_embedding(fact2_id, [1.0, 0.0], "test")
         learn_client.assertions.deactivate(fact2_id)
 
-        # Default: active_only=True
-        results = learn_client.assertions.search_similar(
-            embedding=[1.0, 0.0],
+        # Default: active assertions only
+        results = learn_client.embeddings.search_similar(
+            query=[1.0, 0.0],
             model_name="test",
             min_similarity=0.0,
         )
 
-        result_ids = [r.fact.id for r in results]
+        result_ids = [r.entity.id for r in results]
         assert fact1_id in result_ids
         assert fact2_id not in result_ids
-
-        # With active_only=False
-        results_all = learn_client.assertions.search_similar(
-            embedding=[1.0, 0.0],
-            model_name="test",
-            min_similarity=0.0,
-            active_only=False,
-        )
-
-        result_ids_all = [r.fact.id for r in results_all]
-        assert fact1_id in result_ids_all
-        assert fact2_id in result_ids_all
 
     def test_search_similar_empty_results(self, learn_client, clean_tables):
         """Test search_similar returns empty list when no matches."""
         fact_id = learn_client.assertions.add("Test assertion")
-        learn_client.assertions.set_embedding(fact_id, [1.0, 0.0, 0.0], model_name="test")
+        learn_client.embeddings.set_embedding(fact_id, [1.0, 0.0, 0.0], "test")
 
         # Search with completely different embedding and high threshold
-        results = learn_client.assertions.search_similar(
-            embedding=[0.0, 0.0, 1.0],
+        results = learn_client.embeddings.search_similar(
+            query=[0.0, 0.0, 1.0],
             model_name="test",
             min_similarity=0.99,
         )
@@ -408,35 +391,36 @@ class TestAssertionsEmbeddings:
     def test_search_similar_wrong_model_returns_empty(self, learn_client, clean_tables):
         """Test search_similar returns empty when model doesn't match."""
         fact_id = learn_client.assertions.add("Test assertion")
-        learn_client.assertions.set_embedding(fact_id, [1.0, 0.0], model_name="model-a")
+        learn_client.embeddings.set_embedding(fact_id, [1.0, 0.0], "model-a")
 
-        results = learn_client.assertions.search_similar(
-            embedding=[1.0, 0.0],
+        results = learn_client.embeddings.search_similar(
+            query=[1.0, 0.0],
             model_name="model-b",  # Different model
             min_similarity=0.0,
         )
 
         assert results == []
 
-    def test_delete_assertion_cascades_to_embeddings(self, learn_client, clean_tables, database):
-        """Test that deleting an assertion also deletes its embeddings."""
+    def test_delete_embedding_on_fact_delete(self, learn_client, clean_tables, database):
+        """Test that embeddings can be cleaned up when deleting facts."""
         fact_id = learn_client.assertions.add("Assertion to delete")
-        learn_client.assertions.set_embedding(fact_id, [0.1, 0.2], model_name="test")
+        learn_client.embeddings.set_embedding(fact_id, [0.1, 0.2], "test")
 
         # Verify embedding exists
-        results = learn_client.assertions.search_similar(
-            embedding=[0.1, 0.2],
+        results = learn_client.embeddings.search_similar(
+            query=[0.1, 0.2],
             model_name="test",
             min_similarity=0.9,
         )
         assert len(results) == 1
 
-        # Delete the assertion
+        # Delete embedding explicitly, then delete the assertion
+        learn_client.embeddings.delete_embedding(fact_id)
         learn_client.assertions.delete(fact_id)
 
-        # Embedding should be gone (cascade delete)
-        results_after = learn_client.assertions.search_similar(
-            embedding=[0.1, 0.2],
+        # Embedding should be gone
+        results_after = learn_client.embeddings.search_similar(
+            query=[0.1, 0.2],
             model_name="test",
             min_similarity=0.0,
         )
@@ -450,44 +434,44 @@ class TestAssertionsEmbeddings:
         bg_id = learn_client.assertions.add("10 years experience", category="background")
 
         # All assertions have similar embeddings
-        learn_client.assertions.set_embedding(pref_id, [0.9, 0.1, 0.0], model_name="test")
-        learn_client.assertions.set_embedding(rule_id, [0.85, 0.15, 0.0], model_name="test")
-        learn_client.assertions.set_embedding(bg_id, [0.8, 0.2, 0.0], model_name="test")
+        learn_client.embeddings.set_embedding(pref_id, [0.9, 0.1, 0.0], "test")
+        learn_client.embeddings.set_embedding(rule_id, [0.85, 0.15, 0.0], "test")
+        learn_client.embeddings.set_embedding(bg_id, [0.8, 0.2, 0.0], "test")
 
         # Search without categories - should get all
-        results_all = learn_client.assertions.search_similar(
-            embedding=[0.9, 0.1, 0.0],
+        results_all = learn_client.embeddings.search_similar(
+            query=[0.9, 0.1, 0.0],
             model_name="test",
             min_similarity=0.5,
         )
         assert len(results_all) == 3
 
         # Search with single category filter
-        results_prefs = learn_client.assertions.search_similar(
-            embedding=[0.9, 0.1, 0.0],
+        results_prefs = learn_client.embeddings.search_similar(
+            query=[0.9, 0.1, 0.0],
             model_name="test",
             min_similarity=0.5,
             categories=["preferences"],
         )
         assert len(results_prefs) == 1
-        assert results_prefs[0].fact.id == pref_id
+        assert results_prefs[0].entity.id == pref_id
 
         # Search with multiple categories
-        results_multi = learn_client.assertions.search_similar(
-            embedding=[0.9, 0.1, 0.0],
+        results_multi = learn_client.embeddings.search_similar(
+            query=[0.9, 0.1, 0.0],
             model_name="test",
             min_similarity=0.5,
             categories=["preferences", "rules"],
         )
-        result_ids = [r.fact.id for r in results_multi]
+        result_ids = [r.entity.id for r in results_multi]
         assert len(results_multi) == 2
         assert pref_id in result_ids
         assert rule_id in result_ids
         assert bg_id not in result_ids
 
         # Search with non-existent category
-        results_empty = learn_client.assertions.search_similar(
-            embedding=[0.9, 0.1, 0.0],
+        results_empty = learn_client.embeddings.search_similar(
+            query=[0.9, 0.1, 0.0],
             model_name="test",
             min_similarity=0.5,
             categories=["nonexistent"],

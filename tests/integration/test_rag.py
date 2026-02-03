@@ -78,7 +78,7 @@ class TestRAGIntegration:
         fact_ids = []
         for content, category, embedding in facts_data:
             fact_id = learn_client.assertions.add(content, category=category)
-            learn_client.assertions.set_embedding(fact_id, embedding, "test-model")
+            learn_client.embeddings.set_embedding(fact_id, embedding, "test-model")
             fact_ids.append(fact_id)
 
         return fact_ids
@@ -93,6 +93,7 @@ class TestRAGIntegration:
             client=mock_llm_client,
             context_builder=context_builder,
             embedder=mock_embedder,
+            embedding_adapter=learn_client.embeddings,
         )
 
         # Ask about Python - should retrieve Python-related facts
@@ -123,6 +124,7 @@ class TestRAGIntegration:
             client=mock_llm_client,
             context_builder=context_builder,
             embedder=mock_embedder,
+            embedding_adapter=learn_client.embeddings,
         )
 
         # Ask about concise responses - "brief" keyword triggers [0.1, 0.8, 0.1] embedding
@@ -159,6 +161,7 @@ class TestRAGIntegration:
             client=mock_llm_client,
             context_builder=context_builder,
             embedder=mock_embedder,
+            embedding_adapter=learn_client.embeddings,
         )
 
         # Should work but return no facts
@@ -184,6 +187,7 @@ class TestRAGIntegration:
             client=mock_llm_client,
             context_builder=context_builder,
             embedder=mock_embedder,
+            embedding_adapter=learn_client.embeddings,
         )
 
         # Set very low min_similarity to get all facts, but limit to 2
@@ -210,6 +214,7 @@ class TestRAGIntegration:
             client=mock_llm_client,
             context_builder=context_builder,
             embedder=mock_embedder,
+            embedding_adapter=learn_client.embeddings,
         )
 
         # Set very high min_similarity - should return very few or no facts
@@ -238,8 +243,8 @@ class TestRAGIntegration:
         inactive_id = learn_client.assertions.add("Inactive fact about Python")
 
         # Give both the same Python-related embedding
-        learn_client.assertions.set_embedding(active_id, [0.9, 0.1, 0.0], "test-model")
-        learn_client.assertions.set_embedding(inactive_id, [0.9, 0.1, 0.0], "test-model")
+        learn_client.embeddings.set_embedding(active_id, [0.9, 0.1, 0.0], "test-model")
+        learn_client.embeddings.set_embedding(inactive_id, [0.9, 0.1, 0.0], "test-model")
 
         # Deactivate one
         learn_client.assertions.deactivate(inactive_id)
@@ -249,6 +254,7 @@ class TestRAGIntegration:
             client=mock_llm_client,
             context_builder=context_builder,
             embedder=mock_embedder,
+            embedding_adapter=learn_client.embeddings,
         )
 
         await query.ask(
@@ -274,6 +280,7 @@ class TestRAGIntegration:
             context_builder=context_builder,
             base_system_prompt="You are a helpful coding assistant.",
             embedder=mock_embedder,
+            embedding_adapter=learn_client.embeddings,
         )
 
         await query.ask(
@@ -300,6 +307,7 @@ class TestRAGIntegration:
             client=mock_llm_client,
             context_builder=context_builder,
             embedder=mock_embedder,
+            embedding_adapter=learn_client.embeddings,
         )
 
         conv = Conversation()
