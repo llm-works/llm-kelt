@@ -2,8 +2,8 @@
 
 from typing import Literal
 
-from ..collection.facts import FactsClient
-from ..core.models import Fact
+from ..memory.v1.clients import AssertionsClient
+from ..memory.v1.models import Fact
 
 
 class ContextBuilder:
@@ -21,7 +21,7 @@ class ContextBuilder:
         # Returns: "You are a helpful assistant.\n\n## About the user:\n- Fact 1\n- Fact 2"
     """
 
-    def __init__(self, facts_client: FactsClient):
+    def __init__(self, facts_client: AssertionsClient):
         """
         Initialize context builder.
 

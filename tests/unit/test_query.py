@@ -4,10 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from llm_learn.collection.facts import ScoredFact
-from llm_learn.core.models import Fact
 from llm_learn.inference.embedder import EmbeddingResult
 from llm_learn.inference.query import ContextQuery, Conversation, RAGArgs
+from llm_learn.memory.v1 import Fact, ScoredFact
 
 
 class TestRAGArgs:

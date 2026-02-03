@@ -21,13 +21,13 @@ class TestExportPreferencesDPO:
             context="Summarize this article",
             chosen="Concise summary",
             rejected="Verbose essay",
-            domain="synthesis",
+            category="synthesis",
         )
         learn_client.preferences.record(
             context="Explain quantum computing",
             chosen="Simple explanation",
             rejected="Overly complex explanation",
-            domain="explanation",
+            category="explanation",
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -55,11 +55,11 @@ class TestExportPreferencesDPO:
             assert record["chosen"] == "Concise summary"
             assert record["rejected"] == "Verbose essay"
 
-    def test_export_filter_by_domain(self, learn_client, database, clean_tables):
-        """Test export filtering by domain."""
-        learn_client.preferences.record(context="A", chosen="G", rejected="B", domain="synthesis")
-        learn_client.preferences.record(context="B", chosen="G", rejected="B", domain="analysis")
-        learn_client.preferences.record(context="C", chosen="G", rejected="B", domain="synthesis")
+    def test_export_filter_by_category(self, learn_client, database, clean_tables):
+        """Test export filtering by category."""
+        learn_client.preferences.record(context="A", chosen="G", rejected="B", category="synthesis")
+        learn_client.preferences.record(context="B", chosen="G", rejected="B", category="analysis")
+        learn_client.preferences.record(context="C", chosen="G", rejected="B", category="synthesis")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "dpo.jsonl"
@@ -67,7 +67,7 @@ class TestExportPreferencesDPO:
                 database.session,
                 learn_client.profile_id,
                 output_path,
-                domain="synthesis",
+                category="synthesis",
             )
 
             assert result.count == 2
@@ -124,10 +124,17 @@ class TestExportFeedbackSFT:
 
     def test_export_basic(self, learn_client, database, clean_tables):
         """Test basic SFT export."""
-        # Create feedback with content
-        learn_client.feedback.record(
+        # Create content first
+        content_id = learn_client.content.create(
             content_text="This is a great article about AI.",
+            source="test",
+            title="AI Overview",
+        )
+
+        # Record feedback on that content
+        learn_client.feedback.record(
             signal="positive",
+            content_id=content_id,
             strength=0.9,
             tags=["interesting", "ai"],
             comment="Very informative",
@@ -154,14 +161,24 @@ class TestExportFeedbackSFT:
 
     def test_export_filters_by_signal(self, learn_client, database, clean_tables):
         """Test that export filters by signal type."""
-        learn_client.feedback.record(
+        # Create content
+        good_id = learn_client.content.create(
             content_text="Good content",
+            source="test",
+        )
+        bad_id = learn_client.content.create(
+            content_text="Bad content",
+            source="test",
+        )
+
+        learn_client.feedback.record(
             signal="positive",
+            content_id=good_id,
             strength=0.9,
         )
         learn_client.feedback.record(
-            content_text="Bad content",
             signal="negative",
+            content_id=bad_id,
             strength=0.9,
         )
 
@@ -178,14 +195,24 @@ class TestExportFeedbackSFT:
 
     def test_export_filters_by_strength(self, learn_client, database, clean_tables):
         """Test that export filters by minimum strength."""
-        learn_client.feedback.record(
+        # Create content
+        strong_id = learn_client.content.create(
             content_text="Strong positive",
+            source="test",
+        )
+        weak_id = learn_client.content.create(
+            content_text="Weak positive",
+            source="test",
+        )
+
+        learn_client.feedback.record(
             signal="positive",
+            content_id=strong_id,
             strength=0.9,
         )
         learn_client.feedback.record(
-            content_text="Weak positive",
             signal="positive",
+            content_id=weak_id,
             strength=0.3,
         )
 
@@ -202,9 +229,15 @@ class TestExportFeedbackSFT:
 
     def test_export_with_context(self, learn_client, database, clean_tables):
         """Test export with context in Alpaca format."""
-        learn_client.feedback.record(
+        # Create content
+        content_id = learn_client.content.create(
             content_text="Response text",
+            source="test",
+        )
+
+        learn_client.feedback.record(
             signal="positive",
+            content_id=content_id,
             strength=0.9,
             context={"query": "What is AI?"},
         )
@@ -232,14 +265,24 @@ class TestExportFeedbackClassifier:
 
     def test_export_basic(self, learn_client, database, clean_tables):
         """Test basic classifier export."""
-        learn_client.feedback.record(
+        # Create content
+        good_id = learn_client.content.create(
             content_text="Good content",
+            source="test",
+        )
+        bad_id = learn_client.content.create(
+            content_text="Bad content",
+            source="test",
+        )
+
+        learn_client.feedback.record(
             signal="positive",
+            content_id=good_id,
             strength=0.9,
         )
         learn_client.feedback.record(
-            content_text="Bad content",
             signal="negative",
+            content_id=bad_id,
             strength=0.9,
         )
 
@@ -264,14 +307,24 @@ class TestExportFeedbackClassifier:
 
     def test_export_excludes_dismiss(self, learn_client, database, clean_tables):
         """Test that dismiss signals are excluded."""
-        learn_client.feedback.record(
+        # Create content
+        good_id = learn_client.content.create(
             content_text="Positive",
+            source="test",
+        )
+        dismiss_id = learn_client.content.create(
+            content_text="Dismissed",
+            source="test",
+        )
+
+        learn_client.feedback.record(
             signal="positive",
+            content_id=good_id,
             strength=0.9,
         )
         learn_client.feedback.record(
-            content_text="Dismissed",
             signal="dismiss",
+            content_id=dismiss_id,
             strength=0.9,
         )
 
@@ -287,14 +340,24 @@ class TestExportFeedbackClassifier:
 
     def test_export_filters_by_strength(self, learn_client, database, clean_tables):
         """Test that export filters by minimum strength."""
-        learn_client.feedback.record(
+        # Create content
+        strong_id = learn_client.content.create(
             content_text="Strong",
+            source="test",
+        )
+        weak_id = learn_client.content.create(
+            content_text="Weak",
+            source="test",
+        )
+
+        learn_client.feedback.record(
             signal="positive",
+            content_id=strong_id,
             strength=0.9,
         )
         learn_client.feedback.record(
-            content_text="Weak",
             signal="positive",
+            content_id=weak_id,
             strength=0.3,
         )
 

@@ -1,0 +1,186 @@
+"""Feedback client for explicit user signals on content."""
+
+import math
+from typing import Literal, cast
+
+from appinfra.db.utils import detach, detach_all
+from sqlalchemy import func, select
+
+from ....core.exceptions import ValidationError
+from ..models import Fact, FeedbackDetails
+from .base import FactClient
+
+SignalType = Literal["positive", "negative", "dismiss"]
+
+
+class FeedbackClient(FactClient[FeedbackDetails]):
+    """
+    Client for recording explicit user feedback on content.
+
+    Feedback represents user signals (positive, negative, dismiss) on
+    content items, with optional strength and tags.
+
+    Usage:
+        feedback = FeedbackClient(session_factory, profile_id=123)
+
+        # Record feedback
+        fact_id = feedback.record(
+            signal="positive",
+            content_id=456,
+            strength=0.9,
+            comment="Great article!",
+            tags=["informative", "well-written"],
+        )
+
+        # List by signal
+        positive = feedback.list_by_signal("positive")
+    """
+
+    fact_type = "feedback"
+    details_model = FeedbackDetails
+    details_relationship = "feedback_details"
+
+    def _validate_feedback_inputs(self, signal: SignalType, strength: float) -> None:
+        """Validate feedback record inputs."""
+        valid_signals = ("positive", "negative", "dismiss")
+        if signal not in valid_signals:
+            raise ValidationError(f"Invalid signal: {signal}. Must be one of {valid_signals}")
+        if not math.isfinite(strength) or strength < 0.0 or strength > 1.0:
+            raise ValidationError(f"strength must be between 0.0 and 1.0, got {strength}")
+
+    def record(
+        self,
+        signal: SignalType,
+        content_id: int | None = None,
+        strength: float = 1.0,
+        tags: list[str] | None = None,
+        comment: str | None = None,
+        context: dict | None = None,
+        category: str | None = None,
+    ) -> int:
+        """Record user feedback. See class docstring for full usage."""
+        self._validate_feedback_inputs(signal, strength)
+
+        with self._session_factory() as session:
+            content_desc = f" on content {content_id}" if content_id else ""
+            fact = Fact(
+                profile_id=self.profile_id,
+                type=self.fact_type,
+                content=f"{signal} feedback{content_desc}",
+                category=category,
+                source="user",
+                confidence=strength,
+                active=True,
+            )
+            session.add(fact)
+            session.flush()
+
+            details = FeedbackDetails(
+                fact_id=fact.id,
+                content_id=content_id,
+                signal=signal,
+                strength=strength,
+                tags=tags,
+                comment=comment,
+                context=context,
+            )
+            session.add(details)
+            return fact.id
+
+    def list_by_signal(
+        self,
+        signal: SignalType,
+        limit: int = 100,
+        active_only: bool = True,
+    ) -> list[Fact]:
+        """
+        List feedback by signal type.
+
+        Args:
+            signal: Signal to filter by
+            limit: Maximum records to return
+            active_only: Only return active facts
+
+        Returns:
+            List of facts with feedback details
+        """
+        with self._session_factory() as session:
+            stmt = (
+                select(Fact)
+                .join(FeedbackDetails)
+                .where(
+                    Fact.profile_id == self.profile_id,
+                    Fact.type == self.fact_type,
+                    FeedbackDetails.signal == signal,
+                )
+            )
+
+            if active_only:
+                stmt = stmt.where(Fact.active == True)  # noqa: E712
+
+            stmt = stmt.order_by(Fact.created_at.desc()).limit(limit)
+
+            facts = list(session.scalars(stmt).all())
+            for fact in facts:
+                details = fact.feedback_details
+                if details is not None:
+                    detach(details, session)
+            return cast(list[Fact], detach_all(facts, session))
+
+    def list_by_content(
+        self,
+        content_id: int,
+        limit: int = 100,
+    ) -> list[Fact]:
+        """
+        List all feedback for a specific content item.
+
+        Args:
+            content_id: Content ID to filter by
+            limit: Maximum records to return
+
+        Returns:
+            List of facts with feedback details
+        """
+        with self._session_factory() as session:
+            stmt = (
+                select(Fact)
+                .join(FeedbackDetails)
+                .where(
+                    Fact.profile_id == self.profile_id,
+                    Fact.type == self.fact_type,
+                    FeedbackDetails.content_id == content_id,
+                )
+                .order_by(Fact.created_at.desc())
+                .limit(limit)
+            )
+
+            facts = list(session.scalars(stmt).all())
+            for fact in facts:
+                details = fact.feedback_details
+                if details is not None:
+                    detach(details, session)
+            return cast(list[Fact], detach_all(facts, session))
+
+    def count_by_signal(self) -> dict[str, int]:
+        """
+        Count feedback by signal type.
+
+        Returns:
+            Dict mapping signal to count
+        """
+        with self._session_factory() as session:
+            counts = {}
+            for signal in ("positive", "negative", "dismiss"):
+                stmt = (
+                    select(func.count())
+                    .select_from(FeedbackDetails)
+                    .join(Fact)
+                    .where(
+                        Fact.profile_id == self.profile_id,
+                        Fact.type == self.fact_type,
+                        FeedbackDetails.signal == signal,
+                    )
+                )
+                counts[signal] = session.scalar(stmt) or 0
+            return counts

@@ -13,6 +13,9 @@ from llm_learn.client import LearnClient
 from llm_learn.core.database import Database
 from llm_learn.core.models import Base, Profile, Workspace
 
+# Import memory v1 models so they're registered with Base for migrations
+from llm_learn.memory.v1 import models as memv1_models  # noqa: F401
+
 # Enable appinfra's schema isolation fixtures for parallel test execution
 pytest_plugins = ["appinfra.db.pg.testing"]
 
@@ -262,9 +265,14 @@ def sample_content(learn_client, clean_tables):
 @pytest.fixture
 def sample_feedback(learn_client, clean_tables):
     """Create sample feedback for testing."""
-    feedback_id = learn_client.feedback.record(
+    # Create content first, then record feedback on it
+    content_id = learn_client.content.create(
         content_text="Sample content for feedback",
+        source="test",
+    )
+    feedback_id = learn_client.feedback.record(
         signal="positive",
+        content_id=content_id,
         strength=0.9,
         tags=["interesting"],
     )
