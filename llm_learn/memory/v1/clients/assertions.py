@@ -153,7 +153,7 @@ class AssertionsClient(FactClient[None]):
         if not content or not content.strip():
             raise ValidationError("content cannot be empty")
 
-        if confidence < 0.0 or confidence > 1.0:
+        if not (0.0 <= confidence <= 1.0):
             raise ValidationError(f"confidence must be between 0.0 and 1.0, got {confidence}")
 
         with self._session_factory() as session:
@@ -211,7 +211,7 @@ class AssertionsClient(FactClient[None]):
         if content is not None and not content.strip():
             raise ValidationError("content cannot be empty")
 
-        if confidence is not None and (confidence < 0.0 or confidence > 1.0):
+        if confidence is not None and not (0.0 <= confidence <= 1.0):
             raise ValidationError(f"confidence must be between 0.0 and 1.0, got {confidence}")
 
         with self._session_factory() as session:
