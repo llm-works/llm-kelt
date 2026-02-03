@@ -145,6 +145,20 @@ class TestPredictionsClient:
                 outcome="correct",
             )
 
+    def test_resolve_already_resolved_raises(self, learn_client, clean_tables):
+        """Test that re-resolving a prediction raises ValidationError."""
+        fact_id = learn_client.predictions.record(
+            hypothesis="Test prediction",
+            confidence=0.7,
+        )
+
+        # First resolution should succeed
+        learn_client.predictions.resolve(fact_id=fact_id, outcome="correct")
+
+        # Second resolution should fail
+        with pytest.raises(ValidationError, match="already resolved"):
+            learn_client.predictions.resolve(fact_id=fact_id, outcome="incorrect")
+
     def test_list_pending(self, learn_client, clean_tables):
         """Test listing pending predictions."""
         learn_client.predictions.record(hypothesis="A", confidence=0.5)

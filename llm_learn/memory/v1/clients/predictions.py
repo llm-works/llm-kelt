@@ -154,6 +154,9 @@ class PredictionsClient(FactClient[PredictionDetails]):
             if details is None:
                 raise NotFoundError(f"Prediction details for {fact_id} not found")
 
+            if details.status == "resolved":
+                raise ValidationError(f"Prediction {fact_id} is already resolved")
+
             details.status = "resolved"
             details.outcome = outcome
             details.outcome_confidence = outcome_confidence
