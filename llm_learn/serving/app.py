@@ -12,7 +12,7 @@ from .routes import create_router
 def create_server(
     llm_config: dict,
     database: Database,
-    profile_id: int,
+    profile_id: str,
     model_name: str = "llm-learn-proxy",
     host: str = "0.0.0.0",
     port: int = 8001,
@@ -22,7 +22,7 @@ def create_server(
     Args:
         llm_config: LLM backend configuration (see LLMClient.from_config).
         database: Database instance for learning data.
-        profile_id: Profile ID to load facts from.
+        profile_id: Profile ID (32-char hash) to load facts from.
         model_name: Model name to report in responses.
         host: Host to bind to.
         port: Port to bind to (default 8001, since llm-infer uses 8000).
@@ -38,7 +38,7 @@ def create_server(
         server = create_server(
             llm_config={"default": "local", "backends": {...}},
             database=db,
-            profile_id=1,
+            profile_id="a3f8b2c1d4e5f6a7b8c9d0e1f2a3b4c5",
         )
         server.start()
     """
@@ -67,6 +67,23 @@ def create_server(
     )
 
 
+def _setup_database_from_config(config: dict) -> Database:
+    """Create and migrate database from config."""
+    from appinfra import DotDict
+    from appinfra.db.pg import PG
+    from appinfra.log import LogConfig, LoggerFactory
+
+    log_config = LogConfig.from_params(level="info")
+    logger = LoggerFactory.create_root(log_config)
+
+    dbs = config.get("dbs", {})
+    db_config = DotDict(**dbs.get("main", {}))
+    pg = PG(logger, db_config)
+    database = Database.from_pg(pg)
+    database.migrate()
+    return database
+
+
 def create_server_from_config(config: dict) -> Server:
     """Create server from llm-learn.yaml configuration.
 
@@ -79,47 +96,18 @@ def create_server_from_config(config: dict) -> Server:
 
     Returns:
         Configured Server instance.
-
-    Example config (llm-learn.yaml):
-        llm:
-          default: local
-          backends:
-            local:
-              type: openai_compatible
-              base_url: http://localhost:8000/v1
-              model: qwen2.5-72b
-        dbs:
-          main:
-            url: postgresql://user:pass@localhost/learn
-        proxy:
-          host: 0.0.0.0
-          port: 8001
-          profile_id: 1
-          model_name: llm-learn-proxy
     """
-    from appinfra import DotDict
-    from appinfra.db.pg import PG
-    from appinfra.log import LogConfig, LoggerFactory
-
-    # Setup logging
-    log_config = LogConfig.from_params(level="info")
-    logger = LoggerFactory.create_root(log_config)
-
-    # Setup database from dbs.main
-    # Wrap in DotDict for attribute access (PG uses getattr for create_db, etc.)
-    dbs = config.get("dbs", {})
-    db_config = DotDict(**dbs.get("main", {}))
-    pg = PG(logger, db_config)
-    database = Database.from_pg(pg)
-    database.migrate()  # Create database and tables if needed
-
-    # Get proxy settings
+    database = _setup_database_from_config(config)
     proxy_config = config.get("proxy", {})
+
+    profile_id = proxy_config.get("profile_id") or config.get("profile_id")
+    if profile_id is None:
+        raise ValueError("profile_id is required in config (proxy.profile_id or profile_id)")
 
     return create_server(
         llm_config=config.get("llm", {}),
         database=database,
-        profile_id=proxy_config.get("profile_id", config.get("profile_id", 1)),
+        profile_id=str(profile_id),
         model_name=proxy_config.get("model_name", "llm-learn-proxy"),
         host=proxy_config.get("host", config.get("host", "0.0.0.0")),
         port=proxy_config.get("port", config.get("port", 8001)),

@@ -13,8 +13,8 @@ from llm_learn.client import LearnClient
 from llm_learn.core.database import Database
 from llm_learn.core.models import Base, Profile, Workspace
 
-# Import memory v1 models so they're registered with Base for migrations
-from llm_learn.memory.v1 import models as memv1_models  # noqa: F401
+# Import atomic memory models so they're registered with Base for migrations
+from llm_learn.memory.atomic import models as atomic_models  # noqa: F401
 
 # Enable appinfra's schema isolation fixtures for parallel test execution
 pytest_plugins = ["appinfra.db.pg.testing"]
@@ -199,36 +199,46 @@ def database(pg_with_tables):
     return Database.from_pg(pg_with_tables)
 
 
-@pytest.fixture(scope="session")
-def test_profile(database):
-    """Create a test workspace and profile for all tests."""
-    with database.session() as session:
-        # Check if test workspace exists
-        workspace = session.query(Workspace).filter_by(slug="test").first()
-        if not workspace:
-            workspace = Workspace(
-                slug="test",
+def _ensure_workspace(session, workspace_id: str, slug: str) -> None:
+    """Create test workspace if it doesn't exist."""
+    if not session.get(Workspace, workspace_id):
+        session.add(
+            Workspace(
+                id=workspace_id,
+                slug=slug,
                 name="Test Workspace",
                 description="Workspace for unit tests",
             )
-            session.add(workspace)
-            session.flush()
-
-        # Check if test profile exists
-        profile = (
-            session.query(Profile).filter_by(workspace_id=workspace.id, slug="default").first()
         )
-        if not profile:
-            profile = Profile(
-                workspace_id=workspace.id,
-                slug="default",
+        session.flush()
+
+
+def _ensure_profile(session, profile_id: str, workspace_id: str, slug: str) -> None:
+    """Create test profile if it doesn't exist."""
+    if not session.get(Profile, profile_id):
+        session.add(
+            Profile(
+                id=profile_id,
+                workspace_id=workspace_id,
+                slug=slug,
                 name="Default Test Profile",
                 description="Profile for unit tests",
             )
-            session.add(profile)
-            session.flush()
+        )
+        session.flush()
 
-        return profile.id
+
+@pytest.fixture(scope="session")
+def test_profile(database):
+    """Create a test workspace and profile for all tests."""
+    workspace_slug, profile_slug = "test", "default"
+    workspace_id = Workspace.generate_id(None, workspace_slug)
+    profile_id = Profile.generate_id(None, workspace_slug, profile_slug)
+
+    with database.session() as session:
+        _ensure_workspace(session, workspace_id, workspace_slug)
+        _ensure_profile(session, profile_id, workspace_id, profile_slug)
+        return profile_id
 
 
 @pytest.fixture

@@ -5,7 +5,8 @@ from typing import Literal, cast
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import func, select
 
-from ....core.exceptions import ValidationError
+from llm_learn.core.exceptions import ValidationError
+
 from ..models import Fact, InteractionDetails
 from .base import FactClient
 
@@ -24,7 +25,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
     - dismiss: User dismissed without engagement
 
     Usage:
-        interactions = InteractionsClient(session_factory, profile_id=123)
+        interactions = InteractionsClient(session_factory, profile_id="a3f8b2c1...")
 
         # Record a read interaction
         fact_id = interactions.record(
@@ -63,7 +64,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
         context: dict | None = None,
         category: str | None = None,
     ) -> int:
-        """Record an interaction. See class docstring for full usage."""
+        """Record an interaction."""
         self._validate_interaction_inputs(interaction_type, scroll_depth, duration_ms)
 
         with self._session_factory() as session:
@@ -96,16 +97,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
         interaction_type: InteractionType,
         limit: int = 100,
     ) -> list[Fact]:
-        """
-        List interactions by type.
-
-        Args:
-            interaction_type: Type to filter by
-            limit: Maximum records to return
-
-        Returns:
-            List of facts with interaction details
-        """
+        """List interactions by type."""
         with self._session_factory() as session:
             stmt = (
                 select(Fact)
@@ -131,16 +123,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
         content_id: int,
         limit: int = 100,
     ) -> list[Fact]:
-        """
-        List all interactions for a specific content item.
-
-        Args:
-            content_id: Content ID to filter by
-            limit: Maximum records to return
-
-        Returns:
-            List of facts with interaction details
-        """
+        """List all interactions for a specific content item."""
         with self._session_factory() as session:
             stmt = (
                 select(Fact)
@@ -162,12 +145,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
             return cast(list[Fact], detach_all(facts, session))
 
     def count_by_type(self) -> dict[str, int]:
-        """
-        Count interactions by type.
-
-        Returns:
-            Dict mapping interaction type to count
-        """
+        """Count interactions by type."""
         with self._session_factory() as session:
             counts = {}
             for itype in ("view", "click", "read", "scroll", "dismiss"):
@@ -185,15 +163,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
             return counts
 
     def get_engagement_stats(self, content_id: int) -> dict[str, int | float | None]:
-        """
-        Get engagement statistics for a content item.
-
-        Args:
-            content_id: Content ID
-
-        Returns:
-            Dict with interaction counts, total duration, avg scroll depth
-        """
+        """Get engagement statistics for a content item."""
         with self._session_factory() as session:
             stmt = (
                 select(

@@ -6,8 +6,9 @@ from typing import Literal, cast
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import select
 
-from ....core.exceptions import ValidationError
-from ....core.utils import utc_now
+from llm_learn.core.base import utc_now
+from llm_learn.core.exceptions import ValidationError
+
 from ..models import DirectiveDetails, Fact
 from .base import FactClient
 
@@ -25,7 +26,7 @@ class DirectivesClient(FactClient[DirectiveDetails]):
     - rule: Conditional rules (e.g., "If X, then Y")
 
     Usage:
-        directives = DirectivesClient(session_factory, profile_id=123)
+        directives = DirectivesClient(session_factory, profile_id="a3f8b2c1...")
 
         # Add a directive
         fact_id = directives.record(
@@ -58,7 +59,7 @@ class DirectivesClient(FactClient[DirectiveDetails]):
         expires_at: datetime | None = None,
         category: str | None = None,
     ) -> int:
-        """Record a directive. See class docstring for full usage."""
+        """Record a directive."""
         self._validate_directive(text, directive_type)
 
         with self._session_factory() as session:
@@ -84,19 +85,7 @@ class DirectivesClient(FactClient[DirectiveDetails]):
             return fact.id
 
     def set_status(self, fact_id: int, status: StatusType) -> bool:
-        """
-        Set directive status.
-
-        Args:
-            fact_id: The fact ID
-            status: New status (active, paused, completed)
-
-        Returns:
-            True if updated, False if not found
-
-        Raises:
-            ValidationError: If status is invalid
-        """
+        """Set directive status."""
         valid_statuses = ("active", "paused", "completed")
         if status not in valid_statuses:
             raise ValidationError(f"Invalid status: {status}")
@@ -120,16 +109,7 @@ class DirectivesClient(FactClient[DirectiveDetails]):
         directive_type: DirectiveType | None = None,
         limit: int = 100,
     ) -> list[Fact]:
-        """
-        List active directives.
-
-        Args:
-            directive_type: Optional type filter
-            limit: Maximum records to return
-
-        Returns:
-            List of active directives
-        """
+        """List active directives."""
         with self._session_factory() as session:
             stmt = (
                 select(Fact)
@@ -165,17 +145,7 @@ class DirectivesClient(FactClient[DirectiveDetails]):
         include_inactive: bool = False,
         limit: int = 100,
     ) -> list[Fact]:
-        """
-        List directives by type.
-
-        Args:
-            directive_type: Type to filter by
-            include_inactive: Include paused/completed directives
-            limit: Maximum records to return
-
-        Returns:
-            List of directives
-        """
+        """List directives by type."""
         with self._session_factory() as session:
             stmt = (
                 select(Fact)
@@ -189,7 +159,6 @@ class DirectivesClient(FactClient[DirectiveDetails]):
 
             if not include_inactive:
                 stmt = stmt.where(DirectiveDetails.status == "active")
-                # Also filter out expired directives
                 now = utc_now()
                 stmt = stmt.where(
                     (DirectiveDetails.expires_at.is_(None)) | (DirectiveDetails.expires_at > now)

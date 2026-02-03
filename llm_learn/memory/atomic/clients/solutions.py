@@ -5,7 +5,8 @@ from typing import cast
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import select
 
-from ....core.exceptions import ValidationError
+from llm_learn.core.exceptions import ValidationError
+
 from ..models import Fact, SolutionDetails
 from .base import FactClient
 
@@ -19,7 +20,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
     - answer: What the agent produced (the output)
 
     Usage:
-        solutions = SolutionsClient(session_factory, profile_id=123)
+        solutions = SolutionsClient(session_factory, profile_id="a3f8b2c1...")
 
         # Record a solution
         fact_id = solutions.record(
@@ -31,13 +32,6 @@ class SolutionsClient(FactClient[SolutionDetails]):
             tokens_used=1500,
             latency_ms=2340,
         )
-
-        # Get solution
-        solution = solutions.get(fact_id)
-        print(solution.solution_details.answer)
-
-        # List solutions by agent
-        recent = solutions.list_by_agent("code-reviewer", limit=10)
     """
 
     fact_type = "solution"
@@ -86,7 +80,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
         category: str | None = None,
         source: str = "agent",
     ) -> int:
-        """Record an agent solution. See class docstring for full usage."""
+        """Record an agent solution."""
         self._validate_solution_inputs(
             agent_name, problem, problem_context, answer, tokens_used, latency_ms, tool_calls
         )
@@ -124,17 +118,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
         limit: int = 100,
         active_only: bool = True,
     ) -> list[Fact]:
-        """
-        List solutions for a specific agent.
-
-        Args:
-            agent_name: Agent name to filter by
-            limit: Maximum records to return
-            active_only: Only return active facts
-
-        Returns:
-            List of facts with solution details
-        """
+        """List solutions for a specific agent."""
         with self._session_factory() as session:
             stmt = (
                 select(Fact)
@@ -164,17 +148,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
         limit: int = 100,
         active_only: bool = True,
     ) -> list[Fact]:
-        """
-        List solutions in a specific category.
-
-        Args:
-            category: Category to filter by
-            limit: Maximum records to return
-            active_only: Only return active facts
-
-        Returns:
-            List of facts with solution details
-        """
+        """List solutions in a specific category."""
         with self._session_factory() as session:
             stmt = select(Fact).where(
                 Fact.profile_id == self.profile_id,
@@ -195,12 +169,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
             return cast(list[Fact], detach_all(facts, session))
 
     def get_agent_names(self) -> list[str]:
-        """
-        Get list of unique agent names with solutions.
-
-        Returns:
-            List of distinct agent names
-        """
+        """Get list of unique agent names with solutions."""
         with self._session_factory() as session:
             stmt = (
                 select(SolutionDetails.agent_name)
@@ -215,15 +184,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
             return list(session.scalars(stmt).all())
 
     def get_stats(self, agent_name: str | None = None) -> dict[str, int | float]:
-        """
-        Get statistics for solutions.
-
-        Args:
-            agent_name: Optional agent name filter
-
-        Returns:
-            Dict with count, total_tokens, avg_latency
-        """
+        """Get statistics for solutions."""
         with self._session_factory() as session:
             from sqlalchemy import func as sqlfunc
 
@@ -257,17 +218,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
         limit: int = 50,
         active_only: bool = True,
     ) -> list[Fact]:
-        """
-        Search solutions by problem text.
-
-        Args:
-            query: Text to search for in problem
-            limit: Maximum records to return
-            active_only: Only return active facts
-
-        Returns:
-            List of matching facts with solution details
-        """
+        """Search solutions by problem text."""
         with self._session_factory() as session:
             stmt = (
                 select(Fact)

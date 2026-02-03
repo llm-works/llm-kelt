@@ -3,17 +3,19 @@
 Provides tools for storing facts, feedback, preferences, solutions, and other
 signals that can be injected into LLM prompts or used for training.
 
-Uses a unified fact-based memory architecture (memory v1) where all knowledge
-is stored in a base facts table with type-specific detail tables.
+Architecture:
+    - core: Domain, Workspace, Profile hierarchy with hash-based IDs
+    - memory.atomic: Fact-based storage with type-specific detail tables
 
 Usage:
     from llm_learn import LearnClient
 
-    learn = LearnClient(profile_id=1)
+    # Create client scoped to a profile (32-char hash ID)
+    learn = LearnClient(profile_id="a3f8b2c1d4e5f6a7b8c9d0e1f2a3b4c5")
 
-    # Access memory v1 primitives via learn.v1.*
-    learn.v1.assertions.add("Timezone: UTC", category="settings")
-    learn.v1.solutions.record(
+    # Access atomic memory primitives via learn.atomic.*
+    learn.atomic.assertions.add("Timezone: UTC", category="settings")
+    learn.atomic.solutions.record(
         agent_name="code-reviewer",
         problem="Review PR #123",
         problem_context={"messages": [...]},
@@ -21,14 +23,14 @@ Usage:
         tokens_used=1500,
         latency_ms=2340,
     )
-    learn.v1.feedback.record(signal="positive", content_id=456)
-    learn.v1.preferences.record(
+    learn.atomic.feedback.record(signal="positive", content_id=456)
+    learn.atomic.preferences.record(
         context="Summarize this",
         chosen="Concise version",
         rejected="Verbose version",
     )
 
-    # Convenience shorthand (equivalent to learn.v1.*)
+    # Convenience shorthand (equivalent to learn.atomic.*)
     learn.assertions.add(...)
     learn.solutions.record(...)
 """

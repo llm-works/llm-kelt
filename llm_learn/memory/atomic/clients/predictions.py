@@ -6,7 +6,8 @@ from typing import Literal, cast
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import select
 
-from ....core.exceptions import NotFoundError, ValidationError
+from llm_learn.core.exceptions import NotFoundError, ValidationError
+
 from ..models import Fact, PredictionDetails
 from .base import FactClient
 
@@ -21,7 +22,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
     resolved against actual outcomes for calibration tracking.
 
     Usage:
-        predictions = PredictionsClient(session_factory, profile_id=123)
+        predictions = PredictionsClient(session_factory, profile_id="a3f8b2c1...")
 
         # Record a prediction
         fact_id = predictions.record(
@@ -82,7 +83,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
         verification_source: str | None = None,
         verification_url: str | None = None,
     ) -> int:
-        """Record a prediction. See class docstring for full usage."""
+        """Record a prediction."""
         self._validate_prediction(hypothesis, confidence)
         parsed_date = self._parse_resolution_date(resolution_date)
         res_type = self._determine_resolution_type(parsed_date, resolution_event, resolution_metric)
@@ -120,22 +121,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
         actual: str | None = None,
         outcome_confidence: float | None = None,
     ) -> bool:
-        """
-        Resolve a prediction with an outcome.
-
-        Args:
-            fact_id: ID of prediction to resolve
-            outcome: Resolution outcome (correct, incorrect, partial, cancelled)
-            actual: What actually happened
-            outcome_confidence: Confidence in outcome assessment (0.0-1.0)
-
-        Returns:
-            True if resolved successfully
-
-        Raises:
-            ValidationError: If inputs are invalid
-            NotFoundError: If prediction not found
-        """
+        """Resolve a prediction with an outcome."""
         valid_outcomes = ("correct", "incorrect", "partial", "cancelled")
         if outcome not in valid_outcomes:
             raise ValidationError(f"Invalid outcome: {outcome}. Must be one of {valid_outcomes}")
@@ -170,16 +156,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
         category: str | None = None,
         limit: int = 100,
     ) -> list[Fact]:
-        """
-        List pending (unresolved) predictions.
-
-        Args:
-            category: Optional category filter
-            limit: Maximum records to return
-
-        Returns:
-            List of pending predictions, ordered by resolution date
-        """
+        """List pending (unresolved) predictions."""
         with self._session_factory() as session:
             stmt = (
                 select(Fact)
@@ -211,18 +188,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
         since: datetime | None = None,
         limit: int = 100,
     ) -> list[Fact]:
-        """
-        List resolved predictions.
-
-        Args:
-            outcome: Optional outcome filter
-            category: Optional category filter
-            since: Only return predictions resolved after this time
-            limit: Maximum records to return
-
-        Returns:
-            List of resolved predictions
-        """
+        """List resolved predictions."""
         with self._session_factory() as session:
             stmt = (
                 select(Fact)
@@ -278,7 +244,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
     def get_calibration_stats(
         self, category: str | None = None
     ) -> dict[str, dict[str, int | float]]:
-        """Get calibration statistics by confidence bucket (0.0-0.1, 0.1-0.2, etc.)."""
+        """Get calibration statistics by confidence bucket."""
         with self._session_factory() as session:
             stmt = (
                 select(Fact, PredictionDetails)

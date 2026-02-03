@@ -6,7 +6,8 @@ from typing import Literal, cast
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import func, select
 
-from ....core.exceptions import ValidationError
+from llm_learn.core.exceptions import ValidationError
+
 from ..models import Fact, FeedbackDetails
 from .base import FactClient
 
@@ -21,7 +22,7 @@ class FeedbackClient(FactClient[FeedbackDetails]):
     content items, with optional strength and tags.
 
     Usage:
-        feedback = FeedbackClient(session_factory, profile_id=123)
+        feedback = FeedbackClient(session_factory, profile_id="a3f8b2c1...")
 
         # Record feedback
         fact_id = feedback.record(
@@ -58,7 +59,7 @@ class FeedbackClient(FactClient[FeedbackDetails]):
         context: dict | None = None,
         category: str | None = None,
     ) -> int:
-        """Record user feedback. See class docstring for full usage."""
+        """Record user feedback."""
         self._validate_feedback_inputs(signal, strength)
 
         with self._session_factory() as session:
@@ -93,17 +94,7 @@ class FeedbackClient(FactClient[FeedbackDetails]):
         limit: int = 100,
         active_only: bool = True,
     ) -> list[Fact]:
-        """
-        List feedback by signal type.
-
-        Args:
-            signal: Signal to filter by
-            limit: Maximum records to return
-            active_only: Only return active facts
-
-        Returns:
-            List of facts with feedback details
-        """
+        """List feedback by signal type."""
         with self._session_factory() as session:
             stmt = (
                 select(Fact)
@@ -132,16 +123,7 @@ class FeedbackClient(FactClient[FeedbackDetails]):
         content_id: int,
         limit: int = 100,
     ) -> list[Fact]:
-        """
-        List all feedback for a specific content item.
-
-        Args:
-            content_id: Content ID to filter by
-            limit: Maximum records to return
-
-        Returns:
-            List of facts with feedback details
-        """
+        """List all feedback for a specific content item."""
         with self._session_factory() as session:
             stmt = (
                 select(Fact)
@@ -163,12 +145,7 @@ class FeedbackClient(FactClient[FeedbackDetails]):
             return cast(list[Fact], detach_all(facts, session))
 
     def count_by_signal(self) -> dict[str, int]:
-        """
-        Count feedback by signal type.
-
-        Returns:
-            Dict mapping signal to count
-        """
+        """Count feedback by signal type."""
         with self._session_factory() as session:
             counts = {}
             for signal in ("positive", "negative", "dismiss"):

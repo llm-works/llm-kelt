@@ -5,7 +5,8 @@ from typing import cast
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import select
 
-from ....core.exceptions import ValidationError
+from llm_learn.core.exceptions import ValidationError
+
 from ..models import Fact, PreferenceDetails
 from .base import FactClient
 
@@ -18,7 +19,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
     context, which can be used for Direct Preference Optimization training.
 
     Usage:
-        preferences = PreferencesClient(session_factory, profile_id=123)
+        preferences = PreferencesClient(session_factory, profile_id="a3f8b2c1...")
 
         # Record a preference pair
         fact_id = preferences.record(
@@ -59,7 +60,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
         category: str | None = None,
         metadata: dict | None = None,
     ) -> int:
-        """Record a preference pair. See class docstring for full usage."""
+        """Record a preference pair."""
         self._validate_preference_inputs(context, chosen, rejected, margin)
 
         with self._session_factory() as session:
@@ -93,17 +94,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
         limit: int = 100,
         active_only: bool = True,
     ) -> list[Fact]:
-        """
-        List preference pairs in a specific category.
-
-        Args:
-            category: Category to filter by
-            limit: Maximum records to return
-            active_only: Only return active facts
-
-        Returns:
-            List of facts with preference details
-        """
+        """List preference pairs in a specific category."""
         with self._session_factory() as session:
             stmt = (
                 select(Fact)
@@ -128,12 +119,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
             return cast(list[Fact], detach_all(facts, session))
 
     def get_categories(self) -> list[str]:
-        """
-        Get list of unique categories.
-
-        Returns:
-            List of distinct category names (excluding None)
-        """
+        """Get list of unique categories."""
         with self._session_factory() as session:
             stmt = (
                 select(Fact.category)
@@ -153,17 +139,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
         limit: int = 50,
         active_only: bool = True,
     ) -> list[Fact]:
-        """
-        Search preference pairs by context.
-
-        Args:
-            query: Text to search for in context
-            limit: Maximum records to return
-            active_only: Only return active facts
-
-        Returns:
-            List of matching facts with preference details
-        """
+        """Search preference pairs by context."""
         with self._session_factory() as session:
             stmt = (
                 select(Fact)

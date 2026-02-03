@@ -8,6 +8,7 @@ from llm_infer.client import LLMClient
 from .context import ContextBuilder
 
 if TYPE_CHECKING:
+    from ..memory.atomic.embedding import EmbeddingAdapter
     from .embedder import Embedder
 
 
@@ -70,6 +71,7 @@ class ContextQuery:
         base_system_prompt: str = "",
         temperature: float = 0.7,
         embedder: "Embedder | None" = None,
+        embedding_adapter: "EmbeddingAdapter | None" = None,
     ):
         """
         Initialize context-aware query interface.
@@ -80,12 +82,14 @@ class ContextQuery:
             base_system_prompt: Default system prompt to use
             temperature: Default temperature for responses
             embedder: Optional embedder for RAG-based fact retrieval
+            embedding_adapter: Optional embedding adapter for RAG search operations
         """
         self._client = client
         self._context_builder = context_builder
         self._base_system_prompt = base_system_prompt
         self._temperature = temperature
         self._embedder = embedder
+        self._embedding_adapter = embedding_adapter
 
     async def ask(  # cq: max-lines=50
         self,
@@ -169,6 +173,8 @@ class ContextQuery:
         """Build system prompt using RAG-based fact retrieval."""
         if self._embedder is None:
             raise ValueError("RAG requires embedder to be configured")
+        if self._embedding_adapter is None:
+            raise ValueError("RAG requires embedding_adapter to be configured")
 
         # Embed the question
         result = await self._embedder.embed_async(question)
@@ -177,8 +183,8 @@ class ContextQuery:
         model_name = rag.model_name if rag.model_name else self._embedder.model
 
         # Search for similar facts (category filtering done in SQL for efficiency)
-        scored_facts = self._context_builder.facts_client.search_similar(
-            embedding=result.embedding,
+        scored_facts = self._embedding_adapter.search_similar(
+            query=result.embedding,
             model_name=model_name,
             top_k=rag.top_k,
             min_similarity=rag.min_similarity,
@@ -186,7 +192,7 @@ class ContextQuery:
         )
 
         # Extract facts from scored results
-        facts = [sf.fact for sf in scored_facts]
+        facts = [sf.entity for sf in scored_facts]
 
         # Build prompt with retrieved facts
         return self._context_builder.build_system_prompt_from_facts(base, facts)

@@ -9,7 +9,7 @@ from typing import Any, TextIO
 
 from sqlalchemy import select
 
-from ...memory.v1.models import (
+from ...memory.atomic.models import (
     Fact,
     FeedbackDetails,
     PredictionDetails,

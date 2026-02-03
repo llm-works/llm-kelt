@@ -1,8 +1,6 @@
 """Core utility functions for Learn framework."""
 
-from datetime import UTC, datetime
+# Re-export from base for backwards compatibility
+from .base import utc_now
 
-
-def utc_now() -> datetime:
-    """Return current UTC time as timezone-aware datetime."""
-    return datetime.now(UTC)
+__all__ = ["utc_now"]
