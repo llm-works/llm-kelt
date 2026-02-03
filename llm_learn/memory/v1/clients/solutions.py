@@ -67,8 +67,11 @@ class SolutionsClient(FactClient[SolutionDetails]):
             raise ValidationError("problem_context must be a dict")
         if not isinstance(answer, dict):
             raise ValidationError("answer must be a dict")
-        if tool_calls is not None and not isinstance(tool_calls, list):
-            raise ValidationError("tool_calls must be a list or None")
+        if tool_calls is not None:
+            if not isinstance(tool_calls, list):
+                raise ValidationError("tool_calls must be a list or None")
+            if any(not isinstance(tc, dict) for tc in tool_calls):
+                raise ValidationError("tool_calls elements must be dicts")
 
     def record(
         self,

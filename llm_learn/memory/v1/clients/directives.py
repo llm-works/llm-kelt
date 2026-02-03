@@ -189,6 +189,11 @@ class DirectivesClient(FactClient[DirectiveDetails]):
 
             if not include_inactive:
                 stmt = stmt.where(DirectiveDetails.status == "active")
+                # Also filter out expired directives
+                now = utc_now()
+                stmt = stmt.where(
+                    (DirectiveDetails.expires_at.is_(None)) | (DirectiveDetails.expires_at > now)
+                )
 
             stmt = stmt.order_by(Fact.created_at.desc()).limit(limit)
 

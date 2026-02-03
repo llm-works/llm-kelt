@@ -1,5 +1,6 @@
 """Feedback client for explicit user signals on content."""
 
+import math
 from typing import Literal, cast
 
 from appinfra.db.utils import detach, detach_all
@@ -44,7 +45,7 @@ class FeedbackClient(FactClient[FeedbackDetails]):
         valid_signals = ("positive", "negative", "dismiss")
         if signal not in valid_signals:
             raise ValidationError(f"Invalid signal: {signal}. Must be one of {valid_signals}")
-        if strength < 0.0 or strength > 1.0:
+        if not math.isfinite(strength) or strength < 0.0 or strength > 1.0:
             raise ValidationError(f"strength must be between 0.0 and 1.0, got {strength}")
 
     def record(

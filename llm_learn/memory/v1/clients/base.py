@@ -7,6 +7,7 @@ from appinfra.db.utils import detach, detach_all
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ....core.utils import utc_now
 from ..models import Fact
 
 T = TypeVar("T")  # Details model type
@@ -64,12 +65,14 @@ class FactClient(Generic[T]):
             fact = self._get_fact(session, fact_id)
             if fact is None:
                 return None
-            # Eagerly load the details relationship
-            details = getattr(fact, self.details_relationship)
-            # Detach both fact and details from session
+            # Eagerly load the details relationship (if any)
+            # Guard against empty details_relationship (e.g., AssertionsClient)
+            if self.details_relationship:
+                details = getattr(fact, self.details_relationship)
+                if details is not None:
+                    detach(details, session)
+            # Detach fact from session
             detach(fact, session)
-            if details is not None:
-                detach(details, session)
             return fact
 
     def list(
@@ -106,9 +109,11 @@ class FactClient(Generic[T]):
             facts = list(session.scalars(stmt).all())
             # Load and detach details for each fact
             for fact in facts:
-                details = getattr(fact, self.details_relationship)
-                if details is not None:
-                    detach(details, session)
+                # Guard against empty details_relationship (e.g., AssertionsClient)
+                if self.details_relationship:
+                    details = getattr(fact, self.details_relationship)
+                    if details is not None:
+                        detach(details, session)
             return cast(list[Fact], detach_all(facts, session))
 
     def count(self, active_only: bool = True) -> int:
@@ -168,6 +173,7 @@ class FactClient(Generic[T]):
             if fact is None:
                 return False
             fact.active = False
+            fact.updated_at = utc_now()
             return True
 
     def activate(self, fact_id: int) -> bool:
@@ -185,6 +191,7 @@ class FactClient(Generic[T]):
             if fact is None:
                 return False
             fact.active = True
+            fact.updated_at = utc_now()
             return True
 
     def exists(self, fact_id: int) -> bool:

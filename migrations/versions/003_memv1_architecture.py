@@ -6,8 +6,11 @@ Create Date: 2026-02-02
 
 This migration:
 1. Creates memv1_* tables (unified fact architecture)
-2. Migrates data from old tables to new structure
-3. Drops old tables (facts, feedback, predictions, etc.)
+2. Drops old tables (facts, feedback, predictions, etc.)
+
+Note: This is a one-way migration. The downgrade() function drops the new
+tables but does NOT recreate the old v0 tables. Ensure you have backups
+before running this migration in production.
 """
 
 from collections.abc import Sequence

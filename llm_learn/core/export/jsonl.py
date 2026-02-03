@@ -68,6 +68,9 @@ def export_feedback(
         if since:
             stmt = stmt.where(Fact.created_at >= since)
         for fact, details, content in session.execute(stmt.order_by(Fact.created_at.asc())).all():
+            # Skip rows without usable text content
+            if content is None or not content.content_text:
+                continue
             f.write(
                 json.dumps(_format_feedback_record(fact, details, content), ensure_ascii=False)
                 + "\n"

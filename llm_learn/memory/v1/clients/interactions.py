@@ -214,5 +214,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
             return {
                 "interaction_count": result.count or 0,
                 "total_duration_ms": result.total_duration or 0,
-                "avg_scroll_depth": float(result.avg_scroll) if result.avg_scroll else None,
+                "avg_scroll_depth": float(result.avg_scroll)
+                if result.avg_scroll is not None
+                else None,
             }

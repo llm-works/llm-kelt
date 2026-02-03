@@ -230,6 +230,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
                 .where(
                     Fact.profile_id == self.profile_id,
                     Fact.type == self.fact_type,
+                    Fact.active == True,  # noqa: E712
                     PredictionDetails.status == "resolved",
                 )
             )
