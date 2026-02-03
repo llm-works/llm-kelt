@@ -196,6 +196,11 @@ class SchemaManager:
         """Bootstrap a fresh database with schema from models."""
         self._lg.info("Bootstrapping fresh database schema")
 
+        # Create pgvector extension before creating tables (required for Vector columns)
+        with self._engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.commit()
+
         # Create all tables from SQLAlchemy models
         Base.metadata.create_all(self._engine)
 

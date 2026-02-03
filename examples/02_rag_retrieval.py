@@ -43,7 +43,7 @@ from appinfra.log import LogConfig, Logger, LoggerFactory
 from httpx import ConnectError, ConnectTimeout
 from llm_infer.client import Factory as LLMClientFactory
 
-from llm_learn import LearnClient
+from llm_learn import LearnClient, LearnClientFactory
 from llm_learn.inference import (
     ContextBuilder,
     ContextQuery,
@@ -102,8 +102,8 @@ async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedde
     """Embed facts for semantic search. Returns embedder if successful."""
     print(f"\n{H2}▶ Embedding Facts for Semantic Search{RESET}")
 
-    embedding_config = config.learn.embedding
-    embedder = Embedder(base_url=embedding_config.base_url, model="default")
+    embedding_config = config.embedding
+    embedder = Embedder(base_url=embedding_config.base_url, model=embedding_config.model_name)
 
     try:
         print(f"  {MUTED}Connecting to embedding server...{RESET}")
@@ -267,14 +267,14 @@ async def main():
 
     # Suppress logging noise
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
-
-    learn = LearnClient(profile_id=1)
-    learn.migrate()
-    profile_id = ensure_demo_profile(learn)
-    learn = LearnClient(profile_id=profile_id)
-    print(f"{MUTED}Using profile_id={RESET}{INFO}{profile_id}{RESET}")
-
     config = Config("etc/llm-learn.yaml")
+    factory = LearnClientFactory(lg)
+
+    # Create initial client to get/create profile
+    learn = factory.create_from_config(profile_id="1", config=config)
+    profile_id = ensure_demo_profile(learn)
+    learn = factory.create_from_config(profile_id=profile_id, config=config)
+    print(f"{MUTED}Using profile_id={RESET}{INFO}{profile_id}{RESET}")
 
     # Run demos
     populate_facts(learn)

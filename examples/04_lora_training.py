@@ -32,7 +32,7 @@ from appinfra.log import LogConfig, Logger, LoggerFactory
 from llm_infer.client import Factory as LLMClientFactory
 from llm_infer.client import LLMClient
 
-from llm_learn import LearnClient
+from llm_learn import LearnClient, LearnClientFactory
 from llm_learn.training import (
     AdapterRegistry,
     LoraConfig,
@@ -360,10 +360,12 @@ async def main():
 
     # Initialize
     config = Config("etc/llm-learn.yaml")
-    learn = LearnClient(profile_id=1)
-    learn.migrate()
+    factory = LearnClientFactory(lg)
+
+    # Create initial client to get/create profile
+    learn = factory.create_from_config(profile_id="1", config=config)
     profile_id = ensure_demo_profile(learn, profile_slug="lora-training")
-    learn = LearnClient(profile_id=profile_id)
+    learn = factory.create_from_config(profile_id=profile_id, config=config)
     print(f"{MUTED}Using profile_id={RESET}{INFO}{profile_id}{RESET}")
 
     # Get inference URL and query for running model

@@ -38,7 +38,7 @@ from _helpers import (
 )
 from llm_infer.client import Factory as LLMClientFactory
 
-from llm_learn import LearnClient
+from llm_learn import LearnClient, LearnClientFactory
 from llm_learn.inference import ContextBuilder, ContextQuery
 
 
@@ -210,10 +210,17 @@ async def main():
     print(f"{H1}{'━' * 50}{RESET}")
 
     # Initialize
-    learn = LearnClient(profile_id=1)
-    learn.migrate()
+    from appinfra.config import Config
+    from appinfra.log import LogConfig, LoggerFactory
+
+    config = Config("etc/llm-learn.yaml")
+    lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+    factory = LearnClientFactory(lg)
+
+    # Create initial client to get/create profile
+    learn = factory.create_from_config(profile_id="1", config=config)
     profile_id = ensure_demo_profile(learn)
-    learn = LearnClient(profile_id=profile_id)
+    learn = factory.create_from_config(profile_id=profile_id, config=config)
     print(f"{MUTED}Using profile_id={RESET}{INFO}{profile_id}{RESET}")
 
     # Run demos
