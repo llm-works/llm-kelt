@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint, select
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, utc_now
@@ -161,15 +162,16 @@ class ContentStore:
             Tuple of (content_id, created) where created is True if new.
 
         Raises:
-            ValidationError: If content_text is empty.
+            ValidationError: If content_text or source is empty.
         """
         if not content_text or not content_text.strip():
             raise ValidationError("Content text cannot be empty")
+        if not source or not source.strip():
+            raise ValidationError("Source cannot be empty")
 
         content_hash = self._compute_hash(content_text)
 
         with self._session_factory() as session:
-            # Try to find existing by hash within this profile
             stmt = select(Content).where(
                 Content.profile_id == self._profile_id,
                 Content.content_hash == content_hash,
@@ -178,20 +180,19 @@ class ContentStore:
             if existing:
                 return existing.id, False
 
-            # Create new
-            content = Content(
-                profile_id=self._profile_id,
-                external_id=external_id,
-                source=source.strip() if source else "unknown",
-                url=url,
-                title=title,
-                content_text=content_text,
-                content_hash=content_hash,
-                metadata_=metadata,
+            content = self._create_content_record(
+                content_hash, content_text, source, external_id, url, title, metadata
             )
-            session.add(content)
-            session.flush()
-            return content.id, True
+            try:
+                session.add(content)
+                session.flush()
+                return content.id, True
+            except IntegrityError:
+                session.rollback()
+                existing = session.scalar(stmt)
+                if existing:
+                    return existing.id, False
+                raise
 
     def get(self, content_id: int) -> Content | None:
         """
@@ -324,6 +325,28 @@ class ContentStore:
                 session.delete(content)
                 return True
             return False
+
+    def _create_content_record(
+        self,
+        content_hash: str,
+        content_text: str,
+        source: str,
+        external_id: str | None,
+        url: str | None,
+        title: str | None,
+        metadata: dict | None,
+    ) -> Content:
+        """Build a Content record with the given parameters."""
+        return Content(
+            profile_id=self._profile_id,
+            external_id=external_id,
+            source=source.strip(),
+            url=url,
+            title=title,
+            content_text=content_text,
+            content_hash=content_hash,
+            metadata_=metadata,
+        )
 
     @staticmethod
     def _compute_hash(content_text: str) -> str:

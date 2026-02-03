@@ -59,6 +59,14 @@ def upgrade() -> None:  # cq: exempt
     )
     op.create_index("idx_workspaces_domain", "workspaces", ["domain_id"])
     op.create_index("idx_workspaces_slug", "workspaces", ["slug"])
+    # Partial unique index for domain-less workspaces (prevents duplicate slugs when domain is NULL)
+    op.create_index(
+        "uq_workspace_slug_null_domain",
+        "workspaces",
+        ["slug"],
+        unique=True,
+        postgresql_where=sa.text("domain_id IS NULL"),
+    )
 
     op.create_table(
         "profiles",

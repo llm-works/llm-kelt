@@ -8,6 +8,7 @@ from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, Index, Integer, String, UniqueConstraint, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, utc_now
@@ -114,6 +115,26 @@ class EmbeddingStore:
         """
         self._session_factory = session_factory
 
+    @staticmethod
+    def _update_embedding(record: Embedding, embedding: list[float]) -> Embedding:
+        """Update an existing embedding record with new vector data."""
+        record.embedding = embedding
+        record.dimensions = len(embedding)
+        return record
+
+    @staticmethod
+    def _create_embedding(
+        entity_type: str, entity_id: str, model_name: str, embedding: list[float]
+    ) -> Embedding:
+        """Create a new Embedding record."""
+        return Embedding(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            model_name=model_name,
+            dimensions=len(embedding),
+            embedding=embedding,
+        )
+
     def store(
         self,
         entity_type: str,
@@ -146,22 +167,23 @@ class EmbeddingStore:
                 Embedding.model_name == model_name,
             )
             existing: Embedding | None = session.scalar(stmt)
-
             if existing:
-                existing.embedding = embedding
-                existing.dimensions = len(embedding)
+                self._update_embedding(existing, embedding)
                 session.commit()
                 return existing
 
-            emb = Embedding(
-                entity_type=entity_type,
-                entity_id=entity_id,
-                model_name=model_name,
-                dimensions=len(embedding),
-                embedding=embedding,
-            )
+            emb = self._create_embedding(entity_type, entity_id, model_name, embedding)
             session.add(emb)
-            session.commit()
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                existing = session.scalar(stmt)
+                if existing:
+                    self._update_embedding(existing, embedding)
+                    session.commit()
+                    return existing
+                raise
             session.refresh(emb)
             return emb
 

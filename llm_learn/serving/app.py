@@ -101,7 +101,7 @@ def create_server_from_config(config: dict) -> Server:
     proxy_config = config.get("proxy", {})
 
     profile_id = proxy_config.get("profile_id") or config.get("profile_id")
-    if profile_id is None:
+    if profile_id is None or not str(profile_id).strip():
         raise ValueError("profile_id is required in config (proxy.profile_id or profile_id)")
 
     return create_server(

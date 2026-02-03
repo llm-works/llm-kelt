@@ -75,6 +75,10 @@ class EmbeddingAdapter:
             raise RuntimeError("No embedder configured")
 
         model = model_name or self._embedder.model
+        if model_name is not None and model_name != self._embedder.model:
+            raise ValueError(
+                f"embedder model {self._embedder.model!r} does not match requested {model_name!r}"
+            )
         result = self._embedder.embed(fact.content)
         self._store.store(
             entity_type=self.ENTITY_TYPE,

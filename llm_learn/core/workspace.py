@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -54,6 +54,13 @@ class Workspace(Base):
     __table_args__ = (
         # Slug unique within domain (NULL domain treated separately by DB)
         UniqueConstraint("domain_id", "slug", name="uq_workspace_domain_slug"),
+        # Partial unique index for domain-less workspaces (prevents duplicate slugs when domain is NULL)
+        Index(
+            "uq_workspace_slug_null_domain",
+            "slug",
+            unique=True,
+            postgresql_where=text("domain_id IS NULL"),
+        ),
         Index("idx_workspaces_domain", "domain_id"),
         Index("idx_workspaces_slug", "slug"),
     )
