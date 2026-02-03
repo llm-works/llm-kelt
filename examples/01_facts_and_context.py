@@ -36,7 +36,7 @@ from _helpers import (
     ensure_demo_profile,
     psql_cmd,
 )
-from llm_infer.client import LLMClient
+from llm_infer.client import Factory as LLMClientFactory
 
 from llm_learn import LearnClient
 from llm_learn.inference import ContextBuilder, ContextQuery
@@ -112,9 +112,12 @@ async def demo_context_query(context_builder: ContextBuilder):
 
     try:
         from appinfra.config import Config
+        from appinfra.log import LogConfig, LoggerFactory
 
         config = Config("etc/llm-learn.yaml")
-        llm_client = LLMClient.from_config(config.llm.to_dict())
+        lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+        llm_factory = LLMClientFactory(lg)
+        llm_client = llm_factory.from_config(config.llm.to_dict())
 
         question = "Show me how to return an error from a Python API endpoint"
 

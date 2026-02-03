@@ -21,9 +21,13 @@ from .exceptions import (
     DatabaseError,
     LearnError,
     NotFoundError,
+    SchemaVersionError,
     ValidationError,
 )
 from .profile import Profile
+
+# Schema management
+from .schema import SchemaManager, SchemaState, SchemaStatus
 
 # Types
 from .types import PagedResult, ScoredEntity
@@ -47,10 +51,15 @@ __all__ = [
     # Types
     "ScoredEntity",
     "PagedResult",
+    # Schema
+    "SchemaManager",
+    "SchemaState",
+    "SchemaStatus",
     # Exceptions
     "LearnError",
     "ValidationError",
     "NotFoundError",
     "DatabaseError",
     "ConfigurationError",
+    "SchemaVersionError",
 ]

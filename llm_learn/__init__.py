@@ -41,14 +41,18 @@ from .core.exceptions import (
     DatabaseError,
     LearnError,
     NotFoundError,
+    SchemaVersionError,
     ValidationError,
 )
+from .factory import LearnClientFactory
 
 __all__ = [
     "LearnClient",
+    "LearnClientFactory",
     "LearnError",
     "ValidationError",
     "NotFoundError",
     "DatabaseError",
     "ConfigurationError",
+    "SchemaVersionError",
 ]

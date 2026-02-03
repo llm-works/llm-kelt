@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from _helpers import H1, H2, INFO, LLM_A, LLM_Q, MUTED, OK, RESET, WARN, ensure_demo_profile
 from appinfra.config import Config
 from appinfra.log import LogConfig, Logger, LoggerFactory
+from llm_infer.client import Factory as LLMClientFactory
 from llm_infer.client import LLMClient
 
 from llm_learn import LearnClient
@@ -399,7 +400,8 @@ async def main():
     print(f"{MUTED}Adapter path:{RESET} {INFO}{adapter_base_path}{RESET}")
 
     # Create LLM client
-    llm_client = LLMClient.from_config(config.llm.to_dict())
+    llm_factory = LLMClientFactory(lg)
+    llm_client = llm_factory.from_config(config.llm.to_dict())
 
     try:
         # Step 1: Show baseline
