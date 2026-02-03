@@ -48,7 +48,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
         """Validate prediction inputs."""
         if not hypothesis or not hypothesis.strip():
             raise ValidationError("hypothesis cannot be empty")
-        if confidence < 0.0 or confidence > 1.0:
+        if not (0.0 <= confidence <= 1.0):
             raise ValidationError(f"confidence must be between 0.0 and 1.0, got {confidence}")
 
     def _parse_resolution_date(self, resolution_date: date | str | None) -> date | None:
@@ -141,9 +141,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
         if outcome not in valid_outcomes:
             raise ValidationError(f"Invalid outcome: {outcome}. Must be one of {valid_outcomes}")
 
-        if outcome_confidence is not None and (
-            outcome_confidence < 0.0 or outcome_confidence > 1.0
-        ):
+        if outcome_confidence is not None and not (0.0 <= outcome_confidence <= 1.0):
             raise ValidationError(
                 f"outcome_confidence must be between 0.0 and 1.0, got {outcome_confidence}"
             )
