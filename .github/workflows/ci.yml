@@ -33,8 +33,9 @@ jobs:
           python -m pip install ruff mypy types-PyYAML
           # Install minimal deps for type checking (avoid heavy ML deps)
           python -m pip install sqlalchemy pydantic fastapi httpx
-          # Install llm-infer without its heavy ML deps
-          python -m pip install "llm-infer @ git+https://github.com/serendip-ml/llm-infer.git@9e9b4b20" --no-deps
+          # Install llm-infer from develop branch (policy: use @develop during active development,
+          # pin to specific commit for releases)
+          python -m pip install "llm-infer @ git+https://github.com/serendip-ml/llm-infer.git@develop" --no-deps
           python -m pip install -e . --no-deps
 
       - name: Check formatting
@@ -86,8 +87,9 @@ jobs:
           # Install runtime deps (avoid heavy ML deps from llm-infer)
           python -m pip install sqlalchemy psycopg2-binary pgvector alembic httpx fastapi uvicorn pydantic
           python -m pip install appinfra
-          # Install llm-infer without its heavy ML deps
-          python -m pip install "llm-infer @ git+https://github.com/serendip-ml/llm-infer.git@9e9b4b20" --no-deps
+          # Install llm-infer from develop branch (policy: use @develop during active development,
+          # pin to specific commit for releases)
+          python -m pip install "llm-infer @ git+https://github.com/serendip-ml/llm-infer.git@develop" --no-deps
           # Install dev deps explicitly
           python -m pip install pytest pytest-cov pytest-xdist pytest-asyncio coverage
           # Install package without transitive deps
@@ -138,8 +140,9 @@ jobs:
           # Install runtime deps (avoid heavy ML deps from llm-infer)
           python -m pip install sqlalchemy psycopg2-binary pgvector alembic httpx fastapi uvicorn pydantic
           python -m pip install appinfra
-          # Install llm-infer without its heavy ML deps
-          python -m pip install "llm-infer @ git+https://github.com/serendip-ml/llm-infer.git@9e9b4b20" --no-deps
+          # Install llm-infer from develop branch (policy: use @develop during active development,
+          # pin to specific commit for releases)
+          python -m pip install "llm-infer @ git+https://github.com/serendip-ml/llm-infer.git@develop" --no-deps
           # Install dev deps explicitly
           python -m pip install pytest pytest-cov pytest-xdist pytest-asyncio coverage
           # Install package without transitive deps
