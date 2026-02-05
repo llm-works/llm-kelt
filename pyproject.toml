@@ -18,9 +18,9 @@ dependencies = [
     "pgvector>=0.3,<1.0",
     "alembic>=1.12,<2.0",
 
-    # Inference
+    # Inference - llm-infer commented out to prefer local editable install
+    # "llm-infer @ git+https://github.com/serendip-ml/llm-infer.git@develop",
     "httpx>=0.27,<1.0",
-    "llm-infer @ git+https://github.com/serendip-ml/llm-infer.git@develop",
 
     # Serving
     "fastapi>=0.109,<1.0",
