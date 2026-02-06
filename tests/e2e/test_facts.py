@@ -18,7 +18,7 @@ from llm_learn.inference.context import ContextBuilder
 @pytest.fixture
 def facts_learn_client(logger, database, test_profile):
     """Create LearnClient for facts testing."""
-    return LearnClient(lg=logger, profile_id=test_profile, database=database, ensure_schema=False)
+    return LearnClient(lg=logger, profile_id=test_profile, database=database)
 
 
 @pytest.mark.llm

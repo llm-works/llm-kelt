@@ -12,7 +12,7 @@ class TestEnsureProfile:
         """LearnClient should create the profile if it doesn't exist."""
         profile_id = Profile.generate_id(None, "default", "auto-test-1")
 
-        client = LearnClient(logger, profile_id=profile_id, database=database, ensure_schema=False)
+        client = LearnClient(logger, profile_id=profile_id, database=database)
 
         with database.session() as session:
             profile = session.get(Profile, profile_id)
@@ -28,7 +28,7 @@ class TestEnsureProfile:
         """Auto-created profile should be under a 'default' workspace."""
         profile_id = Profile.generate_id(None, "default", "auto-test-2")
 
-        LearnClient(logger, profile_id=profile_id, database=database, ensure_schema=False)
+        LearnClient(logger, profile_id=profile_id, database=database)
 
         workspace_id = Workspace.generate_id(None, "default")
         with database.session() as session:
@@ -48,7 +48,7 @@ class TestEnsureProfile:
             original_name = original.name
 
         # Create client with existing profile — should not modify it
-        LearnClient(logger, profile_id=test_profile, database=database, ensure_schema=False)
+        LearnClient(logger, profile_id=test_profile, database=database)
 
         with database.session() as session:
             profile = session.get(Profile, test_profile)
@@ -60,8 +60,8 @@ class TestEnsureProfile:
         pid_a = Profile.generate_id(None, "default", "auto-test-multi-a")
         pid_b = Profile.generate_id(None, "default", "auto-test-multi-b")
 
-        LearnClient(logger, profile_id=pid_a, database=database, ensure_schema=False)
-        LearnClient(logger, profile_id=pid_b, database=database, ensure_schema=False)
+        LearnClient(logger, profile_id=pid_a, database=database)
+        LearnClient(logger, profile_id=pid_b, database=database)
 
         workspace_id = Workspace.generate_id(None, "default")
         with database.session() as session:
