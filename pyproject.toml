@@ -14,6 +14,7 @@ dependencies = [
 
     # Storage
     "sqlalchemy>=2.0,<3.0",
+    "sqlalchemy-utils>=0.42,<1.0",
     "psycopg2-binary>=2.9,<3.0",
     "pgvector>=0.3,<1.0",
     "alembic>=1.12,<2.0",

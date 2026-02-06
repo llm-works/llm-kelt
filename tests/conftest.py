@@ -245,7 +245,7 @@ def test_profile(database):
 @pytest.fixture
 def learn_client(logger, database, test_profile):
     """Create LearnClient for testing, scoped to test profile."""
-    return LearnClient(logger, profile_id=test_profile, database=database, ensure_schema=False)
+    return LearnClient(logger, profile_id=test_profile, database=database)
 
 
 @pytest.fixture

@@ -7,11 +7,15 @@ from typing import TYPE_CHECKING, Any
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 from llm_infer.client import LLMClient
+from sqlalchemy.exc import IntegrityError
 
 from .core.content import ContentStore
 from .core.database import Database
 from .core.embedding import EmbeddingStore
-from .core.schema import SchemaManager, SchemaStatus
+from .core.exceptions import SchemaVersionError
+from .core.profile import Profile
+from .core.schema import SchemaManager, SchemaState, SchemaStatus
+from .core.workspace import Workspace
 from .inference.context import ContextBuilder
 from .inference.embedder import Embedder
 from .inference.query import ContextQuery
@@ -90,7 +94,7 @@ class LearnClient:
             learn_config: Optional learn settings (config.learn section).
                          Contains memory, embedding, default_system_prompt, etc.
             ensure_schema: If True (default), auto-migrate schema on init.
-                          Set False for tests or when schema is known current.
+                          If False, verify schema is current and raise SchemaVersionError if not.
         """
         self._lg = lg
         self._profile_id = profile_id
@@ -99,9 +103,8 @@ class LearnClient:
         self._llm_client = llm_client
         self._learn_config = learn_config
 
-        if ensure_schema:
-            self._ensure_schema()
-
+        self._verify_schema(ensure=ensure_schema)
+        self._ensure_profile()
         self._setup_stores()
         self._setup_query_interface()
 
@@ -232,10 +235,64 @@ class LearnClient:
             return ""
         return getattr(self._learn_config, "default_system_prompt", "") or ""
 
-    def _ensure_schema(self) -> None:
-        """Ensure database schema is current (called during init)."""
+    def _verify_schema(self, *, ensure: bool) -> None:
+        """Verify database schema is current, optionally auto-migrating.
+
+        Args:
+            ensure: If True, create database and run migrations automatically.
+                    If False, only verify — raise SchemaVersionError if not current.
+        """
+        if ensure:
+            self._db.ensure_database()
+            manager = SchemaManager(self._lg, self._db.engine)
+            manager.ensure_schema()
+            return
+
         manager = SchemaManager(self._lg, self._db.engine)
-        manager.ensure_schema()
+        status = manager.get_status()
+        if status.state != SchemaState.CURRENT:
+            raise SchemaVersionError(
+                f"Schema is not current (state={status.state.value}, "
+                f"current={status.current_version}, head={status.head_version}). "
+                "Use ensure_schema=True to auto-migrate."
+            )
+
+    def _ensure_profile(self) -> None:
+        """Ensure the profile row and its parent workspace exist.
+
+        Creates a default workspace (no domain) and the profile row so that
+        FK constraints on atomic_facts etc. are satisfied immediately.
+
+        Uses try/except IntegrityError to handle concurrent callers safely.
+        """
+        with self._db.session() as session:
+            if session.get(Profile, self._profile_id):
+                return
+
+        workspace_id = Workspace.generate_id(None, "default")
+
+        # Ensure workspace exists (separate transaction for safe concurrency)
+        try:
+            with self._db.session() as session:
+                if not session.get(Workspace, workspace_id):
+                    session.add(Workspace(id=workspace_id, slug="default", name="Default"))
+        except IntegrityError:
+            self._lg.info("workspace already created by concurrent process")
+
+        # Create profile (workspace now guaranteed to exist)
+        try:
+            with self._db.session() as session:
+                session.add(
+                    Profile(
+                        id=self._profile_id,
+                        workspace_id=workspace_id,
+                        slug=self._profile_id,
+                        name="Default",
+                        active=True,
+                    )
+                )
+        except IntegrityError:
+            self._lg.info("profile already created by concurrent process")
 
     def get_schema_status(self) -> SchemaStatus:
         """Get current schema status for diagnostics."""
