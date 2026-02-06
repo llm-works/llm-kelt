@@ -4,6 +4,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
+import sqlalchemy_utils
 from appinfra.db.pg import PG
 from appinfra.log import Logger
 
@@ -57,6 +58,17 @@ class Database:
             raise
         finally:
             session.close()
+
+    def ensure_database(self) -> None:
+        """Create the database if PG is configured with create_db and it doesn't exist.
+
+        Mirrors the create_db logic from PG.migrate() so callers that bypass
+        PG.migrate() (e.g., SchemaManager) still get automatic database creation.
+        """
+        create_db = getattr(self._pg.cfg, "create_db", False)
+        if create_db is True and not sqlalchemy_utils.database_exists(self._pg.engine.url):
+            sqlalchemy_utils.create_database(self._pg.engine.url)
+            self._lg.info("created database")
 
     @property
     def engine(self) -> Any:
