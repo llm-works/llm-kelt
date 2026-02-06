@@ -269,13 +269,19 @@ class LearnClient:
             if session.get(Profile, self._profile_id):
                 return
 
+        workspace_id = Workspace.generate_id(None, "default")
+
+        # Ensure workspace exists (separate transaction for safe concurrency)
         try:
             with self._db.session() as session:
-                workspace_id = Workspace.generate_id(None, "default")
                 if not session.get(Workspace, workspace_id):
                     session.add(Workspace(id=workspace_id, slug="default", name="Default"))
-                    session.flush()
+        except IntegrityError:
+            self._lg.info("workspace already created by concurrent process")
 
+        # Create profile (workspace now guaranteed to exist)
+        try:
+            with self._db.session() as session:
                 session.add(
                     Profile(
                         id=self._profile_id,
