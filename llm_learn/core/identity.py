@@ -113,35 +113,14 @@ class IdentityResolver:
         config = config or {}
         defaults = defaults or {}
 
-        # Extract names (with defaults)
-        name = config.get("name") or defaults.get("name")
-        if not name:
-            raise ValidationError("Profile name is required (in config or defaults)")
+        # Extract and validate names
+        name, workspace, domain = _extract_names(config, defaults)
 
-        workspace = config.get("workspace") or defaults.get("workspace", "default")
-        domain = config.get("domain") or defaults.get("domain")
+        # Extract and validate explicit IDs
+        explicit_ids = _extract_and_validate_explicit_ids(config)
 
-        # Extract explicit IDs (for migrations/renaming)
-        explicit_profile_id = config.get("profile_id")
-        explicit_workspace_id = config.get("workspace_id")
-        explicit_domain_id = config.get("domain_id")
-
-        # Validate explicit IDs if provided
-        if explicit_profile_id is not None:
-            _validate_id(explicit_profile_id, "profile_id")
-        if explicit_workspace_id is not None:
-            _validate_id(explicit_workspace_id, "workspace_id")
-        if explicit_domain_id is not None:
-            _validate_id(explicit_domain_id, "domain_id")
-
-        # Resolve IDs (generate from names or use explicit)
-        domain_id: str | None = None
-        if domain is not None:
-            domain_id = explicit_domain_id or Domain.generate_id(domain)
-
-        workspace_id = explicit_workspace_id or Workspace.generate_id(domain, workspace)
-
-        profile_id = explicit_profile_id or Profile.generate_id(domain, workspace, name)
+        # Resolve final IDs
+        domain_id, workspace_id, profile_id = _resolve_ids(name, workspace, domain, explicit_ids)
 
         return ProfileIdentity(
             name=name,
@@ -151,6 +130,77 @@ class IdentityResolver:
             workspace_id=workspace_id,
             domain_id=domain_id,
         )
+
+
+def _extract_names(config: dict[str, Any], defaults: dict[str, Any]) -> tuple[str, str, str | None]:
+    """Extract and validate profile/workspace/domain names from config.
+
+    Returns:
+        Tuple of (name, workspace, domain).
+
+    Raises:
+        ValidationError: If profile name is missing.
+    """
+    name = config.get("name") or defaults.get("name")
+    if not name:
+        raise ValidationError("Profile name is required (in config or defaults)")
+
+    workspace = config.get("workspace") or defaults.get("workspace", "default")
+    domain = config.get("domain") or defaults.get("domain")
+
+    return name, workspace, domain
+
+
+def _extract_and_validate_explicit_ids(
+    config: dict[str, Any],
+) -> dict[str, str | None]:
+    """Extract and validate explicit ID overrides from config.
+
+    Returns:
+        Dict with keys: profile_id, workspace_id, domain_id (values may be None).
+
+    Raises:
+        ValidationError: If any explicit ID is invalid.
+    """
+    explicit_profile_id = config.get("profile_id")
+    explicit_workspace_id = config.get("workspace_id")
+    explicit_domain_id = config.get("domain_id")
+
+    # Validate explicit IDs if provided
+    if explicit_profile_id is not None:
+        _validate_id(explicit_profile_id, "profile_id")
+    if explicit_workspace_id is not None:
+        _validate_id(explicit_workspace_id, "workspace_id")
+    if explicit_domain_id is not None:
+        _validate_id(explicit_domain_id, "domain_id")
+
+    return {
+        "profile_id": explicit_profile_id,
+        "workspace_id": explicit_workspace_id,
+        "domain_id": explicit_domain_id,
+    }
+
+
+def _resolve_ids(
+    name: str,
+    workspace: str,
+    domain: str | None,
+    explicit_ids: dict[str, str | None],
+) -> tuple[str | None, str, str]:
+    """Resolve final IDs from names and explicit overrides.
+
+    Returns:
+        Tuple of (domain_id, workspace_id, profile_id).
+    """
+    domain_id: str | None = None
+    if domain is not None:
+        domain_id = explicit_ids["domain_id"] or Domain.generate_id(domain)
+
+    workspace_id = explicit_ids["workspace_id"] or Workspace.generate_id(domain, workspace)
+
+    profile_id = explicit_ids["profile_id"] or Profile.generate_id(domain, workspace, name)
+
+    return domain_id, workspace_id, profile_id
 
 
 def _validate_id(id_str: str, name: str) -> None:

@@ -14,7 +14,7 @@ from .core.database import Database
 from .core.domain import Domain
 from .core.embedding import EmbeddingStore
 from .core.exceptions import SchemaVersionError, ValidationError
-from .core.identity import IdentityResolver, ProfileIdentity
+from .core.identity import ProfileIdentity
 from .core.profile import Profile
 from .core.schema import SchemaManager, SchemaState, SchemaStatus
 from .core.workspace import Workspace
@@ -131,7 +131,7 @@ class LearnClient:
         llm_client: LLMClient | None = None,
         learn_config: DotDict | None = None,
         ensure_schema: bool = True,
-    ) -> "LearnClient":
+    ) -> LearnClient:
         """Create LearnClient from ProfileIdentity (recommended).
 
         This is the preferred way to create a LearnClient when you want to specify
@@ -344,20 +344,37 @@ class LearnClient:
         # Level 1: Ensure domain exists (if specified)
         if self._identity.domain is not None:
             assert self._identity.domain_id is not None
-            try:
-                with self._db.session() as session:
-                    if not session.get(Domain, self._identity.domain_id):
-                        session.add(
-                            Domain(
-                                id=self._identity.domain_id,
-                                slug=self._identity.domain,
-                                name=self._identity.domain.title(),
-                            )
-                        )
-            except IntegrityError:
-                self._lg.debug("domain already created by concurrent process")
+            self._ensure_domain_exists()
 
         # Level 2: Ensure workspace exists
+        self._ensure_workspace_exists()
+
+        # Level 3: Ensure profile exists
+        self._ensure_profile_exists()
+
+    def _ensure_domain_exists(self) -> None:
+        """Ensure domain exists in database."""
+        assert (
+            self._identity is not None
+            and self._identity.domain is not None
+            and self._identity.domain_id is not None
+        )
+        try:
+            with self._db.session() as session:
+                if not session.get(Domain, self._identity.domain_id):
+                    session.add(
+                        Domain(
+                            id=self._identity.domain_id,
+                            slug=self._identity.domain,
+                            name=self._identity.domain.title(),
+                        )
+                    )
+        except IntegrityError:
+            self._lg.debug("domain already created by concurrent process")
+
+    def _ensure_workspace_exists(self) -> None:
+        """Ensure workspace exists in database."""
+        assert self._identity is not None
         try:
             with self._db.session() as session:
                 if not session.get(Workspace, self._identity.workspace_id):
@@ -372,7 +389,9 @@ class LearnClient:
         except IntegrityError:
             self._lg.debug("workspace already created by concurrent process")
 
-        # Level 3: Ensure profile exists
+    def _ensure_profile_exists(self) -> None:
+        """Ensure profile exists in database."""
+        assert self._identity is not None
         try:
             with self._db.session() as session:
                 session.add(
