@@ -24,9 +24,10 @@ from tempfile import TemporaryDirectory
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, ensure_demo_profile, psql_cmd
+from _helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, psql_cmd
 
 from llm_learn import LearnClient
+from llm_learn.core.profile import Profile
 from llm_learn.training import (
     ExportResult,
     export_feedback_classifier,
@@ -269,9 +270,9 @@ def main():
     print(f"{H1}  Example 03: Training Data Export{RESET}")
     print(f"{H1}{'━' * 50}{RESET}")
 
-    learn = LearnClient(profile_id=1)
-    learn.migrate()
-    profile_id = ensure_demo_profile(learn)
+    # Create LearnClient - uses proper profile ID from generate_id
+    # Auto-creates profile and workspace on init (ensure_schema=True by default)
+    profile_id = Profile.generate_id(None, "demo", "example")
     learn = LearnClient(profile_id=profile_id)
     print(f"{MUTED}Using profile_id={RESET}{INFO}{profile_id}{RESET}")
 

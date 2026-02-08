@@ -115,6 +115,10 @@ class LearnClient:
                 f"profile_id must be 32-char hex hash, got: {profile_id!r}. "
                 "Use IdentityResolver to generate proper IDs."
             )
+        try:
+            int(profile_id, 16)
+        except ValueError:
+            raise ValidationError(f"profile_id must be hex string, got: {profile_id!r}") from None
 
         self._verify_schema(ensure=ensure_schema)
         self._ensure_profile()
@@ -394,15 +398,16 @@ class LearnClient:
         assert self._identity is not None
         try:
             with self._db.session() as session:
-                session.add(
-                    Profile(
-                        id=self._identity.profile_id,
-                        workspace_id=self._identity.workspace_id,
-                        slug=self._identity.name,
-                        name=self._identity.name.title(),
-                        active=True,
+                if not session.get(Profile, self._identity.profile_id):
+                    session.add(
+                        Profile(
+                            id=self._identity.profile_id,
+                            workspace_id=self._identity.workspace_id,
+                            slug=self._identity.name,
+                            name=self._identity.name.title(),
+                            active=True,
+                        )
                     )
-                )
         except IntegrityError:
             self._lg.debug("profile already created by concurrent process")
 

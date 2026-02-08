@@ -31,7 +31,7 @@ def psql_cmd(learn: LearnClient) -> str:
     return f"psql -h {url.host} -p {url.port} -U {url.username} -d {url.database}"
 
 
-def ensure_demo_profile(learn: LearnClient, profile_slug: str = "example") -> int:
+def ensure_demo_profile(learn: LearnClient, profile_slug: str = "example") -> str:
     """Ensure demo workspace and profile exist, return profile_id.
 
     Args:
@@ -39,7 +39,7 @@ def ensure_demo_profile(learn: LearnClient, profile_slug: str = "example") -> in
         profile_slug: Slug for the profile (default: "example")
 
     Returns:
-        The profile_id of the created/existing profile
+        The profile_id (32-char hex hash) of the created/existing profile
     """
     from llm_learn.core.models import Profile, Workspace
 
@@ -63,4 +63,4 @@ def ensure_demo_profile(learn: LearnClient, profile_slug: str = "example") -> in
             session.flush()
 
         session.commit()
-        return int(profile.id)
+        return profile.id
