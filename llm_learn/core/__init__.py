@@ -24,6 +24,9 @@ from .exceptions import (
     SchemaVersionError,
     ValidationError,
 )
+
+# Identity resolution
+from .identity import IdentityResolver, ProfileIdentity
 from .profile import Profile
 
 # Schema management
@@ -62,4 +65,7 @@ __all__ = [
     "DatabaseError",
     "ConfigurationError",
     "SchemaVersionError",
+    # Identity
+    "ProfileIdentity",
+    "IdentityResolver",
 ]

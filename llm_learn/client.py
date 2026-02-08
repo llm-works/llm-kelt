@@ -11,8 +11,10 @@ from sqlalchemy.exc import IntegrityError
 
 from .core.content import ContentStore
 from .core.database import Database
+from .core.domain import Domain
 from .core.embedding import EmbeddingStore
-from .core.exceptions import SchemaVersionError
+from .core.exceptions import SchemaVersionError, ValidationError
+from .core.identity import ProfileIdentity
 from .core.profile import Profile
 from .core.schema import SchemaManager, SchemaState, SchemaStatus
 from .core.workspace import Workspace
@@ -81,6 +83,7 @@ class LearnClient:
         llm_client: LLMClient | None = None,
         learn_config: DotDict | None = None,
         ensure_schema: bool = True,
+        identity: ProfileIdentity | None = None,
     ) -> None:
         """
         Initialize LearnClient scoped to a specific profile.
@@ -95,18 +98,79 @@ class LearnClient:
                          Contains memory, embedding, default_system_prompt, etc.
             ensure_schema: If True (default), auto-migrate schema on init.
                           If False, verify schema is current and raise SchemaVersionError if not.
+            identity: Optional ProfileIdentity for hierarchy creation. If not provided,
+                     creates legacy "default" workspace with profile_id as slug.
         """
         self._lg = lg
         self._profile_id = profile_id
+        self._identity = identity
         self._db = database
         self._embedder = embedder
         self._llm_client = llm_client
         self._learn_config = learn_config
 
+        # Validate profile_id is proper hash
+        if not isinstance(profile_id, str) or len(profile_id) != 32:
+            raise ValidationError(
+                f"profile_id must be 32-char hex hash, got: {profile_id!r}. "
+                "Use IdentityResolver to generate proper IDs."
+            )
+        try:
+            int(profile_id, 16)
+        except ValueError:
+            raise ValidationError(f"profile_id must be hex string, got: {profile_id!r}") from None
+
         self._verify_schema(ensure=ensure_schema)
         self._ensure_profile()
         self._setup_stores()
         self._setup_query_interface()
+
+    @classmethod
+    def from_identity(
+        cls,
+        lg: Logger,
+        identity: ProfileIdentity,
+        database: Database,
+        embedder: Embedder | None = None,
+        llm_client: LLMClient | None = None,
+        learn_config: DotDict | None = None,
+        ensure_schema: bool = True,
+    ) -> LearnClient:
+        """Create LearnClient from ProfileIdentity (recommended).
+
+        This is the preferred way to create a LearnClient when you want to specify
+        the full domain/workspace/profile hierarchy.
+
+        Args:
+            lg: Logger instance
+            identity: Resolved ProfileIdentity with all IDs determined
+            database: Database instance
+            embedder: Optional embedder for generating embeddings
+            llm_client: Optional LLM client for context-aware queries
+            learn_config: Optional learn settings
+            ensure_schema: If True, auto-migrate schema on init
+
+        Returns:
+            LearnClient instance scoped to the profile
+
+        Example:
+            identity = IdentityResolver.resolve({
+                "domain": "acme",
+                "workspace": "production",
+                "name": "code-reviewer"
+            })
+            client = LearnClient.from_identity(lg, identity, database)
+        """
+        return cls(
+            lg=lg,
+            profile_id=identity.profile_id,
+            database=database,
+            embedder=embedder,
+            llm_client=llm_client,
+            learn_config=learn_config,
+            ensure_schema=ensure_schema,
+            identity=identity,
+        )
 
     def _setup_stores(self) -> None:
         """Initialize storage components."""
@@ -258,20 +322,100 @@ class LearnClient:
             )
 
     def _ensure_profile(self) -> None:
-        """Ensure the profile row and its parent workspace exist.
+        """Ensure the profile row and its parent hierarchy exist.
 
-        Creates a default workspace (no domain) and the profile row so that
-        FK constraints on atomic_facts etc. are satisfied immediately.
+        Creates the full domain → workspace → profile hierarchy if identity is provided.
+        Otherwise creates legacy "default" workspace for backwards compatibility.
 
         Uses try/except IntegrityError to handle concurrent callers safely.
         """
+        # Fast path: profile already exists
         with self._db.session() as session:
             if session.get(Profile, self._profile_id):
                 return
 
+        if self._identity is not None:
+            # New path: create full hierarchy from ProfileIdentity
+            self._ensure_hierarchy_from_identity()
+        else:
+            # Legacy path: create default workspace + profile
+            self._ensure_legacy_profile()
+
+    def _ensure_hierarchy_from_identity(self) -> None:
+        """Create full domain → workspace → profile hierarchy from ProfileIdentity."""
+        assert self._identity is not None
+
+        # Level 1: Ensure domain exists (if specified)
+        if self._identity.domain is not None:
+            assert self._identity.domain_id is not None
+            self._ensure_domain_exists()
+
+        # Level 2: Ensure workspace exists
+        self._ensure_workspace_exists()
+
+        # Level 3: Ensure profile exists
+        self._ensure_profile_exists()
+
+    def _ensure_domain_exists(self) -> None:
+        """Ensure domain exists in database."""
+        assert (
+            self._identity is not None
+            and self._identity.domain is not None
+            and self._identity.domain_id is not None
+        )
+        try:
+            with self._db.session() as session:
+                if not session.get(Domain, self._identity.domain_id):
+                    session.add(
+                        Domain(
+                            id=self._identity.domain_id,
+                            slug=self._identity.domain,
+                            name=self._identity.domain.replace("-", " ").title(),
+                        )
+                    )
+        except IntegrityError:
+            self._lg.debug("domain already created by concurrent process")
+
+    def _ensure_workspace_exists(self) -> None:
+        """Ensure workspace exists in database."""
+        assert self._identity is not None
+        try:
+            with self._db.session() as session:
+                if not session.get(Workspace, self._identity.workspace_id):
+                    session.add(
+                        Workspace(
+                            id=self._identity.workspace_id,
+                            domain_id=self._identity.domain_id,
+                            slug=self._identity.workspace,
+                            name=self._identity.workspace.replace("-", " ").title(),
+                        )
+                    )
+        except IntegrityError:
+            self._lg.debug("workspace already created by concurrent process")
+
+    def _ensure_profile_exists(self) -> None:
+        """Ensure profile exists in database."""
+        assert self._identity is not None
+        try:
+            with self._db.session() as session:
+                if not session.get(Profile, self._identity.profile_id):
+                    session.add(
+                        Profile(
+                            id=self._identity.profile_id,
+                            workspace_id=self._identity.workspace_id,
+                            slug=self._identity.name,
+                            name=self._identity.name.replace("-", " ").title(),
+                            active=True,
+                        )
+                    )
+        except IntegrityError:
+            self._lg.debug("profile already created by concurrent process")
+
+    def _ensure_legacy_profile(self) -> None:
+        """Create legacy default workspace + profile (backwards compatibility)."""
         workspace_id = Workspace.generate_id(None, "default")
 
-        # Ensure workspace exists (separate transaction for safe concurrency)
+        # Ensure workspace exists
         try:
             with self._db.session() as session:
                 if not session.get(Workspace, workspace_id):

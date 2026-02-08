@@ -24,9 +24,9 @@ from tempfile import TemporaryDirectory
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, ensure_demo_profile, psql_cmd
+from _helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, psql_cmd
 
-from llm_learn import LearnClient
+from llm_learn import IdentityResolver, LearnClient
 from llm_learn.training import (
     ExportResult,
     export_feedback_classifier,
@@ -265,15 +265,25 @@ def print_summary():
 
 def main():
     """Run the training export demo."""
+    from appinfra.config import Config
+    from appinfra.log import LogConfig, LoggerFactory
+
+    from llm_learn.core.database import Database
+
     print(f"\n{H1}{'━' * 50}{RESET}")
     print(f"{H1}  Example 03: Training Data Export{RESET}")
     print(f"{H1}{'━' * 50}{RESET}")
 
-    learn = LearnClient(profile_id=1)
-    learn.migrate()
-    profile_id = ensure_demo_profile(learn)
-    learn = LearnClient(profile_id=profile_id)
-    print(f"{MUTED}Using profile_id={RESET}{INFO}{profile_id}{RESET}")
+    # Setup config, logger, and database
+    config = Config("etc/llm-learn.yaml")
+    lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+    database = Database.from_config(config.get("database"))
+
+    # Create LearnClient using identity-aware API
+    # This creates the full domain → workspace → profile hierarchy
+    identity = IdentityResolver.resolve({"workspace": "demo", "name": "example"})
+    learn = LearnClient.from_identity(lg, identity, database)
+    print(f"{MUTED}Using profile_id={RESET}{INFO}{identity.profile_id}{RESET}")
 
     record_sample_data(learn)
 
