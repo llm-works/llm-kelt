@@ -370,7 +370,7 @@ class LearnClient:
                         Domain(
                             id=self._identity.domain_id,
                             slug=self._identity.domain,
-                            name=self._identity.domain.title(),
+                            name=self._identity.domain.replace("-", " ").title(),
                         )
                     )
         except IntegrityError:
@@ -387,7 +387,7 @@ class LearnClient:
                             id=self._identity.workspace_id,
                             domain_id=self._identity.domain_id,
                             slug=self._identity.workspace,
-                            name=self._identity.workspace.title(),
+                            name=self._identity.workspace.replace("-", " ").title(),
                         )
                     )
         except IntegrityError:
@@ -404,7 +404,7 @@ class LearnClient:
                             id=self._identity.profile_id,
                             workspace_id=self._identity.workspace_id,
                             slug=self._identity.name,
-                            name=self._identity.name.title(),
+                            name=self._identity.name.replace("-", " ").title(),
                             active=True,
                         )
                     )

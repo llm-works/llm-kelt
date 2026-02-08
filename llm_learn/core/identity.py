@@ -192,6 +192,10 @@ def _resolve_ids(
     Returns:
         Tuple of (domain_id, workspace_id, profile_id).
     """
+    # Validate: cannot provide explicit domain_id without domain name
+    if explicit_ids["domain_id"] is not None and domain is None:
+        raise ValidationError("Cannot provide explicit domain_id without domain name")
+
     domain_id: str | None = None
     if domain is not None:
         domain_id = explicit_ids["domain_id"] or Domain.generate_id(domain)
