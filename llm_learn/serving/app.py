@@ -74,7 +74,7 @@ def create_server_from_config(config: dict, lg: Logger | None = None) -> Server:
             - llm: LLM backend configuration
             - embedding: Embedding service configuration
             - learn: Learn-specific settings
-            - proxy: Proxy-specific settings (host, port, profile_id, model_name)
+            - proxy: Proxy-specific settings (host, port, context_key, model_name)
         lg: Optional logger. If not provided, creates one.
 
     Returns:
@@ -87,15 +87,15 @@ def create_server_from_config(config: dict, lg: Logger | None = None) -> Server:
 
     proxy_config = config.get("proxy", {})
 
-    profile_id = proxy_config.get("profile_id") or config.get("profile_id")
-    if profile_id is None or not str(profile_id).strip():
-        raise ValueError("profile_id is required in config (proxy.profile_id or profile_id)")
+    context_key = proxy_config.get("context_key") or config.get("context_key")
+    if context_key is None or not str(context_key).strip():
+        raise ValueError("context_key is required in config (proxy.context_key or context_key)")
 
     # Use factory to create LearnClient from config
     from llm_learn import IsolationContext
 
     factory = LearnClientFactory(lg)
-    context = IsolationContext(context_key=str(profile_id))
+    context = IsolationContext(context_key=str(context_key))
     learn_client = factory.create_from_config(
         context=context,
         config=DotDict(**config),

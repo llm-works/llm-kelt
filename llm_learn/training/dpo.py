@@ -5,7 +5,6 @@ Trains the model to prefer "chosen" responses over "rejected" ones.
 """
 
 import json
-import warnings
 from datetime import datetime
 from pathlib import Path
 
@@ -264,7 +263,6 @@ def train_dpo(
     training_config: TrainingConfig | None = None,
     beta: float = 0.1,
     quantize: bool = True,
-    reference_free: bool = False,
 ) -> TrainingResult:
     """Train a LoRA adapter using Direct Preference Optimization.
 
@@ -277,19 +275,10 @@ def train_dpo(
         training_config: Training hyperparameters. Uses sensible defaults if not provided.
         beta: DPO beta parameter (higher = more conservative).
         quantize: Use 4-bit quantization (QLoRA). Reduces VRAM ~4x.
-        reference_free: Deprecated, ignored. With PEFT, reference logprobs are computed
-            by disabling the adapter (no separate model needed).
 
     Returns:
         TrainingResult with adapter path, metrics, and training metadata.
     """
-    if reference_free:
-        warnings.warn(
-            "reference_free parameter is deprecated and ignored. "
-            "With PEFT models, TRL computes reference logprobs by disabling the adapter.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
     trainer = DpoTrainer(
         lg=lg,
         data_path=data_path,

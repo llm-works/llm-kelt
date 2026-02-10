@@ -5,7 +5,7 @@ Memory models (facts, predictions, etc.) are in memory/atomic.
 """
 
 # Base utilities
-from .base import Base, generate_id, utc_now
+from .base import Base, utc_now
 
 # Models
 from .content import Content, ContentStore
@@ -33,7 +33,6 @@ from .types import PagedResult, ScoredEntity
 __all__ = [
     # Base
     "Base",
-    "generate_id",
     "utc_now",
     # Database
     "Database",

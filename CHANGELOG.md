@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content storage with deduplication
 - Directives management (standing, one-time, rules)
 - Predictions tracking with resolution and calibration
-- Profile-scoped data isolation within workspaces
+- Context-scoped data isolation
 
 #### Inference
 - `ContextBuilder` for system prompt augmentation with facts

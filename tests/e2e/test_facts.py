@@ -16,11 +16,11 @@ from llm_learn.inference.context import ContextBuilder
 
 
 @pytest.fixture
-def facts_learn_client(logger, database, test_profile):
+def facts_learn_client(logger, database, test_context):
     """Create LearnClient for facts testing."""
     from llm_learn import IsolationContext
 
-    context = IsolationContext(context_key=test_profile, schema_name=None)
+    context = IsolationContext(context_key=test_context, schema_name=None)
     return LearnClient(database=database, context=context, lg=logger)
 
 

@@ -2,7 +2,7 @@
 """Example: Facts and Context Injection.
 
 This example demonstrates:
-1. Storing facts about a user/profile
+1. Storing facts about a user/context
 2. Building system prompts with injected facts
 3. Using ContextQuery for context-aware LLM interactions
 

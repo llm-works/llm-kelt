@@ -201,7 +201,7 @@ def database(logger, pg_with_tables):
 
 
 @pytest.fixture(scope="session")
-def test_profile(database):
+def test_context(database):
     """Return a test context key for all tests."""
     # Simple hash-based context key for testing
     from hashlib import md5
@@ -210,16 +210,16 @@ def test_profile(database):
 
 
 @pytest.fixture
-def learn_client(logger, database, test_profile):
-    """Create LearnClient for testing, scoped to test profile."""
+def learn_client(logger, database, test_context):
+    """Create LearnClient for testing, scoped to test context."""
     from llm_learn import IsolationContext
 
-    context = IsolationContext(context_key=test_profile, schema_name=None)
+    context = IsolationContext(context_key=test_context, schema_name=None)
     return LearnClient(database=database, context=context, lg=logger)
 
 
 @pytest.fixture
-def clean_tables(database, test_profile):
+def clean_tables(database, test_context):
     """Clean all tables before each test."""
     with database.session() as session:
         # Delete in reverse order to respect foreign keys

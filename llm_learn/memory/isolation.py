@@ -49,22 +49,22 @@ class IsolationContext:
     Attributes:
         context_key: Partition key (any string format). If None, no filtering applied.
             Supports glob patterns (* and ?) for hierarchical prefix matching:
-            - "acme:prod:reviewer" - exact match (single profile)
-            - "acme:prod:*" - prefix match (all profiles in workspace)
-            - "acme:*" - prefix match (all workspaces in domain)
+            - "acme:prod:reviewer" - exact match (single agent)
+            - "acme:prod:*" - prefix match (all agents in environment)
+            - "acme:*" - prefix match (all environments for customer)
         schema_name: Schema where data lives. If None, defaults to "public".
 
     Examples:
-        # Exact match - single profile
+        # Exact match - single agent
         context = IsolationContext(
             context_key="acme:prod:reviewer",
             schema_name="customer_acme"
         )
 
-        # Prefix match - all profiles in a workspace
+        # Prefix match - all agents in an environment
         context = IsolationContext(context_key="acme:prod:*")
 
-        # Prefix match - all workspaces in a domain
+        # Prefix match - all environments for a customer
         context = IsolationContext(context_key="acme:*")
 
         # Single tenant: no filtering, public schema (simplest)
@@ -72,12 +72,12 @@ class IsolationContext:
 
     Hierarchical Partitioning:
         Use colon-separated (or any delimiter) keys for hierarchy:
-        - domain:workspace:profile (e.g., "acme:prod:reviewer")
-        - customer:environment:agent (e.g., "acme:staging:summarizer")
+        - customer:environment:agent (e.g., "acme:prod:reviewer")
+        - tenant:project:instance (e.g., "acme:api:summarizer")
 
         Then query at any level using glob wildcards:
-        - All profiles: "acme:prod:*"
-        - All workspaces: "acme:*"
+        - All agents: "acme:prod:*"
+        - All environments: "acme:*"
         - All data: "*"
 
     Responsibility:

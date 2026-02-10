@@ -90,8 +90,8 @@ class ContentStore:
                 Supports SQL LIKE patterns (% and _) for prefix/pattern matching.
                 Examples:
                   - "acme:prod:reviewer" - exact match
-                  - "acme:prod:%" - all profiles in workspace
-                  - "acme:%" - all workspaces in domain
+                  - "acme:prod:%" - all agents in environment
+                  - "acme:%" - all environments for customer
         """
         self._session_factory = session_factory
         self._context_key = context_key
@@ -216,7 +216,7 @@ class ContentStore:
             content_id: The content ID.
 
         Returns:
-            Content record if found and belongs to profile, None otherwise.
+            Content record if found and belongs to context, None otherwise.
         """
         with self._session_factory() as session:
             stmt = select(Content).where(Content.id == content_id)
@@ -233,7 +233,7 @@ class ContentStore:
 
     def find_by_hash(self, content_hash: str) -> Content | None:
         """
-        Find content by hash within this profile.
+        Find content by hash within this context.
 
         Args:
             content_hash: SHA-256 hash of content text.
@@ -256,7 +256,7 @@ class ContentStore:
 
     def find_by_external_id(self, external_id: str, source: str | None = None) -> Content | None:
         """
-        Find content by external ID within this profile.
+        Find content by external ID within this context.
 
         Args:
             external_id: Original ID from source.
@@ -288,7 +288,7 @@ class ContentStore:
         offset: int = 0,
     ) -> list[Content]:
         """
-        List content for this profile.
+        List content for this context.
 
         Args:
             source: Optional source filter.
@@ -314,7 +314,7 @@ class ContentStore:
 
     def count(self, *, source: str | None = None) -> int:
         """
-        Count content for this profile.
+        Count content for this context.
 
         Args:
             source: Optional source filter.

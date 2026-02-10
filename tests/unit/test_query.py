@@ -114,7 +114,7 @@ class TestContextQueryRAG:
         """Create a sample fact."""
         return Fact(
             id=1,
-            context_key="test_profile_id_00000000000000",
+            context_key="test-agent",
             content="User prefers Python",
             category="preferences",
             source="user",
@@ -396,7 +396,7 @@ class TestContextQueryRAG:
         """Test that RAGArgs.categories is passed to search_similar for SQL filtering."""
         pref_fact = Fact(
             id=1,
-            context_key="test_profile_id_00000000000000",
+            context_key="test-agent",
             content="User prefers Python",
             category="preferences",
             source="user",
@@ -529,7 +529,7 @@ class TestBuildSystemPromptFromFacts:
         return [
             Fact(
                 id=1,
-                context_key="test_profile_id_00000000000000",
+                context_key="test-agent",
                 content="Fact one",
                 category="preferences",
                 source="user",
@@ -538,7 +538,7 @@ class TestBuildSystemPromptFromFacts:
             ),
             Fact(
                 id=2,
-                context_key="test_profile_id_00000000000000",
+                context_key="test-agent",
                 content="Fact two",
                 category="preferences",
                 source="user",
@@ -580,7 +580,7 @@ class TestBuildSystemPromptFromFacts:
 
         fact = Fact(
             id=1,
-            context_key="test_profile_id_00000000000000",
+            context_key="test-agent",
             content="Test fact",
             category="preferences",
             source="user",
@@ -607,7 +607,7 @@ class TestBuildSystemPromptFromFacts:
         facts = [
             Fact(
                 id=1,
-                context_key="test_profile_id_00000000000000",
+                context_key="test-agent",
                 content="Pref 1",
                 category="preferences",
                 source="user",
@@ -616,7 +616,7 @@ class TestBuildSystemPromptFromFacts:
             ),
             Fact(
                 id=2,
-                context_key="test_profile_id_00000000000000",
+                context_key="test-agent",
                 content="Pref 2",
                 category="preferences",
                 source="user",
@@ -625,7 +625,7 @@ class TestBuildSystemPromptFromFacts:
             ),
             Fact(
                 id=3,
-                context_key="test_profile_id_00000000000000",
+                context_key="test-agent",
                 content="Rule 1",
                 category="rules",
                 source="user",

@@ -77,7 +77,7 @@ class Embedding(Base):
     Each memory model uses a distinct entity_type prefix to namespace its embeddings.
 
     The entity_id is a string to accommodate both integer IDs (cast to string)
-    and hash-based IDs used by profiles, workspaces, and domains.
+    and string-based identifiers.
 
     Multiple embedding models can be used for the same entity - each model
     gets its own record, allowing model upgrades without data loss.

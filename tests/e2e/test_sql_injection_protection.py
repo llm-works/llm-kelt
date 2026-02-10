@@ -139,7 +139,7 @@ class TestSQLInjectionProtection:
         assert len(exact_facts) == 1
         assert "customer_123:prod:agent_a" in exact_facts[0].content
 
-        # Test glob pattern - all agents in customer_123:prod workspace
+        # Test glob pattern - all agents in customer_123:prod environment
         pattern_client = LearnClient(
             database=database,
             context=IsolationContext(context_key="customer_123:prod:*"),

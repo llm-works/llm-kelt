@@ -166,8 +166,8 @@ class TestEmbedMissingFactsIntegration:
         assert search_results[0].entity.id == active_id
 
     @pytest.mark.asyncio
-    async def test_embed_empty_profile(self, logger, learn_client, mock_embedder, clean_tables):
-        """Test embedding when profile has no facts."""
+    async def test_embed_empty_context(self, logger, learn_client, mock_embedder, clean_tables):
+        """Test embedding when context has no facts."""
         result = await embed_missing_facts(logger, mock_embedder, learn_client.embeddings)
 
         assert result.processed == 0
