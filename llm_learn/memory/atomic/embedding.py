@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from llm_learn.core.embedding import EmbeddingStore
 from llm_learn.core.types import ScoredEntity
+from llm_learn.memory.isolation import build_context_filter
 
 from .models import Fact
 
@@ -131,9 +132,14 @@ class EmbeddingAdapter:
         with self._session_factory() as session:
             stmt = select(Fact).where(
                 Fact.id.in_(fact_ids),
-                Fact.context_key == self._context_key,
                 Fact.active == True,  # noqa: E712
             )
+
+            # Apply context filtering with glob pattern support
+            context_filter = build_context_filter(self._context_key, Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
             if fact_type:
                 stmt = stmt.where(Fact.type == fact_type)
             if categories:
@@ -226,9 +232,14 @@ class EmbeddingAdapter:
         with self._session_factory() as session:
             # Get candidate facts
             stmt = select(Fact).where(
-                Fact.context_key == self._context_key,
                 Fact.active == True,  # noqa: E712
             )
+
+            # Apply context filtering with glob pattern support
+            context_filter = build_context_filter(self._context_key, Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
             if fact_type:
                 stmt = stmt.where(Fact.type == fact_type)
 

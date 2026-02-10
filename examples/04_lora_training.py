@@ -26,7 +26,7 @@ from tempfile import TemporaryDirectory
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _helpers import H1, H2, INFO, LLM_A, LLM_Q, MUTED, OK, RESET, WARN, ensure_demo_profile
+from _helpers import H1, H2, INFO, LLM_A, LLM_Q, MUTED, OK, RESET, WARN, get_demo_context_key
 from appinfra.config import Config
 from appinfra.log import LogConfig, Logger, LoggerFactory
 from llm_infer.client import Factory as LLMClientFactory
@@ -365,7 +365,7 @@ async def main():
     factory = LearnClientFactory(lg)
 
     # Create context for this example
-    context_key = ensure_demo_profile(None, profile_slug="lora-training")
+    context_key = get_demo_context_key("lora-training")
     context = IsolationContext(context_key=context_key)
     learn = factory.create_from_config(context=context, config=config)
     print(f"{MUTED}Using context_key={RESET}{INFO}{context_key}{RESET}")

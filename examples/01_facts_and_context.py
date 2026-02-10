@@ -33,7 +33,7 @@ from _helpers import (
     OK,
     RESET,
     WARN,
-    ensure_demo_profile,
+    get_demo_context_key,
     psql_cmd,
 )
 from llm_infer.client import Factory as LLMClientFactory
@@ -72,7 +72,7 @@ def setup_facts(learn: LearnClient):
 
     print(
         f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(learn)} -c "SELECT id, category, content '
-        f'FROM memv1_facts WHERE profile_id={learn.context_key} AND active=true;"'
+        f"FROM memv1_facts WHERE context_key='{learn.context_key}' AND active=true;\""
     )
 
 
@@ -220,7 +220,7 @@ async def main():
     factory = LearnClientFactory(lg)
 
     # Create context for this example
-    context_key = ensure_demo_profile(None, "example")
+    context_key = get_demo_context_key("example")
     context = IsolationContext(context_key=context_key)
     learn = factory.create_from_config(context=context, config=config)
     print(f"{MUTED}Using context_key={RESET}{INFO}{context_key}{RESET}")

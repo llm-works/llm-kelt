@@ -31,14 +31,13 @@ def psql_cmd(learn: LearnClient) -> str:
     return f"psql -h {url.host} -p {url.port} -U {url.username} -d {url.database}"
 
 
-def ensure_demo_profile(learn: LearnClient, profile_slug: str = "example") -> str:
-    """Generate a demo context key from profile slug.
+def get_demo_context_key(name: str = "example") -> str:
+    """Generate a demo context key.
 
     Args:
-        learn: LearnClient instance (not used, kept for API compatibility)
-        profile_slug: Slug for the profile (default: "example")
+        name: Name for the demo context (default: "example")
 
     Returns:
-        A context key string in format "demo:profile_slug"
+        A context key string in format "demo:name"
     """
-    return f"demo:{profile_slug}"
+    return f"demo:{name}"

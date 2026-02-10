@@ -35,7 +35,7 @@ from _helpers import (
     OK,
     RESET,
     WARN,
-    ensure_demo_profile,
+    get_demo_context_key,
     psql_cmd,
 )
 from appinfra.config import Config
@@ -94,7 +94,7 @@ def populate_facts(learn: LearnClient):
         print(f"    {INFO}[{cat}]{RESET} {len(facts)} facts")
 
     print(
-        f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(learn)} -c "SELECT id, category, content FROM facts WHERE profile_id={learn.context_key} AND active=true;"'
+        f"\n  {CMD}▸ Verify:{RESET} {psql_cmd(learn)} -c \"SELECT id, category, content FROM atomic_facts WHERE context_key='{learn.context_key}' AND active=true;\""
     )
 
 
@@ -115,7 +115,7 @@ async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedde
             print(f"  {WARN}⚠ {result.failed} failed{RESET}")
 
         print(
-            f'\n  {CMD}▸ Verify embeddings:{RESET} {psql_cmd(learn)} -c "SELECT id, content, (embedding IS NOT NULL) as has_embedding FROM facts WHERE profile_id={learn.context_key} LIMIT 5;"'
+            f"\n  {CMD}▸ Verify embeddings:{RESET} {psql_cmd(learn)} -c \"SELECT id, content, (embedding IS NOT NULL) as has_embedding FROM atomic_facts WHERE context_key='{learn.context_key}' LIMIT 5;\""
         )
         return embedder
     except (ConnectError, ConnectTimeout, OSError):
@@ -273,7 +273,7 @@ async def main():
     factory = LearnClientFactory(lg)
 
     # Create context for this example
-    context_key = ensure_demo_profile(None, "rag-demo")
+    context_key = get_demo_context_key("rag-demo")
     context = IsolationContext(context_key=context_key)
     learn = factory.create_from_config(context=context, config=config)
     print(f"{MUTED}Using context_key={RESET}{INFO}{context_key}{RESET}")
