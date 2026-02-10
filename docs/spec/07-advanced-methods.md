@@ -646,7 +646,7 @@ class OrchestrationAgent(WorkerAgent):
         super().setup()
 
         # Learn client for data primitives
-        self.learn = LearnClient(profile_id=self.config.profile_id)
+        self.learn = LearnClient(context_key=self.config.context_key)
 
         # Models
         self.small_model = LocalBackend(self.config.small_model_url)
@@ -686,7 +686,7 @@ Learn can optionally store pipeline execution history:
 ```sql
 CREATE TABLE pipeline_executions (
     id BIGSERIAL PRIMARY KEY,
-    profile_id BIGINT NOT NULL REFERENCES profiles(id),
+    context_key VARCHAR(100),
     query_hash VARCHAR(64) NOT NULL,
     model_used VARCHAR(50) NOT NULL,
     facts_used BIGINT[] NOT NULL,

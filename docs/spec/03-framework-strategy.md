@@ -203,7 +203,7 @@ from agent.adaptation.retry import ExponentialBackoffRetry
 class OrchestrationAgent:
     def setup(self):
         # Learn client for data primitives
-        self.learn = LearnClient(profile_id=self.config.profile_id)
+        self.learn = LearnClient(context_key=self.config.context_key)
 
         # Agent provides implementations
         selector = HybridSelector(self.small_model)

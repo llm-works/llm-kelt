@@ -470,7 +470,7 @@ Learn can optionally store routing decisions for analysis:
 -- Optional: Track routing decisions for learning
 CREATE TABLE routing_decisions (
     id BIGSERIAL PRIMARY KEY,
-    profile_id BIGINT NOT NULL REFERENCES profiles(id),
+    context_key VARCHAR(100),
     query_hash VARCHAR(64) NOT NULL,
     tier_used VARCHAR(20) NOT NULL,  -- 'rules', 'embedding', 'llm'
     facts_selected BIGINT[] NOT NULL,

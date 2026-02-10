@@ -18,7 +18,7 @@ embedding:
 proxy:
   host: "0.0.0.0"
   port: 8010
-  profile_id: 1
+  context_key: "default"
   model_name: "llm-learn-proxy"
 
 # Adapter settings (for training integration with llm-infer)

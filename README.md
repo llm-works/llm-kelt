@@ -18,7 +18,7 @@ storage, feedback collection, preference pairs, RAG-based retrieval, and fine-tu
 - **Preference Pairs** - Store chosen vs rejected responses for DPO training
 - **Training Export** - Export to DPO, SFT, and classifier formats
 - **LoRA Fine-Tuning** - Train adapters with QLoRA support
-- **Multi-Tenant** - Profile-scoped data with workspace isolation
+- **Multi-Tenant** - Context-scoped data isolation
 
 ## Installation
 
@@ -42,8 +42,8 @@ pip install -e ".[dev]"
 ```python
 from llm_learn import LearnClient
 
-# Create client scoped to a profile
-learn = LearnClient(profile_id=1)
+# Create client scoped to a context
+learn = LearnClient(context_key="default")
 learn.migrate()  # Create database tables
 
 # Add facts about the user
@@ -120,7 +120,7 @@ learn.preferences.record(
 # Export to DPO format for TRL
 result = export_preferences_dpo(
     session_factory=learn.database.session,
-    profile_id=learn.profile_id,
+    context_key=learn.context_key,
     output_path="preferences.jsonl",
 )
 # Output: {"prompt": str, "chosen": str, "rejected": str}
@@ -128,7 +128,7 @@ result = export_preferences_dpo(
 # Export feedback to SFT format
 result = export_feedback_sft(
     session_factory=learn.database.session,
-    profile_id=learn.profile_id,
+    context_key=learn.context_key,
     output_path="feedback_sft.jsonl",
     signal="positive",
 )
@@ -165,13 +165,12 @@ print(f"Train loss: {result.metrics['train_loss']:.4f}")
 ## Architecture
 
 ```
-Workspace
-  └── Profile
-        ├── Facts           → Injected into prompts (with embeddings for RAG)
-        ├── Feedback        → Explicit signals (positive/negative)
-        ├── Preferences     → DPO training pairs (chosen/rejected)
-        ├── Interactions    → Implicit signals (view, click, scroll)
-        ├── Content         → Deduplicated content storage
+Isolation Context (context_key)
+  ├── Facts           → Injected into prompts (with embeddings for RAG)
+  ├── Feedback        → Explicit signals (positive/negative)
+  ├── Preferences     → DPO training pairs (chosen/rejected)
+  ├── Interactions    → Implicit signals (view, click, scroll)
+  ├── Content         → Deduplicated content storage
         ├── Directives      → Goals and rules
         └── Predictions     → Hypothesis tracking
 ```
@@ -212,7 +211,7 @@ See the [`examples/`](examples/) directory for complete working examples:
 
 | Class | Description |
 |-------|-------------|
-| `LearnClient` | Main entry point, scoped to a profile |
+| `LearnClient` | Main entry point, scoped to a context |
 | `FactsClient` | Store and retrieve facts |
 | `FeedbackClient` | Record explicit feedback signals |
 | `PreferencesClient` | Store preference pairs |

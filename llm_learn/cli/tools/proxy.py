@@ -19,7 +19,7 @@ class ServeTool(Tool):
     def add_args(self, parser) -> None:
         parser.add_argument("--host", help="Host to bind to")
         parser.add_argument("--port", "-p", type=int, help="Port to bind to")
-        parser.add_argument("--profile", type=int, help="Profile ID to use")
+        parser.add_argument("--context", help="Context key to use")
 
     def _get_config(self) -> dict:
         """Get raw config dict from app."""
@@ -35,15 +35,15 @@ class ServeTool(Tool):
             config["host"] = self.args.host
         if getattr(self.args, "port", None):
             config["port"] = self.args.port
-        if getattr(self.args, "profile", None):
-            config["profile_id"] = self.args.profile
+        if getattr(self.args, "context", None):
+            config["context_key"] = self.args.context
 
         self.lg.info(
             "starting proxy server...",
             extra={
                 "host": config.get("host", "0.0.0.0"),
                 "port": config.get("port", 8001),
-                "profile_id": config.get("profile_id", 1),
+                "context_key": config.get("context_key", "default"),
             },
         )
 

@@ -38,12 +38,12 @@
 
 ### LearnClient
 
-Main entry point, scoped to a profile. Provides unified access to all collection APIs.
+Main entry point, scoped to a context. Provides unified access to all collection APIs.
 
 ```python
 from llm_learn import LearnClient
 
-learn = LearnClient(profile_id=1)
+learn = LearnClient(context_key="default")
 learn.facts.add("Prefers concise output", category="preferences")
 learn.feedback.record(content_text="...", signal="positive")
 learn.preferences.record(context="...", chosen="...", rejected="...")
@@ -93,7 +93,7 @@ from llm_learn.serving import create_server
 server = create_server(
     llm_config=config["llm"],
     database=db,
-    profile_id=1,
+    context_key="default",
 )
 server.start()  # Serves on :8001
 ```
@@ -180,7 +180,7 @@ User provides feedback
 
 ```python
 class LearnClient:
-    def __init__(self, profile_id: int, database: Database | None = None): ...
+    def __init__(self, context_key: str, database: Database | None = None): ...
 
     @property
     def facts(self) -> FactsClient: ...
@@ -291,8 +291,8 @@ exports/
 from llm_learn import LearnClient
 from llm_learn.serving import create_server
 
-learn = LearnClient(profile_id=1)
-server = create_server(llm_config=config, database=learn.database, profile_id=1)
+learn = LearnClient(context_key="default")
+server = create_server(llm_config=config, database=learn.database, context_key="default")
 server.start()
 ```
 
@@ -359,7 +359,7 @@ class AdaptationStrategy(Protocol):
         """Whether this strategy modifies model weights."""
         ...
 
-    async def prepare(self, profile_id: int) -> None:
+    async def prepare(self, context_key: str) -> None:
         """
         Prepare strategy for inference.
 
@@ -418,7 +418,7 @@ class MemoryStrategy(AdaptationStrategy):
     def __init__(self, facts_client: FactsClient):
         self._facts = facts_client
 
-    async def prepare(self, profile_id: int) -> None:
+    async def prepare(self, context_key: str) -> None:
         self._active_facts = self._facts.list_active()
 
     async def adapt_request(
@@ -457,7 +457,7 @@ class RAGStrategy(AdaptationStrategy):
 
 ### LoRAStrategy (Planned)
 
-Load profile-specific LoRA adapter for weight-modified inference.
+Load context-specific LoRA adapter for weight-modified inference.
 
 ```python
 class LoRAStrategy(AdaptationStrategy):
@@ -467,8 +467,8 @@ class LoRAStrategy(AdaptationStrategy):
     def __init__(self, adapter_registry: AdapterRegistry):
         self._registry = adapter_registry
 
-    async def prepare(self, profile_id: int) -> None:
-        self._adapter = await self._registry.get_adapter(profile_id)
+    async def prepare(self, context_key: str) -> None:
+        self._adapter = await self._registry.get_adapter(context_key)
 
     async def adapt_request(
         self,
@@ -538,7 +538,7 @@ class ExportFormat(Enum):
 @dataclass
 class TrainingJob:
     id: str
-    profile_id: int
+    context_key: str
     method: str                   # "lora", "dpo", "classifier"
     status: str                   # "pending", "running", "completed", "failed"
     config: TrainingConfig
@@ -555,11 +555,11 @@ Manages trained adapters and their deployment.
 
 ```python
 class AdapterRegistry:
-    """Registry of trained adapters by profile."""
+    """Registry of trained adapters by context."""
 
     async def register(
         self,
-        profile_id: int,
+        context_key: str,
         adapter_path: str,
         metadata: AdapterMetadata,
     ) -> str:
@@ -568,25 +568,25 @@ class AdapterRegistry:
 
     async def get_adapter(
         self,
-        profile_id: int,
+        context_key: str,
         version: str = "latest",
     ) -> Adapter | None:
-        """Get adapter for profile."""
+        """Get adapter for context."""
         ...
 
     async def list_adapters(
         self,
-        profile_id: int,
+        context_key: str,
     ) -> list[Adapter]:
-        """List all adapter versions for profile."""
+        """List all adapter versions for context."""
         ...
 
     async def set_active(
         self,
-        profile_id: int,
+        context_key: str,
         adapter_id: str,
     ) -> None:
-        """Set active adapter for profile."""
+        """Set active adapter for context."""
         ...
 ```
 
@@ -595,7 +595,7 @@ class AdapterRegistry:
 ```sql
 CREATE TABLE adapters (
     id VARCHAR(36) PRIMARY KEY,
-    profile_id BIGINT NOT NULL REFERENCES profiles(id),
+    context_key VARCHAR(100),
     method VARCHAR(50) NOT NULL,        -- 'lora', 'dpo', etc.
     version INT NOT NULL,
     path TEXT NOT NULL,                  -- Storage path
@@ -605,11 +605,11 @@ CREATE TABLE adapters (
     is_active BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
 
-    UNIQUE(profile_id, method, version)
+    UNIQUE(context_key, method, version)
 );
 
-CREATE INDEX idx_adapters_profile ON adapters(profile_id);
-CREATE INDEX idx_adapters_active ON adapters(profile_id, is_active) WHERE is_active;
+CREATE INDEX idx_adapters_context ON adapters(context_key);
+CREATE INDEX idx_adapters_active ON adapters(context_key, is_active) WHERE is_active;
 ```
 
 ---
@@ -651,15 +651,15 @@ class AdaptationOrchestrator:
     def __init__(
         self,
         strategies: list[AdaptationStrategy],
-        profile_id: int,
+        context_key: str,
     ):
         self._strategies = strategies
-        self._profile_id = profile_id
+        self._context_key = context_key
 
     async def prepare(self) -> None:
-        """Prepare all strategies for this profile."""
+        """Prepare all strategies for this context."""
         for strategy in self._strategies:
-            await strategy.prepare(self._profile_id)
+            await strategy.prepare(self._context_key)
 
     async def adapt(
         self,
@@ -679,7 +679,7 @@ class AdaptationOrchestrator:
 
 ```yaml
 serving:
-  profile_id: 1
+  context_key: "default"
   adaptation:
     strategies:
       - type: memory

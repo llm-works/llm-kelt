@@ -51,8 +51,8 @@ class FactClient(Generic[T]):
                 Supports SQL LIKE patterns (% and _) for prefix/pattern matching.
                 Examples:
                   - "acme:prod:reviewer" - exact match
-                  - "acme:prod:%" - all profiles in workspace
-                  - "acme:%" - all workspaces in domain
+                  - "acme:prod:%" - all agents in environment
+                  - "acme:%" - all environments for customer
             embedding_adapter: Optional EmbeddingAdapter for auto-embedding facts.
         """
         self._lg = lg

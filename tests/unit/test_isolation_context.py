@@ -40,7 +40,7 @@ class TestIsolationContext:
             "simple",
             "acme:prod",
             "customer_123",
-            "domain:workspace:profile",
+            "customer:environment:agent",
             "a" * 255,  # Long key
         ]
 
