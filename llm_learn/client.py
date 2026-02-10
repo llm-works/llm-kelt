@@ -143,46 +143,54 @@ class LearnClient:
         """Get context key (convenience accessor for context.context_key)."""
         return self._context.context_key
 
-    def with_isolation(self, context: IsolationContext) -> LearnClient:
+    def with_isolation(
+        self,
+        *,
+        context_key: str | None = ...,  # type: ignore[assignment]
+        schema_name: str | None = ...,  # type: ignore[assignment]
+        **kwargs: Any,
+    ) -> LearnClient:
         """
         Return new client with isolation overrides.
 
-        Non-None fields in the new context override the current context.
-        None fields keep their current values (merge behavior).
-
-        If you need to completely change isolation (e.g., set a field to None
-        that was previously set), create a new LearnClient instead.
+        Only provided fields are overridden; omitted fields keep their current values.
+        You can explicitly set a field to None to clear it.
 
         Args:
-            context: IsolationContext with fields to override
+            context_key: New context_key, or None to clear. Omit to keep current.
+            schema_name: New schema_name, or None to clear. Omit to keep current.
+            **kwargs: Additional fields for extensibility
 
         Returns:
             New LearnClient with merged context
 
         Example:
             # Override just schema (keeps same context_key)
-            learn.with_isolation(IsolationContext(schema_name="public"))
+            learn.with_isolation(schema_name="public")
 
-            # Query different context entirely
-            learn.with_isolation(IsolationContext(
+            # Clear context_key to None, keep schema_name
+            learn.with_isolation(context_key=None)
+
+            # Override both
+            learn.with_isolation(
                 context_key="other_context",
                 schema_name="customer_other"
-            ))
+            )
         """
         from dataclasses import replace
 
-        # Get current context
-        current = self.context
+        # Build overrides dict from provided kwargs
+        valid_fields = {"context_key", "schema_name"}
+        overrides = {k: v for k, v in kwargs.items() if k in valid_fields}
 
-        # Build overrides dict with non-None fields
-        overrides = {}
-        if context.context_key is not None:
-            overrides["context_key"] = context.context_key
-        if context.schema_name is not None:
-            overrides["schema_name"] = context.schema_name
+        # Add explicitly provided positional kwargs (type hints)
+        if context_key is not ...:
+            overrides["context_key"] = context_key
+        if schema_name is not ...:
+            overrides["schema_name"] = schema_name
 
         # Merge with current context
-        merged = replace(current, **overrides)
+        merged = replace(self.context, **overrides)
 
         # Create new client with merged context
         return LearnClient(

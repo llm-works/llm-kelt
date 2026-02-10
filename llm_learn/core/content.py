@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any, cast
 
 from appinfra.db.utils import detach, detach_all
-from sqlalchemy import DateTime, Index, String, Text, UniqueConstraint, select
+from sqlalchemy import DateTime, Index, String, Text, UniqueConstraint, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
@@ -57,6 +57,14 @@ class Content(Base):
             "idx_content_context_prefix",
             "context_key",
             postgresql_ops={"context_key": "text_pattern_ops"},
+        ),
+        # Partial unique index for NULL context_key to ensure deduplication works
+        # When context_key IS NULL, content_hash must be unique (global scope deduplication)
+        Index(
+            "uq_content_null_context_hash",
+            "content_hash",
+            unique=True,
+            postgresql_where=text("context_key IS NULL"),
         ),
     )
 
