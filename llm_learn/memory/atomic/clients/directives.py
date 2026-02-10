@@ -104,59 +104,26 @@ class DirectivesClient(FactClient[DirectiveDetails]):
             fact.updated_at = utc_now()
             return True
 
-    def list_active(
+    def _list_directives(
         self,
         directive_type: DirectiveType | None = None,
-        limit: int = 100,
-    ) -> list[Fact]:
-        """List active directives."""
-        with self._session_factory() as session:
-            stmt = (
-                select(Fact)
-                .join(DirectiveDetails)
-                .where(
-                    Fact.context_key == self.context_key,
-                    Fact.type == self.fact_type,
-                    DirectiveDetails.status == "active",
-                )
-            )
-
-            if directive_type:
-                stmt = stmt.where(DirectiveDetails.directive_type == directive_type)
-
-            # Filter out expired
-            now = utc_now()
-            stmt = stmt.where(
-                (DirectiveDetails.expires_at.is_(None)) | (DirectiveDetails.expires_at > now)
-            )
-
-            stmt = stmt.order_by(Fact.created_at.desc()).limit(limit)
-
-            facts = list(session.scalars(stmt).all())
-            for fact in facts:
-                details = fact.directive_details
-                if details is not None:
-                    detach(details, session)
-            return cast(list[Fact], detach_all(facts, session))
-
-    def list_by_type(
-        self,
-        directive_type: DirectiveType,
         include_inactive: bool = False,
         limit: int = 100,
     ) -> list[Fact]:
-        """List directives by type."""
+        """Internal helper to list directives with various filters."""
         with self._session_factory() as session:
-            stmt = (
-                select(Fact)
-                .join(DirectiveDetails)
-                .where(
-                    Fact.context_key == self.context_key,
-                    Fact.type == self.fact_type,
-                    DirectiveDetails.directive_type == directive_type,
-                )
-            )
+            stmt = select(Fact).join(DirectiveDetails).where(Fact.type == self.fact_type)
 
+            # Apply context filter (supports glob patterns: * and ?)
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
+            # Filter by directive type if specified
+            if directive_type:
+                stmt = stmt.where(DirectiveDetails.directive_type == directive_type)
+
+            # Filter by active status and expiration
             if not include_inactive:
                 stmt = stmt.where(DirectiveDetails.status == "active")
                 now = utc_now()
@@ -172,3 +139,24 @@ class DirectivesClient(FactClient[DirectiveDetails]):
                 if details is not None:
                     detach(details, session)
             return cast(list[Fact], detach_all(facts, session))
+
+    def list_active(
+        self,
+        directive_type: DirectiveType | None = None,
+        limit: int = 100,
+    ) -> list[Fact]:
+        """List active directives."""
+        return self._list_directives(
+            directive_type=directive_type, include_inactive=False, limit=limit
+        )
+
+    def list_by_type(
+        self,
+        directive_type: DirectiveType,
+        include_inactive: bool = False,
+        limit: int = 100,
+    ) -> list[Fact]:
+        """List directives by type."""
+        return self._list_directives(
+            directive_type=directive_type, include_inactive=include_inactive, limit=limit
+        )

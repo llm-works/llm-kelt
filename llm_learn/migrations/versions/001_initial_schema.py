@@ -60,12 +60,12 @@ def upgrade() -> None:  # cq: exempt
     )
     # Partial unique index for NULL context_key to ensure deduplication works
     # When context_key IS NULL, content_hash must be unique (global scope deduplication)
-    op.execute(
-        """
-        CREATE UNIQUE INDEX uq_content_null_context_hash
-        ON content (content_hash)
-        WHERE context_key IS NULL
-        """
+    op.create_index(
+        "uq_content_null_context_hash",
+        "content",
+        ["content_hash"],
+        unique=True,
+        postgresql_where=sa.text("context_key IS NULL"),
     )
 
     # =========================================================================

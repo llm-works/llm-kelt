@@ -58,34 +58,23 @@ class FactClient(Generic[T]):
         Returns:
             SQLAlchemy filter condition, or None if no filtering needed.
         """
-        if self.context_key is None:
-            return None
+        from llm_learn.memory.isolation import build_context_filter
 
-        # Detect LIKE pattern (contains % or _)
-        if "%" in self.context_key or "_" in self.context_key:
-            return column.like(self.context_key)
-        else:
-            return column == self.context_key
+        return build_context_filter(self.context_key, column)
 
     def _get_fact(self, session: Session, fact_id: int) -> Fact | None:
         """Get fact by ID, verifying context ownership."""
-        fact = session.get(Fact, fact_id)
-        if fact is None:
-            return None
+        from sqlalchemy import select
 
-        # Check context ownership (supports pattern matching)
+        # Build query with all filters upfront (single query)
+        stmt = select(Fact).where(Fact.id == fact_id, Fact.type == self.fact_type)
+
+        # Apply context filter if needed (supports glob patterns)
         context_filter = self._build_context_filter(Fact.context_key)
         if context_filter is not None:
-            # Verify fact matches context filter
-            from sqlalchemy import select as _select
+            stmt = stmt.where(context_filter)
 
-            stmt = _select(Fact.id).where(Fact.id == fact_id, context_filter)
-            if not session.scalar(stmt):
-                return None
-
-        if fact.type != self.fact_type:
-            return None
-        return fact
+        return session.scalar(stmt)
 
     def get(self, fact_id: int) -> Fact | None:
         """

@@ -111,14 +111,9 @@ class ContentStore:
         Returns:
             SQLAlchemy filter condition, or None if no filtering needed.
         """
-        if self._context_key is None:
-            return None
+        from llm_learn.memory.isolation import build_context_filter
 
-        # Detect LIKE pattern (contains % or _)
-        if "%" in self._context_key or "_" in self._context_key:
-            return column.like(self._context_key)
-        else:
-            return column == self._context_key
+        return build_context_filter(self._context_key, column)
 
     def create(
         self,
