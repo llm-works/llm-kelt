@@ -66,7 +66,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
         with self._session_factory() as session:
             preview = context[:100] + "..." if len(context) > 100 else context
             fact = Fact(
-                profile_id=self.profile_id,
+                context_key=self.context_key,
                 type=self.fact_type,
                 content=f"Preference: {preview}",
                 category=category,
@@ -100,7 +100,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
                 select(Fact)
                 .join(PreferenceDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     Fact.category == category,
                 )
@@ -124,7 +124,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
             stmt = (
                 select(Fact.category)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     Fact.category.isnot(None),
                 )
@@ -145,7 +145,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
                 select(Fact)
                 .join(PreferenceDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     PreferenceDetails.context.ilike(f"%{query}%"),
                 )

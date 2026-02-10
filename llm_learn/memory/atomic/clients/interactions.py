@@ -70,7 +70,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
         with self._session_factory() as session:
             content_desc = f" on content {content_id}" if content_id else ""
             fact = Fact(
-                profile_id=self.profile_id,
+                context_key=self.context_key,
                 type=self.fact_type,
                 content=f"{interaction_type} interaction{content_desc}",
                 category=category,
@@ -103,7 +103,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
                 select(Fact)
                 .join(InteractionDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     InteractionDetails.interaction_type == interaction_type,
                 )
@@ -129,7 +129,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
                 select(Fact)
                 .join(InteractionDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     InteractionDetails.content_id == content_id,
                 )
@@ -154,7 +154,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
                     .select_from(InteractionDetails)
                     .join(Fact)
                     .where(
-                        Fact.profile_id == self.profile_id,
+                        Fact.context_key == self.context_key,
                         Fact.type == self.fact_type,
                         InteractionDetails.interaction_type == itype,
                     )
@@ -174,7 +174,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
                 .select_from(InteractionDetails)
                 .join(Fact)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     InteractionDetails.content_id == content_id,
                 )

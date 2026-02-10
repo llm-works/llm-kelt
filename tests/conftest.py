@@ -11,7 +11,7 @@ from appinfra.log import LogConfig, LoggerFactory
 
 from llm_learn.client import LearnClient
 from llm_learn.core.database import Database
-from llm_learn.core.models import Base, Profile, Workspace
+from llm_learn.core.models import Base
 
 # Import atomic memory models so they're registered with Base for migrations
 from llm_learn.memory.atomic import models as atomic_models  # noqa: F401
@@ -200,63 +200,31 @@ def database(logger, pg_with_tables):
     return Database(logger, pg_with_tables)
 
 
-def _ensure_workspace(session, workspace_id: str, slug: str) -> None:
-    """Create test workspace if it doesn't exist."""
-    if not session.get(Workspace, workspace_id):
-        session.add(
-            Workspace(
-                id=workspace_id,
-                slug=slug,
-                name="Test Workspace",
-                description="Workspace for unit tests",
-            )
-        )
-        session.flush()
-
-
-def _ensure_profile(session, profile_id: str, workspace_id: str, slug: str) -> None:
-    """Create test profile if it doesn't exist."""
-    if not session.get(Profile, profile_id):
-        session.add(
-            Profile(
-                id=profile_id,
-                workspace_id=workspace_id,
-                slug=slug,
-                name="Default Test Profile",
-                description="Profile for unit tests",
-            )
-        )
-        session.flush()
-
-
 @pytest.fixture(scope="session")
 def test_profile(database):
-    """Create a test workspace and profile for all tests."""
-    workspace_slug, profile_slug = "test", "default"
-    workspace_id = Workspace.generate_id(None, workspace_slug)
-    profile_id = Profile.generate_id(None, workspace_slug, profile_slug)
+    """Return a test context key for all tests."""
+    # Simple hash-based context key for testing
+    from hashlib import md5
 
-    with database.session() as session:
-        _ensure_workspace(session, workspace_id, workspace_slug)
-        _ensure_profile(session, profile_id, workspace_id, profile_slug)
-        return profile_id
+    return md5(b"test:default").hexdigest()
 
 
 @pytest.fixture
 def learn_client(logger, database, test_profile):
     """Create LearnClient for testing, scoped to test profile."""
-    return LearnClient(logger, profile_id=test_profile, database=database)
+    from llm_learn import IsolationContext
+
+    context = IsolationContext(context_key=test_profile, schema_name=None)
+    return LearnClient(database=database, context=context, lg=logger)
 
 
 @pytest.fixture
 def clean_tables(database, test_profile):
-    """Clean all tables before each test, preserving workspace/profile."""
+    """Clean all tables before each test."""
     with database.session() as session:
         # Delete in reverse order to respect foreign keys
-        # Skip workspaces and profiles tables since we need them
         for table in reversed(Base.metadata.sorted_tables):
-            if table.name not in ("workspaces", "profiles"):
-                session.execute(table.delete())
+            session.execute(table.delete())
     yield
 
 

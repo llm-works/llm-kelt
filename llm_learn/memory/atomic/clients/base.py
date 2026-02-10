@@ -32,22 +32,57 @@ class FactClient(Generic[T]):
     details_model: type[T]  # e.g., SolutionDetails
     details_relationship: str  # e.g., "solution_details"
 
-    def __init__(self, session_factory: Callable[[], Any], profile_id: str) -> None:
+    def __init__(self, session_factory: Callable[[], Any], context_key: str | None) -> None:
         """
-        Initialize client scoped to a specific profile.
+        Initialize client scoped to a specific context.
 
         Args:
             session_factory: Callable that returns a context manager for database sessions.
-            profile_id: Profile ID (32-char hash) to scope all operations to.
+            context_key: Context key to scope all operations to (None = no filtering).
+                Supports SQL LIKE patterns (% and _) for prefix/pattern matching.
+                Examples:
+                  - "acme:prod:reviewer" - exact match
+                  - "acme:prod:%" - all profiles in workspace
+                  - "acme:%" - all workspaces in domain
         """
         self._session_factory = session_factory
-        self.profile_id = profile_id
+        self.context_key = context_key
+
+    def _build_context_filter(self, column):
+        """
+        Build context filter condition with pattern matching support.
+
+        Args:
+            column: SQLAlchemy column to filter on.
+
+        Returns:
+            SQLAlchemy filter condition, or None if no filtering needed.
+        """
+        if self.context_key is None:
+            return None
+
+        # Detect LIKE pattern (contains % or _)
+        if "%" in self.context_key or "_" in self.context_key:
+            return column.like(self.context_key)
+        else:
+            return column == self.context_key
 
     def _get_fact(self, session: Session, fact_id: int) -> Fact | None:
-        """Get fact by ID, verifying profile ownership."""
+        """Get fact by ID, verifying context ownership."""
         fact = session.get(Fact, fact_id)
-        if fact is None or fact.profile_id != self.profile_id:
+        if fact is None:
             return None
+
+        # Check context ownership (supports pattern matching)
+        context_filter = self._build_context_filter(Fact.context_key)
+        if context_filter is not None:
+            # Verify fact matches context filter
+            from sqlalchemy import select as _select
+
+            stmt = _select(Fact.id).where(Fact.id == fact_id, context_filter)
+            if not session.scalar(stmt):
+                return None
+
         if fact.type != self.fact_type:
             return None
         return fact
@@ -83,7 +118,7 @@ class FactClient(Generic[T]):
         active_only: bool = True,
     ) -> list[Fact]:
         """
-        List facts of this type for the profile.
+        List facts of this type for the context.
 
         Args:
             limit: Maximum records to return.
@@ -95,10 +130,12 @@ class FactClient(Generic[T]):
             List of facts with details loaded.
         """
         with self._session_factory() as session:
-            stmt = select(Fact).where(
-                Fact.profile_id == self.profile_id,
-                Fact.type == self.fact_type,
-            )
+            stmt = select(Fact).where(Fact.type == self.fact_type)
+
+            # Apply context filter (supports pattern matching)
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
 
             if active_only:
                 stmt = stmt.where(Fact.active == True)  # noqa: E712
@@ -117,7 +154,7 @@ class FactClient(Generic[T]):
 
     def count(self, active_only: bool = True) -> int:
         """
-        Count facts of this type for the profile.
+        Count facts of this type for the context.
 
         Args:
             active_only: Only count active facts.
@@ -126,14 +163,12 @@ class FactClient(Generic[T]):
             Count of matching facts.
         """
         with self._session_factory() as session:
-            stmt = (
-                select(func.count())
-                .select_from(Fact)
-                .where(
-                    Fact.profile_id == self.profile_id,
-                    Fact.type == self.fact_type,
-                )
-            )
+            stmt = select(func.count()).select_from(Fact).where(Fact.type == self.fact_type)
+
+            # Apply context filter (supports pattern matching)
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
 
             if active_only:
                 stmt = stmt.where(Fact.active == True)  # noqa: E712
@@ -195,13 +230,13 @@ class FactClient(Generic[T]):
 
     def exists(self, fact_id: int) -> bool:
         """
-        Check if a fact exists and belongs to this profile.
+        Check if a fact exists and belongs to this context.
 
         Args:
             fact_id: The fact ID.
 
         Returns:
-            True if exists and belongs to profile.
+            True if exists and belongs to context.
         """
         with self._session_factory() as session:
             stmt = (
@@ -209,8 +244,12 @@ class FactClient(Generic[T]):
                 .select_from(Fact)
                 .where(
                     Fact.id == fact_id,
-                    Fact.profile_id == self.profile_id,
                     Fact.type == self.fact_type,
                 )
             )
+
+            # Apply context filter (supports pattern matching)
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
             return (session.scalar(stmt) or 0) > 0

@@ -64,7 +64,7 @@ class DirectivesClient(FactClient[DirectiveDetails]):
 
         with self._session_factory() as session:
             fact = Fact(
-                profile_id=self.profile_id,
+                context_key=self.context_key,
                 type=self.fact_type,
                 content=text.strip(),
                 category=category,
@@ -115,7 +115,7 @@ class DirectivesClient(FactClient[DirectiveDetails]):
                 select(Fact)
                 .join(DirectiveDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     DirectiveDetails.status == "active",
                 )
@@ -151,7 +151,7 @@ class DirectivesClient(FactClient[DirectiveDetails]):
                 select(Fact)
                 .join(DirectiveDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     DirectiveDetails.directive_type == directive_type,
                 )

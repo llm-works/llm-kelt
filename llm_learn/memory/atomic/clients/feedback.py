@@ -65,7 +65,7 @@ class FeedbackClient(FactClient[FeedbackDetails]):
         with self._session_factory() as session:
             content_desc = f" on content {content_id}" if content_id else ""
             fact = Fact(
-                profile_id=self.profile_id,
+                context_key=self.context_key,
                 type=self.fact_type,
                 content=f"{signal} feedback{content_desc}",
                 category=category,
@@ -100,7 +100,7 @@ class FeedbackClient(FactClient[FeedbackDetails]):
                 select(Fact)
                 .join(FeedbackDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     FeedbackDetails.signal == signal,
                 )
@@ -129,7 +129,7 @@ class FeedbackClient(FactClient[FeedbackDetails]):
                 select(Fact)
                 .join(FeedbackDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     FeedbackDetails.content_id == content_id,
                 )
@@ -154,7 +154,7 @@ class FeedbackClient(FactClient[FeedbackDetails]):
                     .select_from(FeedbackDetails)
                     .join(Fact)
                     .where(
-                        Fact.profile_id == self.profile_id,
+                        Fact.context_key == self.context_key,
                         Fact.type == self.fact_type,
                         FeedbackDetails.signal == signal,
                     )

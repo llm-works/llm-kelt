@@ -1,9 +1,11 @@
 """Memory module - knowledge storage implementations.
 
-Each submodule implements a different knowledge representation model:
+Submodules:
 - atomic: Fact-based storage with type-specific detail tables
+- isolation: IsolationContext for data partitioning
 """
 
 from . import atomic
+from .isolation import IsolationContext
 
-__all__ = ["atomic"]
+__all__ = ["atomic", "IsolationContext"]

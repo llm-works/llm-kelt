@@ -90,7 +90,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
 
         with self._session_factory() as session:
             fact = Fact(
-                profile_id=self.profile_id,
+                context_key=self.context_key,
                 type=self.fact_type,
                 content=hypothesis.strip(),
                 category=category.strip() if category else None,
@@ -162,7 +162,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
                 select(Fact)
                 .join(PredictionDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     Fact.active == True,  # noqa: E712
                     PredictionDetails.status == "pending",
@@ -194,7 +194,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
                 select(Fact)
                 .join(PredictionDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     Fact.active == True,  # noqa: E712
                     PredictionDetails.status == "resolved",
@@ -250,7 +250,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
                 select(Fact, PredictionDetails)
                 .join(PredictionDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     Fact.active == True,  # noqa: E712
                     PredictionDetails.status == "resolved",

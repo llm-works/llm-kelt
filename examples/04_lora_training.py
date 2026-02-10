@@ -156,21 +156,21 @@ def create_training_data(learn: LearnClient):
 
     # Clear existing data
     from llm_learn.core.models import Content
-    from llm_learn.memory.v1.models import Fact, FeedbackDetails, PreferenceDetails
+    from llm_learn.memory.atomic.models import Fact, FeedbackDetails, PreferenceDetails
 
     with learn.database.session() as session:
         session.query(FeedbackDetails).filter(
             FeedbackDetails.fact_id.in_(
-                session.query(Fact.id).filter_by(profile_id=learn.profile_id, type="feedback")
+                session.query(Fact.id).filter_by(context_key=learn.context_key, type="feedback")
             )
         ).delete(synchronize_session=False)
         session.query(PreferenceDetails).filter(
             PreferenceDetails.fact_id.in_(
-                session.query(Fact.id).filter_by(profile_id=learn.profile_id, type="preference")
+                session.query(Fact.id).filter_by(context_key=learn.context_key, type="preference")
             )
         ).delete(synchronize_session=False)
-        session.query(Fact).filter_by(profile_id=learn.profile_id).delete()
-        session.query(Content).filter_by(profile_id=learn.profile_id).delete()
+        session.query(Fact).filter_by(context_key=learn.context_key).delete()
+        session.query(Content).filter_by(context_key=learn.context_key).delete()
         session.commit()
 
     # Create training examples with positive feedback
@@ -215,7 +215,7 @@ def export_training_data(learn: LearnClient, output_dir: Path) -> Path:
     sft_path = output_dir / "sft_data.jsonl"
     result = export_feedback_sft(
         session_factory=learn.database.session,
-        profile_id=learn.profile_id,
+        context_key=learn.context_key,
         output_path=sft_path,
         signal="positive",
         min_strength=0.8,
@@ -358,15 +358,17 @@ async def main():
     # Suppress logging noise
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
 
+    from llm_learn import IsolationContext
+
     # Initialize
     config = Config("etc/llm-learn.yaml")
     factory = LearnClientFactory(lg)
 
-    # Create initial client to get/create profile
-    learn = factory.create_from_config(profile_id="1", config=config)
-    profile_id = ensure_demo_profile(learn, profile_slug="lora-training")
-    learn = factory.create_from_config(profile_id=profile_id, config=config)
-    print(f"{MUTED}Using profile_id={RESET}{INFO}{profile_id}{RESET}")
+    # Create context for this example
+    context_key = ensure_demo_profile(None, profile_slug="lora-training")
+    context = IsolationContext(context_key=context_key)
+    learn = factory.create_from_config(context=context, config=config)
+    print(f"{MUTED}Using context_key={RESET}{INFO}{context_key}{RESET}")
 
     # Get inference URL and query for running model
     infer_url = get_infer_url(config)

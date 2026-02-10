@@ -11,6 +11,7 @@ from llm_infer.client import LLMClient
 from .client import LearnClient
 from .core.database import Database
 from .inference.embedder import Embedder
+from .memory.isolation import IsolationContext
 
 
 class LearnClientFactory:
@@ -22,13 +23,14 @@ class LearnClientFactory:
     Usage:
         from appinfra.config import Config
         from appinfra.log import LogConfig, LoggerFactory
-        from llm_learn import LearnClientFactory
+        from llm_learn import LearnClientFactory, IsolationContext
 
         config = Config("etc/llm-learn.yaml")
         lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
 
         factory = LearnClientFactory(lg)
-        client = factory.create_from_config(profile_id="a3f8...", config=config)
+        context = IsolationContext(context_key="my-agent", schema_name="public")
+        client = factory.create_from_config(context=context, config=config)
     """
 
     def __init__(self, lg: Logger) -> None:
@@ -58,7 +60,7 @@ class LearnClientFactory:
 
     def create_from_config(
         self,
-        profile_id: str,
+        context: IsolationContext,
         config: DotDict,
         db_key: str = "main",
         ensure_schema: bool = True,
@@ -67,7 +69,7 @@ class LearnClientFactory:
         Create LearnClient with all dependencies from config.
 
         Args:
-            profile_id: Profile ID to scope all operations to
+            context: IsolationContext for data partitioning
             config: Full application config (e.g., Config("etc/llm-learn.yaml"))
             db_key: Database config key (default: "main")
             ensure_schema: If True (default), auto-migrate schema on init
@@ -93,9 +95,9 @@ class LearnClientFactory:
         """
         db = Database(self._lg, PG(self._lg, config.dbs[db_key]))
         return LearnClient(
-            lg=self._lg,
-            profile_id=profile_id,
             database=db,
+            context=context,
+            lg=self._lg,
             embedder=self._create_embedder(config),
             llm_client=self._create_llm_client(config),
             learn_config=getattr(config, "learn", None),
@@ -104,7 +106,7 @@ class LearnClientFactory:
 
     def create(
         self,
-        profile_id: str,
+        context: IsolationContext,
         database: Database,
         embedder: Embedder | None = None,
         llm_client: LLMClient | None = None,
@@ -117,7 +119,7 @@ class LearnClientFactory:
         Use this when sharing resources across multiple clients.
 
         Args:
-            profile_id: Profile ID to scope all operations to
+            context: IsolationContext for data partitioning
             database: Existing Database instance
             embedder: Optional existing Embedder instance
             llm_client: Optional existing LLM client instance
@@ -128,9 +130,9 @@ class LearnClientFactory:
             Configured LearnClient instance
         """
         return LearnClient(
-            lg=self._lg,
-            profile_id=profile_id,
             database=database,
+            context=context,
+            lg=self._lg,
             embedder=embedder,
             llm_client=llm_client,
             learn_config=learn_config,

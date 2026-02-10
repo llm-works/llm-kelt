@@ -34,7 +34,7 @@ class TestExportPreferencesDPO:
             output_path = Path(tmpdir) / "dpo.jsonl"
             result = export_preferences_dpo(
                 database.session,
-                learn_client.profile_id,
+                learn_client.context.context_key,
                 output_path,
             )
 
@@ -65,7 +65,7 @@ class TestExportPreferencesDPO:
             output_path = Path(tmpdir) / "dpo.jsonl"
             result = export_preferences_dpo(
                 database.session,
-                learn_client.profile_id,
+                learn_client.context.context_key,
                 output_path,
                 category="synthesis",
             )
@@ -82,7 +82,7 @@ class TestExportPreferencesDPO:
             output_path = Path(tmpdir) / "dpo.jsonl"
             result = export_preferences_dpo(
                 database.session,
-                learn_client.profile_id,
+                learn_client.context.context_key,
                 output_path,
                 min_margin=0.5,
             )
@@ -95,7 +95,7 @@ class TestExportPreferencesDPO:
             output_path = Path(tmpdir) / "dpo.jsonl"
             result = export_preferences_dpo(
                 database.session,
-                learn_client.profile_id,
+                learn_client.context.context_key,
                 output_path,
             )
 
@@ -111,7 +111,7 @@ class TestExportPreferencesDPO:
             output_path = Path(tmpdir) / "nested" / "dir" / "dpo.jsonl"
             result = export_preferences_dpo(
                 database.session,
-                learn_client.profile_id,
+                learn_client.context.context_key,
                 output_path,
             )
 
@@ -144,7 +144,7 @@ class TestExportFeedbackSFT:
             output_path = Path(tmpdir) / "sft.jsonl"
             result = export_feedback_sft(
                 database.session,
-                learn_client.profile_id,
+                learn_client.context.context_key,
                 output_path,
             )
 
@@ -186,7 +186,7 @@ class TestExportFeedbackSFT:
             output_path = Path(tmpdir) / "sft.jsonl"
             result = export_feedback_sft(
                 database.session,
-                learn_client.profile_id,
+                learn_client.context.context_key,
                 output_path,
                 signal="positive",
             )
@@ -220,7 +220,7 @@ class TestExportFeedbackSFT:
             output_path = Path(tmpdir) / "sft.jsonl"
             result = export_feedback_sft(
                 database.session,
-                learn_client.profile_id,
+                learn_client.context.context_key,
                 output_path,
                 min_strength=0.5,
             )
@@ -246,7 +246,7 @@ class TestExportFeedbackSFT:
             output_path = Path(tmpdir) / "sft.jsonl"
             result = export_feedback_sft(
                 database.session,
-                learn_client.profile_id,
+                learn_client.context.context_key,
                 output_path,
                 include_context=True,
             )
@@ -290,7 +290,7 @@ class TestExportFeedbackClassifier:
             output_path = Path(tmpdir) / "classifier.jsonl"
             result = export_feedback_classifier(
                 database.session,
-                learn_client.profile_id,
+                learn_client.context.context_key,
                 output_path,
             )
 
@@ -332,7 +332,7 @@ class TestExportFeedbackClassifier:
             output_path = Path(tmpdir) / "classifier.jsonl"
             result = export_feedback_classifier(
                 database.session,
-                learn_client.profile_id,
+                learn_client.context.context_key,
                 output_path,
             )
 
@@ -365,7 +365,7 @@ class TestExportFeedbackClassifier:
             output_path = Path(tmpdir) / "classifier.jsonl"
             result = export_feedback_classifier(
                 database.session,
-                learn_client.profile_id,
+                learn_client.context.context_key,
                 output_path,
                 min_strength=0.5,
             )

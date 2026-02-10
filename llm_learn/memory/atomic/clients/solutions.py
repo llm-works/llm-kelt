@@ -87,7 +87,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
 
         with self._session_factory() as session:
             fact = Fact(
-                profile_id=self.profile_id,
+                context_key=self.context_key,
                 type=self.fact_type,
                 content=f"{agent_name} solved: {problem[:100]}{'...' if len(problem) > 100 else ''}",
                 category=category,
@@ -124,7 +124,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
                 select(Fact)
                 .join(SolutionDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     SolutionDetails.agent_name == agent_name,
                 )
@@ -151,7 +151,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
         """List solutions in a specific category."""
         with self._session_factory() as session:
             stmt = select(Fact).where(
-                Fact.profile_id == self.profile_id,
+                Fact.context_key == self.context_key,
                 Fact.type == self.fact_type,
                 Fact.category == category,
             )
@@ -175,7 +175,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
                 select(SolutionDetails.agent_name)
                 .join(Fact)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                 )
                 .distinct()
@@ -197,7 +197,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
                 .select_from(SolutionDetails)
                 .join(Fact)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                 )
             )
@@ -224,7 +224,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
                 select(Fact)
                 .join(SolutionDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     SolutionDetails.problem.ilike(f"%{query}%"),
                 )

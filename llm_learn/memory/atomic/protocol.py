@@ -29,7 +29,9 @@ class Protocol:
     Aggregates all atomic clients under a single interface. Access via LearnClient.atomic.
 
     Usage:
-        learn = LearnClient(profile_id="a3f8b2c1...")
+        from llm_learn import LearnClient, IsolationContext
+        context = IsolationContext(context_key="my-agent")
+        learn = LearnClient(database=db, context=context)
 
         # Access atomic primitives
         learn.atomic.assertions.add("User prefers Python")
@@ -44,7 +46,7 @@ class Protocol:
     def __init__(
         self,
         session_factory: Callable[[], Any],
-        profile_id: str,
+        context_key: str | None,
         *,
         embedder: Embedder | None = None,
         embedding_store: EmbeddingStore | None = None,
@@ -54,12 +56,12 @@ class Protocol:
 
         Args:
             session_factory: Database session factory.
-            profile_id: Profile ID (32-char hash) to scope all operations to.
+            context_key: Context key to scope all operations to (None = no filtering).
             embedder: Optional embedder for generating embeddings.
             embedding_store: Optional embedding store for vector operations.
         """
         self._session_factory = session_factory
-        self._profile_id = profile_id
+        self._context_key = context_key
         self._embedder = embedder
         self._embedding_store = embedding_store
 
@@ -77,49 +79,49 @@ class Protocol:
     def assertions(self) -> AssertionsClient:
         """Simple facts about the user."""
         if self._assertions is None:
-            self._assertions = AssertionsClient(self._session_factory, self._profile_id)
+            self._assertions = AssertionsClient(self._session_factory, self._context_key)
         return self._assertions
 
     @property
     def solutions(self) -> SolutionsClient:
         """Agent problem/answer records."""
         if self._solutions is None:
-            self._solutions = SolutionsClient(self._session_factory, self._profile_id)
+            self._solutions = SolutionsClient(self._session_factory, self._context_key)
         return self._solutions
 
     @property
     def predictions(self) -> PredictionsClient:
         """Hypothesis tracking for calibration."""
         if self._predictions is None:
-            self._predictions = PredictionsClient(self._session_factory, self._profile_id)
+            self._predictions = PredictionsClient(self._session_factory, self._context_key)
         return self._predictions
 
     @property
     def feedback(self) -> FeedbackClient:
         """Explicit user signals on content."""
         if self._feedback is None:
-            self._feedback = FeedbackClient(self._session_factory, self._profile_id)
+            self._feedback = FeedbackClient(self._session_factory, self._context_key)
         return self._feedback
 
     @property
     def directives(self) -> DirectivesClient:
         """Standing user instructions."""
         if self._directives is None:
-            self._directives = DirectivesClient(self._session_factory, self._profile_id)
+            self._directives = DirectivesClient(self._session_factory, self._context_key)
         return self._directives
 
     @property
     def interactions(self) -> InteractionsClient:
         """Implicit behavioral signals."""
         if self._interactions is None:
-            self._interactions = InteractionsClient(self._session_factory, self._profile_id)
+            self._interactions = InteractionsClient(self._session_factory, self._context_key)
         return self._interactions
 
     @property
     def preferences(self) -> PreferencesClient:
         """DPO training pairs."""
         if self._preferences is None:
-            self._preferences = PreferencesClient(self._session_factory, self._profile_id)
+            self._preferences = PreferencesClient(self._session_factory, self._context_key)
         return self._preferences
 
     @property
@@ -130,7 +132,7 @@ class Protocol:
                 raise RuntimeError("No embedding store configured")
             self._embedding_adapter = EmbeddingAdapter(
                 self._session_factory,
-                self._profile_id,
+                self._context_key,
                 self._embedding_store,
                 self._embedder,
             )

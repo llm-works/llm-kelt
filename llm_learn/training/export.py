@@ -26,7 +26,7 @@ class ExportResult:
 
     path: Path
     count: int
-    profile_id: str
+    context_key: str | None
     format: str
     exported_at: datetime
 
@@ -104,7 +104,7 @@ def _sft_record_builder(include_context: bool):
 
 
 def _build_feedback_query(
-    profile_id: str,
+    context_key: str | None,
     min_strength: float,
     since: datetime | None,
     until: datetime | None,
@@ -116,11 +116,12 @@ def _build_feedback_query(
         .join(FeedbackDetails, Fact.id == FeedbackDetails.fact_id)
         .join(Content, FeedbackDetails.content_id == Content.id)
         .where(
-            Fact.profile_id == profile_id,
             Fact.type == "feedback",
             FeedbackDetails.strength >= min_strength,
         )
     )
+    if context_key is not None:
+        stmt = stmt.where(Fact.context_key == context_key)
     if signals is not None:
         stmt = stmt.where(FeedbackDetails.signal.in_(signals))
     if since is not None:
@@ -131,7 +132,7 @@ def _build_feedback_query(
 
 
 def _build_preferences_query(
-    profile_id: str,
+    context_key: str | None,
     category: str | None,
     since: datetime | None,
     until: datetime | None,
@@ -141,8 +142,10 @@ def _build_preferences_query(
     stmt = (
         select(Fact, PreferenceDetails)
         .join(PreferenceDetails, Fact.id == PreferenceDetails.fact_id)
-        .where(Fact.profile_id == profile_id, Fact.type == "preference")
+        .where(Fact.type == "preference")
     )
+    if context_key is not None:
+        stmt = stmt.where(Fact.context_key == context_key)
     if category is not None:
         stmt = stmt.where(Fact.category == category)
     if since is not None:
@@ -156,7 +159,7 @@ def _build_preferences_query(
 
 def export_preferences_dpo(
     session_factory: Callable[[], AbstractContextManager[Session]],
-    profile_id: str,
+    context_key: str | None,
     output_path: str | Path,
     *,
     category: str | None = None,
@@ -169,18 +172,18 @@ def export_preferences_dpo(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with session_factory() as session:
-        stmt = _build_preferences_query(profile_id, category, since, until, min_margin)
+        stmt = _build_preferences_query(context_key, category, since, until, min_margin)
         with output_path.open("w", encoding="utf-8") as f:
             count = _write_jsonl(f, session.execute(stmt), _dpo_record_from_row)
 
     return ExportResult(
-        path=output_path, count=count, profile_id=profile_id, format="dpo", exported_at=utc_now()
+        path=output_path, count=count, context_key=context_key, format="dpo", exported_at=utc_now()
     )
 
 
 def export_feedback_sft(
     session_factory: Callable[[], AbstractContextManager[Session]],
-    profile_id: str,
+    context_key: str | None,
     output_path: str | Path,
     *,
     signal: str = "positive",
@@ -221,7 +224,7 @@ def export_feedback_sft(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with session_factory() as session:
-        stmt = _build_feedback_query(profile_id, min_strength, since, until, signals=[signal])
+        stmt = _build_feedback_query(context_key, min_strength, since, until, signals=[signal])
 
         with output_path.open("w", encoding="utf-8") as f:
             count = _write_jsonl(f, session.execute(stmt), _sft_record_builder(include_context))
@@ -229,7 +232,7 @@ def export_feedback_sft(
     return ExportResult(
         path=output_path,
         count=count,
-        profile_id=profile_id,
+        context_key=context_key,
         format="sft",
         exported_at=utc_now(),
     )
@@ -237,7 +240,7 @@ def export_feedback_sft(
 
 def export_feedback_classifier(
     session_factory: Callable[[], AbstractContextManager[Session]],
-    profile_id: str,
+    context_key: str | None,
     output_path: str | Path,
     *,
     since: datetime | None = None,
@@ -272,7 +275,7 @@ def export_feedback_classifier(
 
     with session_factory() as session:
         stmt = _build_feedback_query(
-            profile_id, min_strength, since, until, signals=["positive", "negative"]
+            context_key, min_strength, since, until, signals=["positive", "negative"]
         )
         with output_path.open("w", encoding="utf-8") as f:
             count = _write_jsonl(f, session.execute(stmt), _classifier_record_from_row)
@@ -280,7 +283,7 @@ def export_feedback_classifier(
     return ExportResult(
         path=output_path,
         count=count,
-        profile_id=profile_id,
+        context_key=context_key,
         format="classifier",
         exported_at=utc_now(),
     )

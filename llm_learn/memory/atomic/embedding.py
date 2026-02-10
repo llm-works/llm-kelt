@@ -25,7 +25,7 @@ class EmbeddingAdapter:
     Uses entity_type "atomic.fact" to namespace embeddings.
 
     Example:
-        adapter = EmbeddingAdapter(session_factory, profile_id, store, embedder)
+        adapter = EmbeddingAdapter(session_factory, context_key, store, embedder)
 
         # Embed a fact
         adapter.embed_fact(fact, "text-embedding-3-small")
@@ -42,7 +42,7 @@ class EmbeddingAdapter:
     def __init__(
         self,
         session_factory: Callable[[], Any],
-        profile_id: str,
+        context_key: str | None,
         store: EmbeddingStore,
         embedder: Embedder | None = None,
     ) -> None:
@@ -51,12 +51,12 @@ class EmbeddingAdapter:
 
         Args:
             session_factory: Callable that returns a context manager for database sessions.
-            profile_id: Profile ID (32-char hash) to scope operations to.
+            context_key: Profile ID (32-char hash) to scope operations to.
             store: Core EmbeddingStore for vector operations.
             embedder: Optional Embedder for generating embeddings.
         """
         self._session_factory = session_factory
-        self._profile_id = profile_id
+        self._context_key = context_key
         self._store = store
         self._embedder = embedder
 
@@ -131,7 +131,7 @@ class EmbeddingAdapter:
         with self._session_factory() as session:
             stmt = select(Fact).where(
                 Fact.id.in_(fact_ids),
-                Fact.profile_id == self._profile_id,
+                Fact.context_key == self._context_key,
                 Fact.active == True,  # noqa: E712
             )
             if fact_type:
@@ -226,7 +226,7 @@ class EmbeddingAdapter:
         with self._session_factory() as session:
             # Get candidate facts
             stmt = select(Fact).where(
-                Fact.profile_id == self._profile_id,
+                Fact.context_key == self._context_key,
                 Fact.active == True,  # noqa: E712
             )
             if fact_type:

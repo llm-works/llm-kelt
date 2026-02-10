@@ -91,9 +91,12 @@ def create_server_from_config(config: dict, lg: Logger | None = None) -> Server:
         raise ValueError("profile_id is required in config (proxy.profile_id or profile_id)")
 
     # Use factory to create LearnClient from config
+    from llm_learn import IsolationContext
+
     factory = LearnClientFactory(lg)
+    context = IsolationContext(context_key=str(profile_id))
     learn_client = factory.create_from_config(
-        profile_id=str(profile_id),
+        context=context,
         config=DotDict(**config),
     )
 

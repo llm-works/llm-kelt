@@ -45,6 +45,7 @@ from .core.exceptions import (
     ValidationError,
 )
 from .factory import LearnClientFactory
+from .memory import IsolationContext
 
 __all__ = [
     "LearnClient",
@@ -55,4 +56,5 @@ __all__ = [
     "DatabaseError",
     "ConfigurationError",
     "SchemaVersionError",
+    "IsolationContext",
 ]

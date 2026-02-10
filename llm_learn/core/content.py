@@ -5,19 +5,16 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 from appinfra.db.utils import detach, detach_all
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint, select
+from sqlalchemy import DateTime, Index, String, Text, UniqueConstraint, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, utc_now
 from .exceptions import ValidationError
-
-if TYPE_CHECKING:
-    from .profile import Profile
 
 
 class Content(Base):
@@ -25,16 +22,16 @@ class Content(Base):
     Raw ingested content for reference.
 
     Content is the central reference point - feedback, interactions,
-    and other signals reference content by ID. Strictly per-profile.
+    and other signals reference content by ID. Isolated by context_key.
 
-    Content is deduplicated by hash within a profile - if the same text
+    Content is deduplicated by hash within a context - if the same text
     is ingested twice, only one record is created.
     """
 
     __tablename__ = "content"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    profile_id: Mapped[str] = mapped_column(String(32), ForeignKey("profiles.id"), nullable=False)
+    context_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source: Mapped[str] = mapped_column(String(100), nullable=False)
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -49,15 +46,18 @@ class Content(Base):
         DateTime(timezone=True), default=utc_now, nullable=False
     )
 
-    # Relationships
-    profile: Mapped[Profile] = relationship(back_populates="content")
-
     __table_args__ = (
-        UniqueConstraint("profile_id", "content_hash", name="uq_content_profile_hash"),
-        Index("idx_content_profile", "profile_id"),
+        UniqueConstraint("context_key", "content_hash", name="uq_content_context_hash"),
+        Index("idx_content_context", "context_key"),
         Index("idx_content_source", "source"),
         Index("idx_content_created", "created_at"),
         Index("idx_content_external_id", "external_id"),
+        # Prefix index for efficient LIKE queries (pattern matching)
+        Index(
+            "idx_content_context_prefix",
+            "context_key",
+            postgresql_ops={"context_key": "text_pattern_ops"},
+        ),
     )
 
     def __repr__(self) -> str:
@@ -66,27 +66,51 @@ class Content(Base):
 
 class ContentStore:
     """
-    Content storage operations scoped to a profile.
+    Content storage operations scoped to a context.
 
     Provides methods for creating, retrieving, and listing content.
-    Automatically deduplicates by content hash within the profile.
+    Automatically deduplicates by content hash within the context.
     """
 
-    def __init__(self, session_factory: Callable[[], Any], profile_id: str) -> None:
+    def __init__(self, session_factory: Callable[[], Any], context_key: str | None) -> None:
         """
-        Initialize ContentStore scoped to a profile.
+        Initialize ContentStore scoped to a context.
 
         Args:
             session_factory: Callable that returns a context manager for database sessions.
-            profile_id: Profile ID (32-char hash) to scope all operations to.
+            context_key: Context key to scope all operations to (None = no filtering).
+                Supports SQL LIKE patterns (% and _) for prefix/pattern matching.
+                Examples:
+                  - "acme:prod:reviewer" - exact match
+                  - "acme:prod:%" - all profiles in workspace
+                  - "acme:%" - all workspaces in domain
         """
         self._session_factory = session_factory
-        self._profile_id = profile_id
+        self._context_key = context_key
 
     @property
-    def profile_id(self) -> str:
-        """Get the profile ID this store is scoped to."""
-        return self._profile_id
+    def context_key(self) -> str | None:
+        """Get the context key this store is scoped to."""
+        return self._context_key
+
+    def _build_context_filter(self, column):
+        """
+        Build context filter condition with pattern matching support.
+
+        Args:
+            column: SQLAlchemy column to filter on.
+
+        Returns:
+            SQLAlchemy filter condition, or None if no filtering needed.
+        """
+        if self._context_key is None:
+            return None
+
+        # Detect LIKE pattern (contains % or _)
+        if "%" in self._context_key or "_" in self._context_key:
+            return column.like(self._context_key)
+        else:
+            return column == self._context_key
 
     def create(
         self,
@@ -124,7 +148,7 @@ class ContentStore:
 
         with self._session_factory() as session:
             content = Content(
-                profile_id=self._profile_id,
+                context_key=self._context_key,
                 external_id=external_id,
                 source=source.strip(),
                 url=url,
@@ -172,27 +196,14 @@ class ContentStore:
         content_hash = self._compute_hash(content_text)
 
         with self._session_factory() as session:
-            stmt = select(Content).where(
-                Content.profile_id == self._profile_id,
-                Content.content_hash == content_hash,
-            )
+            stmt = self._build_hash_query(content_hash)
             existing = session.scalar(stmt)
             if existing:
                 return existing.id, False
 
-            content = self._create_content_record(
-                content_hash, content_text, source, external_id, url, title, metadata
+            return self._create_with_retry(
+                session, stmt, content_hash, content_text, source, external_id, url, title, metadata
             )
-            try:
-                session.add(content)
-                session.flush()
-                return content.id, True
-            except IntegrityError:
-                session.rollback()
-                existing = session.scalar(stmt)
-                if existing:
-                    return existing.id, False
-                raise
 
     def get(self, content_id: int) -> Content | None:
         """
@@ -205,10 +216,13 @@ class ContentStore:
             Content record if found and belongs to profile, None otherwise.
         """
         with self._session_factory() as session:
-            stmt = select(Content).where(
-                Content.id == content_id,
-                Content.profile_id == self._profile_id,
-            )
+            stmt = select(Content).where(Content.id == content_id)
+
+            # Apply context filter (supports pattern matching)
+            context_filter = self._build_context_filter(Content.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
             obj = session.scalar(stmt)
             if obj:
                 return cast(Content, detach(obj, session))
@@ -225,10 +239,13 @@ class ContentStore:
             Content record if found, None otherwise.
         """
         with self._session_factory() as session:
-            stmt = select(Content).where(
-                Content.profile_id == self._profile_id,
-                Content.content_hash == content_hash,
-            )
+            stmt = select(Content).where(Content.content_hash == content_hash)
+
+            # Apply context filter (supports pattern matching)
+            context_filter = self._build_context_filter(Content.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
             obj = session.scalar(stmt)
             if obj:
                 return cast(Content, detach(obj, session))
@@ -246,10 +263,13 @@ class ContentStore:
             Content record if found, None otherwise.
         """
         with self._session_factory() as session:
-            stmt = select(Content).where(
-                Content.profile_id == self._profile_id,
-                Content.external_id == external_id,
-            )
+            stmt = select(Content).where(Content.external_id == external_id)
+
+            # Apply context filter (supports pattern matching)
+            context_filter = self._build_context_filter(Content.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
             if source:
                 stmt = stmt.where(Content.source == source)
             obj = session.scalar(stmt)
@@ -276,7 +296,13 @@ class ContentStore:
             List of content records.
         """
         with self._session_factory() as session:
-            stmt = select(Content).where(Content.profile_id == self._profile_id)
+            stmt = select(Content)
+
+            # Apply context filter (supports pattern matching)
+            context_filter = self._build_context_filter(Content.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
             if source:
                 stmt = stmt.where(Content.source == source)
             stmt = stmt.order_by(Content.created_at.desc()).limit(limit).offset(offset)
@@ -296,11 +322,13 @@ class ContentStore:
         from sqlalchemy import func
 
         with self._session_factory() as session:
-            stmt = (
-                select(func.count())
-                .select_from(Content)
-                .where(Content.profile_id == self._profile_id)
-            )
+            stmt = select(func.count()).select_from(Content)
+
+            # Apply context filter (supports pattern matching)
+            context_filter = self._build_context_filter(Content.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
             if source:
                 stmt = stmt.where(Content.source == source)
             return session.scalar(stmt) or 0
@@ -316,15 +344,44 @@ class ContentStore:
             True if deleted, False if not found.
         """
         with self._session_factory() as session:
-            stmt = select(Content).where(
-                Content.id == content_id,
-                Content.profile_id == self._profile_id,
-            )
+            stmt = select(Content).where(Content.id == content_id)
+
+            # Apply context filter (supports pattern matching)
+            context_filter = self._build_context_filter(Content.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
             content = session.scalar(stmt)
             if content:
                 session.delete(content)
                 return True
             return False
+
+    def _build_hash_query(self, content_hash: str):
+        """Build query to find content by hash with context filter."""
+        stmt = select(Content).where(Content.content_hash == content_hash)
+        context_filter = self._build_context_filter(Content.context_key)
+        if context_filter is not None:
+            stmt = stmt.where(context_filter)
+        return stmt
+
+    def _create_with_retry(
+        self, session, stmt, content_hash, content_text, source, external_id, url, title, metadata
+    ) -> tuple[int, bool]:
+        """Create content with retry on integrity error."""
+        content = self._create_content_record(
+            content_hash, content_text, source, external_id, url, title, metadata
+        )
+        try:
+            session.add(content)
+            session.flush()
+            return content.id, True
+        except IntegrityError:
+            session.rollback()
+            existing = session.scalar(stmt)
+            if existing:
+                return existing.id, False
+            raise
 
     def _create_content_record(
         self,
@@ -338,7 +395,7 @@ class ContentStore:
     ) -> Content:
         """Build a Content record with the given parameters."""
         return Content(
-            profile_id=self._profile_id,
+            context_key=self._context_key,
             external_id=external_id,
             source=source.strip(),
             url=url,

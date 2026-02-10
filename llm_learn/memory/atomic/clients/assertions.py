@@ -74,7 +74,7 @@ class AssertionsClient(FactClient[None]):
 
         with self._session_factory() as session:
             fact = Fact(
-                profile_id=self.profile_id,
+                context_key=self.context_key,
                 type=self.fact_type,
                 content=content.strip(),
                 category=category.strip() if category else None,
@@ -164,7 +164,7 @@ class AssertionsClient(FactClient[None]):
         """
         with self._session_factory() as session:
             stmt = select(Fact).where(
-                Fact.profile_id == self.profile_id,
+                Fact.context_key == self.context_key,
                 Fact.type == self.fact_type,
                 Fact.category == category,
             )
@@ -195,7 +195,7 @@ class AssertionsClient(FactClient[None]):
         """
         with self._session_factory() as session:
             stmt = select(Fact).where(
-                Fact.profile_id == self.profile_id,
+                Fact.context_key == self.context_key,
                 Fact.type == self.fact_type,
                 Fact.source == source,
             )
@@ -229,7 +229,7 @@ class AssertionsClient(FactClient[None]):
         """
         with self._session_factory() as session:
             stmt = select(Fact).where(
-                Fact.profile_id == self.profile_id,
+                Fact.context_key == self.context_key,
                 Fact.type == self.fact_type,
                 Fact.content.ilike(f"%{query}%"),
             )
@@ -252,7 +252,7 @@ class AssertionsClient(FactClient[None]):
             stmt = (
                 select(Fact.category)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     Fact.category.isnot(None),
                 )
@@ -280,7 +280,7 @@ class AssertionsClient(FactClient[None]):
         """
         with self._session_factory() as session:
             stmt = select(Fact).where(
-                Fact.profile_id == self.profile_id,
+                Fact.context_key == self.context_key,
                 Fact.type == self.fact_type,
                 Fact.active == True,  # noqa: E712
                 Fact.confidence >= min_confidence,
@@ -304,7 +304,7 @@ class AssertionsClient(FactClient[None]):
             stmt = (
                 select(Fact.category, func.count(Fact.id))
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     Fact.active == True,  # noqa: E712
                 )
