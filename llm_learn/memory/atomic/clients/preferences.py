@@ -19,7 +19,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
     context, which can be used for Direct Preference Optimization training.
 
     Usage:
-        preferences = PreferencesClient(session_factory, profile_id="a3f8b2c1...")
+        preferences = PreferencesClient(session_factory, context_key="my-agent")
 
         # Record a preference pair
         fact_id = preferences.record(

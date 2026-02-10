@@ -25,7 +25,7 @@ class AssertionsClient(FactClient[None]):
     - "User lives in NYC"
 
     Usage:
-        assertions = AssertionsClient(session_factory, profile_id="a3f8b2c1...")
+        assertions = AssertionsClient(session_factory, context_key="my-agent")
 
         # Add an assertion
         fact_id = assertions.add(

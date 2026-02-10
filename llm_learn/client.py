@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 class LearnClient:
     """
-    Main client for the Learn framework, scoped to a profile.
+    Main client for the Learn framework, scoped to an isolation context.
 
     Provides unified access to all framework capabilities:
     - Memory storage (facts, feedback, solutions, preferences, etc.)

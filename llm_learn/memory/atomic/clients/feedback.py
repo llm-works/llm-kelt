@@ -22,7 +22,7 @@ class FeedbackClient(FactClient[FeedbackDetails]):
     content items, with optional strength and tags.
 
     Usage:
-        feedback = FeedbackClient(session_factory, profile_id="a3f8b2c1...")
+        feedback = FeedbackClient(session_factory, context_key="my-agent")
 
         # Record feedback
         fact_id = feedback.record(

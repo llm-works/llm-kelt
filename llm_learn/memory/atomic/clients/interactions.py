@@ -25,7 +25,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
     - dismiss: User dismissed without engagement
 
     Usage:
-        interactions = InteractionsClient(session_factory, profile_id="a3f8b2c1...")
+        interactions = InteractionsClient(session_factory, context_key="my-agent")
 
         # Record a read interaction
         fact_id = interactions.record(

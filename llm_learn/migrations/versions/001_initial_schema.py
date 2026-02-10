@@ -92,10 +92,14 @@ def upgrade() -> None:  # cq: exempt
     op.create_index("idx_embedding_model", "embeddings", ["model_name"])
 
     # HNSW index for vector similarity search
+    # Note: HNSW requires fixed dimensions at index creation time.
+    # This creates an index for 1536-dimension vectors (OpenAI text-embedding-3-small/large).
+    # For other dimensions, create a separate index: CREATE INDEX USING hnsw ((embedding::vector(N)))
     op.execute(
         """
-        CREATE INDEX idx_embeddings_vector ON embeddings
-        USING hnsw (embedding vector_cosine_ops)
+        CREATE INDEX idx_embeddings_vector_1536 ON embeddings
+        USING hnsw ((embedding::vector(1536)) vector_cosine_ops)
+        WHERE dimensions = 1536
         """
     )
 
@@ -130,6 +134,15 @@ def upgrade() -> None:  # cq: exempt
         "atomic_facts",
         ["context_key"],
         postgresql_ops={"context_key": "text_pattern_ops"},
+    )
+    # Partial unique index for NULL context_key to ensure deduplication works
+    # When context_key IS NULL, (type, content, category) must be unique (global scope)
+    op.create_index(
+        "uq_atomic_facts_null_context_dedup",
+        "atomic_facts",
+        ["type", "content", "category"],
+        unique=True,
+        postgresql_where=sa.text("context_key IS NULL"),
     )
 
     # =========================================================================

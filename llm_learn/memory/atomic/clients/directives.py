@@ -26,7 +26,7 @@ class DirectivesClient(FactClient[DirectiveDetails]):
     - rule: Conditional rules (e.g., "If X, then Y")
 
     Usage:
-        directives = DirectivesClient(session_factory, profile_id="a3f8b2c1...")
+        directives = DirectivesClient(session_factory, context_key="my-agent")
 
         # Add a directive
         fact_id = directives.record(

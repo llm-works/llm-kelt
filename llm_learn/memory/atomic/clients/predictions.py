@@ -22,7 +22,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
     resolved against actual outcomes for calibration tracking.
 
     Usage:
-        predictions = PredictionsClient(session_factory, profile_id="a3f8b2c1...")
+        predictions = PredictionsClient(session_factory, context_key="my-agent")
 
         # Record a prediction
         fact_id = predictions.record(

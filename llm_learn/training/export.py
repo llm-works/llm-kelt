@@ -209,7 +209,7 @@ def export_feedback_sft(
 
     Args:
         session_factory: Database session factory
-        profile_id: Profile to export from
+        context_key: Context key to scope export (None = all contexts)
         output_path: Path to write JSONL file
         signal: Feedback signal to export (default: "positive")
         min_strength: Minimum strength threshold (default: 0.5)
@@ -261,7 +261,7 @@ def export_feedback_classifier(
 
     Args:
         session_factory: Database session factory
-        profile_id: Profile to export from
+        context_key: Context key to scope export (None = all contexts)
         output_path: Path to write JSONL file
         since: Only export feedback created after this time
         until: Only export feedback created before this time

@@ -20,7 +20,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
     - answer: What the agent produced (the output)
 
     Usage:
-        solutions = SolutionsClient(session_factory, profile_id="a3f8b2c1...")
+        solutions = SolutionsClient(session_factory, context_key="my-agent")
 
         # Record a solution
         fact_id = solutions.record(
