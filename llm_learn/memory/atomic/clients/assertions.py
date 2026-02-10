@@ -73,10 +73,12 @@ class AssertionsClient(FactClient[None]):
             raise ValidationError(f"confidence must be between 0.0 and 1.0, got {confidence}")
 
         with self._session_factory() as session:
+            content_text = content.strip()
             fact = Fact(
                 context_key=self.context_key,
                 type=self.fact_type,
-                content=content.strip(),
+                content=content_text,
+                content_hash=self._compute_content_hash(content_text),
                 category=category.strip() if category else None,
                 source=source,
                 confidence=confidence,
@@ -136,7 +138,9 @@ class AssertionsClient(FactClient[None]):
                 return False
 
             if content is not None:
-                fact.content = content.strip()
+                content_text = content.strip()
+                fact.content = content_text
+                fact.content_hash = self._compute_content_hash(content_text)
             if category is not None:
                 fact.category = category.strip() if category else None
             if confidence is not None:

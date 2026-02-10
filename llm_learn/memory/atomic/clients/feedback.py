@@ -64,10 +64,12 @@ class FeedbackClient(FactClient[FeedbackDetails]):
 
         with self._session_factory() as session:
             content_desc = f" on content {content_id}" if content_id else ""
+            content_text = f"{signal} feedback{content_desc}"
             fact = Fact(
                 context_key=self.context_key,
                 type=self.fact_type,
-                content=f"{signal} feedback{content_desc}",
+                content=content_text,
+                content_hash=self._compute_content_hash(content_text),
                 category=category,
                 source="user",
                 confidence=strength,

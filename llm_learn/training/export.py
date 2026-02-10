@@ -111,6 +111,8 @@ def _build_feedback_query(
     signals: list[str] | None = None,
 ):
     """Build SQLAlchemy query for feedback with content."""
+    from llm_learn.memory.isolation import build_context_filter
+
     stmt = (
         select(Fact, FeedbackDetails, Content)
         .join(FeedbackDetails, Fact.id == FeedbackDetails.fact_id)
@@ -120,8 +122,9 @@ def _build_feedback_query(
             FeedbackDetails.strength >= min_strength,
         )
     )
-    if context_key is not None:
-        stmt = stmt.where(Fact.context_key == context_key)
+    context_filter = build_context_filter(context_key, Fact.context_key)
+    if context_filter is not None:
+        stmt = stmt.where(context_filter)
     if signals is not None:
         stmt = stmt.where(FeedbackDetails.signal.in_(signals))
     if since is not None:
@@ -139,13 +142,16 @@ def _build_preferences_query(
     min_margin: float | None,
 ):
     """Build SQLAlchemy query for preference pairs."""
+    from llm_learn.memory.isolation import build_context_filter
+
     stmt = (
         select(Fact, PreferenceDetails)
         .join(PreferenceDetails, Fact.id == PreferenceDetails.fact_id)
         .where(Fact.type == "preference")
     )
-    if context_key is not None:
-        stmt = stmt.where(Fact.context_key == context_key)
+    context_filter = build_context_filter(context_key, Fact.context_key)
+    if context_filter is not None:
+        stmt = stmt.where(context_filter)
     if category is not None:
         stmt = stmt.where(Fact.category == category)
     if since is not None:

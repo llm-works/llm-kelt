@@ -1,5 +1,6 @@
 """Base client for atomic memory fact-based storage."""
 
+import hashlib
 from collections.abc import Callable
 from typing import Any, Generic, TypeVar, cast
 
@@ -47,6 +48,11 @@ class FactClient(Generic[T]):
         """
         self._session_factory = session_factory
         self.context_key = context_key
+
+    @staticmethod
+    def _compute_content_hash(content: str) -> str:
+        """Compute SHA-256 hash of content text for deduplication."""
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     def _build_context_filter(self, column):
         """

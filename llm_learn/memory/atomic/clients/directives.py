@@ -63,10 +63,12 @@ class DirectivesClient(FactClient[DirectiveDetails]):
         self._validate_directive(text, directive_type)
 
         with self._session_factory() as session:
+            content_text = text.strip()
             fact = Fact(
                 context_key=self.context_key,
                 type=self.fact_type,
-                content=text.strip(),
+                content=content_text,
+                content_hash=self._compute_content_hash(content_text),
                 category=category,
                 source="user",
                 confidence=1.0,

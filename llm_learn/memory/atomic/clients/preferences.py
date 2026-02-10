@@ -65,10 +65,12 @@ class PreferencesClient(FactClient[PreferenceDetails]):
 
         with self._session_factory() as session:
             preview = context[:100] + "..." if len(context) > 100 else context
+            content_text = f"Preference: {preview}"
             fact = Fact(
                 context_key=self.context_key,
                 type=self.fact_type,
-                content=f"Preference: {preview}",
+                content=content_text,
+                content_hash=self._compute_content_hash(content_text),
                 category=category,
                 source="user",
                 confidence=1.0,

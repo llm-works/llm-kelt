@@ -113,6 +113,7 @@ def upgrade() -> None:  # cq: exempt
         sa.Column("context_key", sa.String(255), nullable=True),
         sa.Column("type", sa.String(20), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
+        sa.Column("content_hash", sa.String(64), nullable=False),
         sa.Column("category", sa.String(50), nullable=True),
         sa.Column("source", sa.String(50), server_default="user", nullable=False),
         sa.Column("confidence", sa.Float(), server_default="1.0", nullable=False),
@@ -136,11 +137,11 @@ def upgrade() -> None:  # cq: exempt
         postgresql_ops={"context_key": "text_pattern_ops"},
     )
     # Partial unique index for NULL context_key to ensure deduplication works
-    # When context_key IS NULL, (type, content, category) must be unique (global scope)
+    # When context_key IS NULL, content_hash must be unique (global scope deduplication)
     op.create_index(
-        "uq_atomic_facts_null_context_dedup",
+        "uq_atomic_facts_null_context_hash",
         "atomic_facts",
-        ["type", "content", "category"],
+        ["content_hash"],
         unique=True,
         postgresql_where=sa.text("context_key IS NULL"),
     )
