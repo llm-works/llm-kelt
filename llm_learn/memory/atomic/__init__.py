@@ -7,7 +7,7 @@ an atomic, self-contained unit.
 Usage:
     from llm_learn.memory.atomic import Protocol
 
-    protocol = Protocol(session_factory, profile_id)
+    protocol = Protocol(lg, session_factory, context_key)
     protocol.assertions.add("User prefers concise responses")
     protocol.feedback.record("positive", content_id=123)
 """

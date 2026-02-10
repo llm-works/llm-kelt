@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any, Generic, TypeVar, cast
 
 from appinfra.db.utils import detach, detach_all
+from appinfra.log import Logger
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -33,11 +34,18 @@ class FactClient(Generic[T]):
     details_model: type[T]  # e.g., SolutionDetails
     details_relationship: str  # e.g., "solution_details"
 
-    def __init__(self, session_factory: Callable[[], Any], context_key: str | None) -> None:
+    def __init__(
+        self,
+        lg: Logger,
+        session_factory: Callable[[], Any],
+        context_key: str | None,
+        embedding_adapter: Any | None = None,
+    ) -> None:
         """
         Initialize client scoped to a specific context.
 
         Args:
+            lg: Logger instance for all client operations.
             session_factory: Callable that returns a context manager for database sessions.
             context_key: Context key to scope all operations to (None = no filtering).
                 Supports SQL LIKE patterns (% and _) for prefix/pattern matching.
@@ -45,9 +53,12 @@ class FactClient(Generic[T]):
                   - "acme:prod:reviewer" - exact match
                   - "acme:prod:%" - all profiles in workspace
                   - "acme:%" - all workspaces in domain
+            embedding_adapter: Optional EmbeddingAdapter for auto-embedding facts.
         """
+        self._lg = lg
         self._session_factory = session_factory
         self.context_key = context_key
+        self._embedding_adapter = embedding_adapter
 
     @staticmethod
     def _compute_content_hash(content: str) -> str:
@@ -249,3 +260,28 @@ class FactClient(Generic[T]):
             if context_filter is not None:
                 stmt = stmt.where(context_filter)
             return (session.scalar(stmt) or 0) > 0
+
+    def _auto_embed_fact(self, fact: Fact, session: Any) -> None:
+        """
+        Automatically embed a fact if embedding adapter is configured.
+
+        This should be called after the fact is flushed (has an ID) but before commit.
+        No-op if embedding adapter is not configured.
+
+        If embedding fails, logs warning but allows fact creation to succeed. This prevents
+        transient embedding service failures (network, rate limits) from blocking fact creation.
+
+        Args:
+            fact: The fact to embed (must have fact.id set).
+            session: Database session to use (ensures transactional consistency).
+        """
+        if self._embedding_adapter is not None:
+            try:
+                self._embedding_adapter.embed_fact(fact, session=session)
+            except Exception as e:
+                # Log warning but let fact creation succeed
+                # Embedding service availability should not block fact creation
+                self._lg.warning(
+                    "auto-embed failed, fact saved without embedding",
+                    extra={"exception": e, "fact_id": fact.id, "fact_type": self.fact_type},
+                )

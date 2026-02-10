@@ -110,6 +110,7 @@ class LearnClient:
         self._embedding_store = EmbeddingStore(self._db.session)
         self._content = ContentStore(self._db.session, self._context.context_key)
         self._atomic = atomic.Protocol(
+            self._lg,
             self._db.session,
             self._context.context_key,
             embedder=self._embedder,

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, Index, Integer, String, UniqueConstraint, select
@@ -13,6 +14,30 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, utc_now
 from .exceptions import ValidationError
+
+
+@contextmanager
+def ensure_session(session: Any | None, session_factory: Callable[[], Any]):
+    """
+    Context manager that either uses provided session or creates a new one.
+
+    If session is provided, yields it without committing (caller controls transaction).
+    If session is None, creates new session (factory auto-commits on successful exit).
+
+    Args:
+        session: Optional existing session to use.
+        session_factory: Factory to create new session if needed.
+
+    Yields:
+        Database session to use.
+    """
+    if session is not None:
+        # Use provided session, don't commit (caller controls transaction)
+        yield session
+    else:
+        # Create new session (factory commits on successful exit)
+        with session_factory() as sess:
+            yield sess
 
 
 def _validate_embedding(embedding: list[float] | None) -> None:
@@ -135,12 +160,44 @@ class EmbeddingStore:
             embedding=embedding,
         )
 
+    def _get_existing_embedding(
+        self, sess: Any, entity_type: str, entity_id: str, model_name: str
+    ) -> Embedding | None:
+        """Get existing embedding record if present."""
+        stmt = select(Embedding).where(
+            Embedding.entity_type == entity_type,
+            Embedding.entity_id == entity_id,
+            Embedding.model_name == model_name,
+        )
+        return cast(Embedding | None, sess.scalar(stmt))
+
+    def _insert_with_race_protection(
+        self, sess: Any, emb: Embedding, entity_type: str, entity_id: str, model_name: str
+    ) -> Embedding:
+        """Insert embedding using nested transaction to handle race conditions."""
+        try:
+            # Use nested transaction to avoid rolling back caller's transaction
+            with sess.begin_nested():
+                sess.add(emb)
+                sess.flush()
+        except IntegrityError:
+            # Only the nested transaction was rolled back
+            # Remove orphaned in-memory object
+            sess.expunge(emb)
+            existing = self._get_existing_embedding(sess, entity_type, entity_id, model_name)
+            if existing:
+                return existing
+            raise
+        sess.refresh(emb)
+        return emb
+
     def store(
         self,
         entity_type: str,
         entity_id: str,
         embedding: list[float],
         model_name: str,
+        session: Any | None = None,
     ) -> Embedding:
         """
         Store embedding, replacing existing if present (upsert).
@@ -150,6 +207,8 @@ class EmbeddingStore:
             entity_id: Entity ID (string representation).
             embedding: Vector embedding.
             model_name: Embedding model name.
+            session: Optional session to use. If None, creates new session and commits.
+                     If provided, uses existing session without committing (caller controls).
 
         Returns:
             The stored Embedding record.
@@ -159,33 +218,14 @@ class EmbeddingStore:
         """
         _validate_embedding(embedding)
 
-        with self._session_factory() as session:
-            # Check for existing
-            stmt = select(Embedding).where(
-                Embedding.entity_type == entity_type,
-                Embedding.entity_id == entity_id,
-                Embedding.model_name == model_name,
-            )
-            existing: Embedding | None = session.scalar(stmt)
+        with ensure_session(session, self._session_factory) as sess:
+            existing = self._get_existing_embedding(sess, entity_type, entity_id, model_name)
             if existing:
                 self._update_embedding(existing, embedding)
-                session.commit()
                 return existing
 
             emb = self._create_embedding(entity_type, entity_id, model_name, embedding)
-            session.add(emb)
-            try:
-                session.commit()
-            except IntegrityError:
-                session.rollback()
-                existing = session.scalar(stmt)
-                if existing:
-                    self._update_embedding(existing, embedding)
-                    session.commit()
-                    return existing
-                raise
-            session.refresh(emb)
-            return emb
+            return self._insert_with_race_protection(sess, emb, entity_type, entity_id, model_name)
 
     def search(
         self,

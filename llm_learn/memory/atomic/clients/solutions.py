@@ -68,10 +68,24 @@ class SolutionsClient(FactClient[SolutionDetails]):
                 raise ValidationError("tool_calls elements must be dicts")
 
     def _create_fact(
-        self, agent_name: str, problem: str, category: str | None, source: str
+        self,
+        agent_name: str,
+        problem: str,
+        answer_text: str | None,
+        category: str | None,
+        source: str,
     ) -> Fact:
-        """Create Fact record for solution."""
-        content_text = f"{agent_name} solved: {problem[:100]}{'...' if len(problem) > 100 else ''}"
+        """Create Fact record for solution.
+
+        Uses answer_text if provided (for semantic search over solutions),
+        otherwise falls back to problem summary.
+        """
+        # Use actual solution text if provided, otherwise summarize problem
+        content_text = (
+            answer_text
+            if answer_text
+            else f"{agent_name} solved: {problem[:100]}{'...' if len(problem) > 100 else ''}"
+        )
         return Fact(
             context_key=self.context_key,
             type=self.fact_type,
@@ -127,7 +141,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
         )
 
         with self._session_factory() as session:
-            fact = self._create_fact(agent_name, problem, category, source)
+            fact = self._create_fact(agent_name, problem, answer_text, category, source)
             session.add(fact)
             session.flush()
 
@@ -143,6 +157,11 @@ class SolutionsClient(FactClient[SolutionDetails]):
                 tool_calls,
             )
             session.add(details)
+            session.flush()
+
+            # Auto-embed if embedder configured
+            self._auto_embed_fact(fact, session)
+
             return fact.id
 
     def list_by_agent(
