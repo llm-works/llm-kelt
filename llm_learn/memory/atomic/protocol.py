@@ -79,21 +79,27 @@ class Protocol:
     def assertions(self) -> AssertionsClient:
         """Simple facts about the user."""
         if self._assertions is None:
-            self._assertions = AssertionsClient(self._session_factory, self._context_key)
+            self._assertions = AssertionsClient(
+                self._session_factory, self._context_key, self._embedding_adapter
+            )
         return self._assertions
 
     @property
     def solutions(self) -> SolutionsClient:
         """Agent problem/answer records."""
         if self._solutions is None:
-            self._solutions = SolutionsClient(self._session_factory, self._context_key)
+            self._solutions = SolutionsClient(
+                self._session_factory, self._context_key, self._embedding_adapter
+            )
         return self._solutions
 
     @property
     def predictions(self) -> PredictionsClient:
         """Hypothesis tracking for calibration."""
         if self._predictions is None:
-            self._predictions = PredictionsClient(self._session_factory, self._context_key)
+            self._predictions = PredictionsClient(
+                self._session_factory, self._context_key, self._embedding_adapter
+            )
         return self._predictions
 
     @property
@@ -107,7 +113,9 @@ class Protocol:
     def directives(self) -> DirectivesClient:
         """Standing user instructions."""
         if self._directives is None:
-            self._directives = DirectivesClient(self._session_factory, self._context_key)
+            self._directives = DirectivesClient(
+                self._session_factory, self._context_key, self._embedding_adapter
+            )
         return self._directives
 
     @property

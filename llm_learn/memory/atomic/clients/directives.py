@@ -84,6 +84,11 @@ class DirectivesClient(FactClient[DirectiveDetails]):
                 expires_at=expires_at,
             )
             session.add(details)
+            session.flush()
+
+            # Auto-embed if embedder configured
+            self._auto_embed_fact(fact)
+
             return fact.id
 
     def set_status(self, fact_id: int, status: StatusType) -> bool:

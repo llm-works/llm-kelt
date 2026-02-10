@@ -86,6 +86,10 @@ class AssertionsClient(FactClient[None]):
             )
             session.add(fact)
             session.flush()
+
+            # Auto-embed if embedder configured
+            self._auto_embed_fact(fact)
+
             return fact.id
 
     def get(self, fact_id: int) -> Fact | None:

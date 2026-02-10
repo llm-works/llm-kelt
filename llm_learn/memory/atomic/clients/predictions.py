@@ -71,6 +71,22 @@ class PredictionsClient(FactClient[PredictionDetails]):
             return "date"
         return "event" if event else ("metric" if metric else None)
 
+    def _create_prediction_fact(
+        self, hypothesis: str, confidence: float, category: str | None
+    ) -> Fact:
+        """Create Fact record for prediction."""
+        content_text = hypothesis.strip()
+        return Fact(
+            context_key=self.context_key,
+            type=self.fact_type,
+            content=content_text,
+            content_hash=self._compute_content_hash(content_text),
+            category=category.strip() if category else None,
+            source="user",
+            confidence=confidence,
+            active=True,
+        )
+
     def _create_prediction_details(
         self,
         fact_id: int,
@@ -113,19 +129,10 @@ class PredictionsClient(FactClient[PredictionDetails]):
         res_type = self._determine_resolution_type(parsed_date, resolution_event, resolution_metric)
 
         with self._session_factory() as session:
-            content_text = hypothesis.strip()
-            fact = Fact(
-                context_key=self.context_key,
-                type=self.fact_type,
-                content=content_text,
-                content_hash=self._compute_content_hash(content_text),
-                category=category.strip() if category else None,
-                source="user",
-                confidence=confidence,
-                active=True,
-            )
+            fact = self._create_prediction_fact(hypothesis, confidence, category)
             session.add(fact)
             session.flush()
+
             details = self._create_prediction_details(
                 fact.id,
                 res_type,
@@ -137,6 +144,11 @@ class PredictionsClient(FactClient[PredictionDetails]):
                 tags,
             )
             session.add(details)
+            session.flush()
+
+            # Auto-embed if embedder configured
+            self._auto_embed_fact(fact)
+
             return fact.id
 
     def resolve(

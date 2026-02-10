@@ -157,6 +157,12 @@ class SolutionsClient(FactClient[SolutionDetails]):
                 tool_calls,
             )
             session.add(details)
+            session.flush()
+
+            # Auto-embed if embedder configured and answer_text provided
+            if answer_text:
+                self._auto_embed_fact(fact)
+
             return fact.id
 
     def list_by_agent(

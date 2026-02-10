@@ -33,7 +33,12 @@ class FactClient(Generic[T]):
     details_model: type[T]  # e.g., SolutionDetails
     details_relationship: str  # e.g., "solution_details"
 
-    def __init__(self, session_factory: Callable[[], Any], context_key: str | None) -> None:
+    def __init__(
+        self,
+        session_factory: Callable[[], Any],
+        context_key: str | None,
+        embedding_adapter: Any | None = None,
+    ) -> None:
         """
         Initialize client scoped to a specific context.
 
@@ -45,9 +50,11 @@ class FactClient(Generic[T]):
                   - "acme:prod:reviewer" - exact match
                   - "acme:prod:%" - all profiles in workspace
                   - "acme:%" - all workspaces in domain
+            embedding_adapter: Optional EmbeddingAdapter for auto-embedding facts.
         """
         self._session_factory = session_factory
         self.context_key = context_key
+        self._embedding_adapter = embedding_adapter
 
     @staticmethod
     def _compute_content_hash(content: str) -> str:
@@ -249,3 +256,16 @@ class FactClient(Generic[T]):
             if context_filter is not None:
                 stmt = stmt.where(context_filter)
             return (session.scalar(stmt) or 0) > 0
+
+    def _auto_embed_fact(self, fact: Fact) -> None:
+        """
+        Automatically embed a fact if embedding adapter is configured.
+
+        This should be called after the fact is flushed (has an ID) but before commit.
+        No-op if embedding adapter is not configured.
+
+        Args:
+            fact: The fact to embed (must have fact.id set).
+        """
+        if self._embedding_adapter is not None:
+            self._embedding_adapter.embed_fact(fact)
