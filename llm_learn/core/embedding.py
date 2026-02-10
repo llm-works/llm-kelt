@@ -203,9 +203,11 @@ class EmbeddingStore:
             emb = self._create_embedding(entity_type, entity_id, model_name, embedding)
             sess.add(emb)
             try:
-                sess.flush()
+                # Use nested transaction to avoid rolling back caller's transaction
+                with sess.begin_nested():
+                    sess.flush()
             except IntegrityError:
-                sess.rollback()
+                # Only the nested transaction was rolled back
                 existing = sess.scalar(stmt)
                 if existing:
                     self._update_embedding(existing, embedding)

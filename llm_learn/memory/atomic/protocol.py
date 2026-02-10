@@ -78,7 +78,16 @@ class Protocol:
         self._directives: DirectivesClient | None = None
         self._interactions: InteractionsClient | None = None
         self._preferences: PreferencesClient | None = None
+
+        # Eagerly initialize embedding adapter so clients can use it
         self._embedding_adapter: EmbeddingAdapter | None = None
+        if self._embedding_store is not None:
+            self._embedding_adapter = EmbeddingAdapter(
+                self._session_factory,
+                self._context_key,
+                self._embedding_store,
+                self._embedder,
+            )
 
     @property
     def assertions(self) -> AssertionsClient:

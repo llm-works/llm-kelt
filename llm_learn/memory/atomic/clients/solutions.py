@@ -159,9 +159,8 @@ class SolutionsClient(FactClient[SolutionDetails]):
             session.add(details)
             session.flush()
 
-            # Auto-embed if embedder configured and answer_text provided
-            if answer_text:
-                self._auto_embed_fact(fact, session)
+            # Auto-embed if embedder configured
+            self._auto_embed_fact(fact, session)
 
             return fact.id
 
