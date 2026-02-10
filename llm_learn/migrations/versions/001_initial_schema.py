@@ -56,7 +56,7 @@ def upgrade() -> None:  # cq: exempt
         "idx_content_context_prefix",
         "content",
         ["context_key"],
-        postgresql_ops={"context_key": "text_pattern_ops"},
+        postgresql_ops={"context_key": "varchar_pattern_ops"},
     )
     # Partial unique index for NULL context_key to ensure deduplication works
     # When context_key IS NULL, content_hash must be unique (global scope deduplication)
@@ -134,7 +134,7 @@ def upgrade() -> None:  # cq: exempt
         "idx_atomic_facts_context_prefix",
         "atomic_facts",
         ["context_key"],
-        postgresql_ops={"context_key": "text_pattern_ops"},
+        postgresql_ops={"context_key": "varchar_pattern_ops"},
     )
     # Partial unique index for NULL context_key to ensure deduplication works
     # When context_key IS NULL, (type, content_hash) must be unique per fact type
