@@ -21,12 +21,12 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from llm_learn.core.base import Base, utc_now
-from llm_learn.core.profile import Profile
 
 # =============================================================================
 # Base Fact Table
@@ -53,9 +53,10 @@ class Fact(Base):
     __tablename__ = "atomic_facts"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    profile_id: Mapped[str] = mapped_column(String(32), ForeignKey("profiles.id"), nullable=False)
+    context_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     type: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     category: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source: Mapped[str] = mapped_column(String(50), default="user", nullable=False)
     confidence: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
@@ -64,9 +65,6 @@ class Fact(Base):
         DateTime(timezone=True), default=utc_now, nullable=False
     )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-    # Relationships
-    profile: Mapped["Profile"] = relationship()
 
     # Detail table relationships (one-to-one)
     solution_details: Mapped["SolutionDetails | None"] = relationship(
@@ -89,11 +87,26 @@ class Fact(Base):
     )
 
     __table_args__ = (
-        Index("idx_atomic_facts_profile", "profile_id"),
-        Index("idx_atomic_facts_profile_type", "profile_id", "type"),
+        Index("idx_atomic_facts_context", "context_key"),
+        Index("idx_atomic_facts_context_type", "context_key", "type"),
         Index("idx_atomic_facts_category", "category"),
-        Index("idx_atomic_facts_profile_active", "profile_id", "active"),
+        Index("idx_atomic_facts_context_active", "context_key", "active"),
         Index("idx_atomic_facts_created", "created_at"),
+        # Prefix index for efficient LIKE queries (pattern matching)
+        Index(
+            "idx_atomic_facts_context_prefix",
+            "context_key",
+            postgresql_ops={"context_key": "varchar_pattern_ops"},
+        ),
+        # Partial unique index for NULL context_key to ensure deduplication works
+        # When context_key IS NULL, (type, content_hash) must be unique per fact type
+        Index(
+            "uq_atomic_facts_null_context_hash",
+            "type",
+            "content_hash",
+            unique=True,
+            postgresql_where=text("context_key IS NULL"),
+        ),
     )
 
     def __repr__(self) -> str:

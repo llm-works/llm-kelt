@@ -31,36 +31,13 @@ def psql_cmd(learn: LearnClient) -> str:
     return f"psql -h {url.host} -p {url.port} -U {url.username} -d {url.database}"
 
 
-def ensure_demo_profile(learn: LearnClient, profile_slug: str = "example") -> str:
-    """Ensure demo workspace and profile exist, return profile_id.
+def get_demo_context_key(name: str = "example") -> str:
+    """Generate a demo context key.
 
     Args:
-        learn: LearnClient instance (used for database access)
-        profile_slug: Slug for the profile (default: "example")
+        name: Name for the demo context (default: "example")
 
     Returns:
-        The profile_id (32-char hex hash) of the created/existing profile
+        A context key string in format "demo:name"
     """
-    from llm_learn.core.models import Profile, Workspace
-
-    with learn.database.session() as session:
-        workspace = session.query(Workspace).filter_by(slug="demo").first()
-        if not workspace:
-            workspace = Workspace(slug="demo", name="Demo Workspace")
-            session.add(workspace)
-            session.flush()
-
-        profile = (
-            session.query(Profile).filter_by(workspace_id=workspace.id, slug=profile_slug).first()
-        )
-        if not profile:
-            profile = Profile(
-                workspace_id=workspace.id,
-                slug=profile_slug,
-                name=f"{profile_slug.replace('-', ' ').title()} Profile",
-            )
-            session.add(profile)
-            session.flush()
-
-        session.commit()
-        return profile.id
+    return f"demo:{name}"

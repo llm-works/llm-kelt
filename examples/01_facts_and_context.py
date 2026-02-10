@@ -33,7 +33,7 @@ from _helpers import (
     OK,
     RESET,
     WARN,
-    ensure_demo_profile,
+    get_demo_context_key,
     psql_cmd,
 )
 from llm_infer.client import Factory as LLMClientFactory
@@ -72,7 +72,7 @@ def setup_facts(learn: LearnClient):
 
     print(
         f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(learn)} -c "SELECT id, category, content '
-        f'FROM memv1_facts WHERE profile_id={learn.profile_id} AND active=true;"'
+        f"FROM memv1_facts WHERE context_key='{learn.context_key}' AND active=true;\""
     )
 
 
@@ -191,10 +191,10 @@ def demo_fact_management(learn: LearnClient):
 
     # Get statistics
     stats = learn.get_stats()
-    v1_stats = stats["v1"]
+    atomic_stats = stats["atomic"]
     print(
-        f"  {INFO}ℹ{RESET} Profile stats: assertions={v1_stats['assertions']}, "
-        f"feedback={v1_stats['feedback']}, content={stats['content']}"
+        f"  {INFO}ℹ{RESET} Context stats: assertions={atomic_stats['assertions']}, "
+        f"feedback={atomic_stats['feedback']}, content={stats['content']}"
     )
 
     print(
@@ -213,15 +213,17 @@ async def main():
     from appinfra.config import Config
     from appinfra.log import LogConfig, LoggerFactory
 
+    from llm_learn import IsolationContext
+
     config = Config("etc/llm-learn.yaml")
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
     factory = LearnClientFactory(lg)
 
-    # Create initial client to get/create profile
-    learn = factory.create_from_config(profile_id="1", config=config)
-    profile_id = ensure_demo_profile(learn)
-    learn = factory.create_from_config(profile_id=profile_id, config=config)
-    print(f"{MUTED}Using profile_id={RESET}{INFO}{profile_id}{RESET}")
+    # Create context for this example
+    context_key = get_demo_context_key("example")
+    context = IsolationContext(context_key=context_key)
+    learn = factory.create_from_config(context=context, config=config)
+    print(f"{MUTED}Using context_key={RESET}{INFO}{context_key}{RESET}")
 
     # Run demos
     setup_facts(learn)

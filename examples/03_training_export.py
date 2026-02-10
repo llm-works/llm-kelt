@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from _helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, psql_cmd
 
-from llm_learn import IdentityResolver, LearnClient
+from llm_learn import IsolationContext, LearnClient, LearnClientFactory
 from llm_learn.training import (
     ExportResult,
     export_feedback_classifier,
@@ -111,21 +111,21 @@ def record_sample_data(learn: LearnClient):
 
     # Clear existing data for clean demo
     from llm_learn.core.models import Content
-    from llm_learn.memory.v1.models import Fact, FeedbackDetails, PreferenceDetails
+    from llm_learn.memory.atomic.models import Fact, FeedbackDetails, PreferenceDetails
 
     with learn.database.session() as session:
         session.query(FeedbackDetails).filter(
             FeedbackDetails.fact_id.in_(
-                session.query(Fact.id).filter_by(profile_id=learn.profile_id, type="feedback")
+                session.query(Fact.id).filter_by(context_key=learn.context_key, type="feedback")
             )
         ).delete(synchronize_session=False)
         session.query(PreferenceDetails).filter(
             PreferenceDetails.fact_id.in_(
-                session.query(Fact.id).filter_by(profile_id=learn.profile_id, type="preference")
+                session.query(Fact.id).filter_by(context_key=learn.context_key, type="preference")
             )
         ).delete(synchronize_session=False)
-        session.query(Fact).filter_by(profile_id=learn.profile_id).delete()
-        session.query(Content).filter_by(profile_id=learn.profile_id).delete()
+        session.query(Fact).filter_by(context_key=learn.context_key).delete()
+        session.query(Content).filter_by(context_key=learn.context_key).delete()
         session.commit()
     print(f"  {MUTED}Cleared existing data for clean demo{RESET}")
 
@@ -163,12 +163,12 @@ def record_sample_data(learn: LearnClient):
     print(
         f'\n  {CMD}▸ Verify feedback:{RESET} {psql_cmd(learn)} -c "SELECT f.id, d.signal, d.strength '
         f"FROM memv1_facts f JOIN memv1_feedback_details d ON f.id = d.fact_id "
-        f'WHERE f.profile_id={learn.profile_id} LIMIT 5;"'
+        f'WHERE f.context_key={learn.context_key} LIMIT 5;"'
     )
     print(
         f'  {CMD}▸ Verify preferences:{RESET} {psql_cmd(learn)} -c "SELECT f.id, f.category, d.margin '
         f"FROM memv1_facts f JOIN memv1_preference_details d ON f.id = d.fact_id "
-        f'WHERE f.profile_id={learn.profile_id} LIMIT 5;"'
+        f'WHERE f.context_key={learn.context_key} LIMIT 5;"'
     )
 
 
@@ -180,7 +180,7 @@ def demo_dpo_export(output_dir: Path, learn: LearnClient):
 
     result = export_preferences_dpo(
         session_factory=learn.database.session,
-        profile_id=learn.profile_id,
+        context_key=learn.context_key,
         output_path=output_dir / "preferences_dpo.jsonl",
         category="ml_explanations",
     )
@@ -195,7 +195,7 @@ def demo_sft_export(output_dir: Path, learn: LearnClient):
 
     result = export_feedback_sft(
         session_factory=learn.database.session,
-        profile_id=learn.profile_id,
+        context_key=learn.context_key,
         output_path=output_dir / "feedback_sft.jsonl",
         signal="positive",
         min_strength=0.5,
@@ -206,7 +206,7 @@ def demo_sft_export(output_dir: Path, learn: LearnClient):
     print(f"\n  {INFO}With context (includes input field):{RESET}")
     result_ctx = export_feedback_sft(
         session_factory=learn.database.session,
-        profile_id=learn.profile_id,
+        context_key=learn.context_key,
         output_path=output_dir / "feedback_sft_context.jsonl",
         signal="positive",
         include_context=True,
@@ -222,7 +222,7 @@ def demo_classifier_export(output_dir: Path, learn: LearnClient):
 
     result = export_feedback_classifier(
         session_factory=learn.database.session,
-        profile_id=learn.profile_id,
+        context_key=learn.context_key,
         output_path=output_dir / "feedback_classifier.jsonl",
         min_strength=0.5,
     )
@@ -237,7 +237,7 @@ def demo_filtered_export(output_dir: Path, learn: LearnClient):
     since = datetime.now(UTC) - timedelta(hours=1)
     result = export_preferences_dpo(
         session_factory=learn.database.session,
-        profile_id=learn.profile_id,
+        context_key=learn.context_key,
         output_path=output_dir / "recent_preferences.jsonl",
         since=since,
     )
@@ -268,8 +268,6 @@ def main():
     from appinfra.config import Config
     from appinfra.log import LogConfig, LoggerFactory
 
-    from llm_learn.core.database import Database
-
     print(f"\n{H1}{'━' * 50}{RESET}")
     print(f"{H1}  Example 03: Training Data Export{RESET}")
     print(f"{H1}{'━' * 50}{RESET}")
@@ -277,13 +275,12 @@ def main():
     # Setup config, logger, and database
     config = Config("etc/llm-learn.yaml")
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
-    database = Database.from_config(config.get("database"))
 
-    # Create LearnClient using identity-aware API
-    # This creates the full domain → workspace → profile hierarchy
-    identity = IdentityResolver.resolve({"workspace": "demo", "name": "example"})
-    learn = LearnClient.from_identity(lg, identity, database)
-    print(f"{MUTED}Using profile_id={RESET}{INFO}{identity.profile_id}{RESET}")
+    # Create LearnClient using factory
+    context = IsolationContext(context_key="demo:example")
+    factory = LearnClientFactory(lg)
+    learn = factory.create_from_config(context=context, config=config)
+    print(f"{MUTED}Using context_key={RESET}{INFO}{learn.context_key}{RESET}")
 
     record_sample_data(learn)
 

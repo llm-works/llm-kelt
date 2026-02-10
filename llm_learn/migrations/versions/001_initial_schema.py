@@ -24,78 +24,13 @@ def upgrade() -> None:  # cq: exempt
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
     # =========================================================================
-    # Core tables (domain -> workspace -> profile hierarchy)
-    # =========================================================================
-
-    op.create_table(
-        "domains",
-        sa.Column("id", sa.String(32), nullable=False),
-        sa.Column("slug", sa.String(50), nullable=False),
-        sa.Column("name", sa.String(100), nullable=False),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("config", postgresql.JSONB(), nullable=True),
-        sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
-        ),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("slug"),
-    )
-    op.create_index("idx_domains_slug", "domains", ["slug"])
-
-    op.create_table(
-        "workspaces",
-        sa.Column("id", sa.String(32), nullable=False),
-        sa.Column("domain_id", sa.String(32), nullable=True),
-        sa.Column("slug", sa.String(50), nullable=False),
-        sa.Column("name", sa.String(100), nullable=False),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("config", postgresql.JSONB(), nullable=True),
-        sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
-        ),
-        sa.ForeignKeyConstraint(["domain_id"], ["domains.id"]),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("domain_id", "slug", name="uq_workspace_domain_slug"),
-    )
-    op.create_index("idx_workspaces_domain", "workspaces", ["domain_id"])
-    op.create_index("idx_workspaces_slug", "workspaces", ["slug"])
-    # Partial unique index for domain-less workspaces (prevents duplicate slugs when domain is NULL)
-    op.create_index(
-        "uq_workspace_slug_null_domain",
-        "workspaces",
-        ["slug"],
-        unique=True,
-        postgresql_where=sa.text("domain_id IS NULL"),
-    )
-
-    op.create_table(
-        "profiles",
-        sa.Column("id", sa.String(32), nullable=False),
-        sa.Column("workspace_id", sa.String(32), nullable=False),
-        sa.Column("slug", sa.String(50), nullable=False),
-        sa.Column("name", sa.String(100), nullable=False),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("config", postgresql.JSONB(), nullable=True),
-        sa.Column("active", sa.Boolean(), server_default="true", nullable=False),
-        sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
-        ),
-        sa.ForeignKeyConstraint(["workspace_id"], ["workspaces.id"]),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("workspace_id", "slug", name="uq_profile_workspace_slug"),
-    )
-    op.create_index("idx_profiles_workspace", "profiles", ["workspace_id"])
-    op.create_index("idx_profiles_slug", "profiles", ["slug"])
-    op.create_index("idx_profiles_active", "profiles", ["active"])
-
-    # =========================================================================
     # Content table (raw ingested content)
     # =========================================================================
 
     op.create_table(
         "content",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("profile_id", sa.String(32), nullable=False),
+        sa.Column("context_key", sa.String(255), nullable=True),
         sa.Column("external_id", sa.String(255), nullable=True),
         sa.Column("source", sa.String(100), nullable=False),
         sa.Column("url", sa.Text(), nullable=True),
@@ -109,14 +44,29 @@ def upgrade() -> None:  # cq: exempt
         sa.Column(
             "fetched_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
         ),
-        sa.ForeignKeyConstraint(["profile_id"], ["profiles.id"]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("profile_id", "content_hash", name="uq_content_profile_hash"),
+        sa.UniqueConstraint("context_key", "content_hash", name="uq_content_context_hash"),
     )
-    op.create_index("idx_content_profile", "content", ["profile_id"])
+    op.create_index("idx_content_context", "content", ["context_key"])
     op.create_index("idx_content_source", "content", ["source"])
     op.create_index("idx_content_created", "content", ["created_at"])
     op.create_index("idx_content_external_id", "content", ["external_id"])
+    # Prefix index for efficient LIKE queries (pattern matching)
+    op.create_index(
+        "idx_content_context_prefix",
+        "content",
+        ["context_key"],
+        postgresql_ops={"context_key": "varchar_pattern_ops"},
+    )
+    # Partial unique index for NULL context_key to ensure deduplication works
+    # When context_key IS NULL, content_hash must be unique (global scope deduplication)
+    op.create_index(
+        "uq_content_null_context_hash",
+        "content",
+        ["content_hash"],
+        unique=True,
+        postgresql_where=sa.text("context_key IS NULL"),
+    )
 
     # =========================================================================
     # Embeddings table (entity-type agnostic vector storage)
@@ -142,10 +92,14 @@ def upgrade() -> None:  # cq: exempt
     op.create_index("idx_embedding_model", "embeddings", ["model_name"])
 
     # HNSW index for vector similarity search
+    # Note: HNSW requires fixed dimensions at index creation time.
+    # This creates an index for 1536-dimension vectors (OpenAI text-embedding-3-small/large).
+    # For other dimensions, create a separate index: CREATE INDEX USING hnsw ((embedding::vector(N)))
     op.execute(
         """
-        CREATE INDEX idx_embeddings_vector ON embeddings
-        USING hnsw (embedding vector_cosine_ops)
+        CREATE INDEX idx_embeddings_vector_1536 ON embeddings
+        USING hnsw ((embedding::vector(1536)) vector_cosine_ops)
+        WHERE dimensions = 1536
         """
     )
 
@@ -156,9 +110,10 @@ def upgrade() -> None:  # cq: exempt
     op.create_table(
         "atomic_facts",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("profile_id", sa.String(32), nullable=False),
+        sa.Column("context_key", sa.String(255), nullable=True),
         sa.Column("type", sa.String(20), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
+        sa.Column("content_hash", sa.String(64), nullable=False),
         sa.Column("category", sa.String(50), nullable=True),
         sa.Column("source", sa.String(50), server_default="user", nullable=False),
         sa.Column("confidence", sa.Float(), server_default="1.0", nullable=False),
@@ -167,14 +122,29 @@ def upgrade() -> None:  # cq: exempt
             "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
         ),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(["profile_id"], ["profiles.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("idx_atomic_facts_profile", "atomic_facts", ["profile_id"])
-    op.create_index("idx_atomic_facts_profile_type", "atomic_facts", ["profile_id", "type"])
+    op.create_index("idx_atomic_facts_context", "atomic_facts", ["context_key"])
+    op.create_index("idx_atomic_facts_context_type", "atomic_facts", ["context_key", "type"])
     op.create_index("idx_atomic_facts_category", "atomic_facts", ["category"])
-    op.create_index("idx_atomic_facts_profile_active", "atomic_facts", ["profile_id", "active"])
+    op.create_index("idx_atomic_facts_context_active", "atomic_facts", ["context_key", "active"])
     op.create_index("idx_atomic_facts_created", "atomic_facts", ["created_at"])
+    # Prefix index for efficient LIKE queries (pattern matching)
+    op.create_index(
+        "idx_atomic_facts_context_prefix",
+        "atomic_facts",
+        ["context_key"],
+        postgresql_ops={"context_key": "varchar_pattern_ops"},
+    )
+    # Partial unique index for NULL context_key to ensure deduplication works
+    # When context_key IS NULL, (type, content_hash) must be unique per fact type
+    op.create_index(
+        "uq_atomic_facts_null_context_hash",
+        "atomic_facts",
+        ["type", "content_hash"],
+        unique=True,
+        postgresql_where=sa.text("context_key IS NULL"),
+    )
 
     # =========================================================================
     # Atomic fact detail tables
@@ -296,23 +266,11 @@ def upgrade() -> None:  # cq: exempt
 
 
 def downgrade() -> None:
-    # Drop detail tables first (FK dependencies)
-    op.drop_table("atomic_preference_details")
-    op.drop_table("atomic_interaction_details")
-    op.drop_table("atomic_directive_details")
-    op.drop_table("atomic_feedback_details")
-    op.drop_table("atomic_prediction_details")
-    op.drop_table("atomic_solution_details")
-    op.drop_table("atomic_facts")
+    """Downgrade not supported - this is the initial schema.
 
-    # Drop vector index and embeddings
-    op.execute("DROP INDEX IF EXISTS idx_embeddings_vector")
-    op.drop_table("embeddings")
-
-    # Drop content
-    op.drop_table("content")
-
-    # Drop hierarchy tables
-    op.drop_table("profiles")
-    op.drop_table("workspaces")
-    op.drop_table("domains")
+    To reset the database, drop all tables and re-run upgrade.
+    """
+    raise NotImplementedError(
+        "Downgrade from initial schema is not supported. "
+        "To reset the database, drop all tables manually and re-run migrations."
+    )

@@ -22,7 +22,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
     resolved against actual outcomes for calibration tracking.
 
     Usage:
-        predictions = PredictionsClient(session_factory, profile_id="a3f8b2c1...")
+        predictions = PredictionsClient(session_factory, context_key="my-agent")
 
         # Record a prediction
         fact_id = predictions.record(
@@ -71,6 +71,30 @@ class PredictionsClient(FactClient[PredictionDetails]):
             return "date"
         return "event" if event else ("metric" if metric else None)
 
+    def _create_prediction_details(
+        self,
+        fact_id: int,
+        res_type: str | None,
+        parsed_date: date | None,
+        resolution_event: str | None,
+        resolution_metric: dict | None,
+        verification_source: str | None,
+        verification_url: str | None,
+        tags: list[str] | None,
+    ) -> PredictionDetails:
+        """Create PredictionDetails record."""
+        return PredictionDetails(
+            fact_id=fact_id,
+            resolution_type=res_type,
+            resolution_date=parsed_date,
+            resolution_event=resolution_event,
+            resolution_metric=resolution_metric,
+            verification_source=verification_source,
+            verification_url=verification_url,
+            status="pending",
+            tags=tags,
+        )
+
     def record(
         self,
         hypothesis: str,
@@ -89,10 +113,12 @@ class PredictionsClient(FactClient[PredictionDetails]):
         res_type = self._determine_resolution_type(parsed_date, resolution_event, resolution_metric)
 
         with self._session_factory() as session:
+            content_text = hypothesis.strip()
             fact = Fact(
-                profile_id=self.profile_id,
+                context_key=self.context_key,
                 type=self.fact_type,
-                content=hypothesis.strip(),
+                content=content_text,
+                content_hash=self._compute_content_hash(content_text),
                 category=category.strip() if category else None,
                 source="user",
                 confidence=confidence,
@@ -100,16 +126,15 @@ class PredictionsClient(FactClient[PredictionDetails]):
             )
             session.add(fact)
             session.flush()
-            details = PredictionDetails(
-                fact_id=fact.id,
-                resolution_type=res_type,
-                resolution_date=parsed_date,
-                resolution_event=resolution_event,
-                resolution_metric=resolution_metric,
-                verification_source=verification_source,
-                verification_url=verification_url,
-                status="pending",
-                tags=tags,
+            details = self._create_prediction_details(
+                fact.id,
+                res_type,
+                parsed_date,
+                resolution_event,
+                resolution_metric,
+                verification_source,
+                verification_url,
+                tags,
             )
             session.add(details)
             return fact.id
@@ -162,7 +187,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
                 select(Fact)
                 .join(PredictionDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     Fact.active == True,  # noqa: E712
                     PredictionDetails.status == "pending",
@@ -194,7 +219,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
                 select(Fact)
                 .join(PredictionDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     Fact.active == True,  # noqa: E712
                     PredictionDetails.status == "resolved",
@@ -250,7 +275,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
                 select(Fact, PredictionDetails)
                 .join(PredictionDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     Fact.active == True,  # noqa: E712
                     PredictionDetails.status == "resolved",

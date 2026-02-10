@@ -19,7 +19,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
     context, which can be used for Direct Preference Optimization training.
 
     Usage:
-        preferences = PreferencesClient(session_factory, profile_id="a3f8b2c1...")
+        preferences = PreferencesClient(session_factory, context_key="my-agent")
 
         # Record a preference pair
         fact_id = preferences.record(
@@ -51,6 +51,26 @@ class PreferencesClient(FactClient[PreferenceDetails]):
         if margin is not None and (margin < 0.0 or margin > 1.0):
             raise ValidationError(f"margin must be between 0.0 and 1.0, got {margin}")
 
+    def _create_preference_fact(
+        self, context: str, chosen: str, rejected: str, margin: float | None, category: str | None
+    ) -> Fact:
+        """Create a Fact for preference pair."""
+        preview = context[:100] + "..." if len(context) > 100 else context
+        content_text = f"Preference: {preview}"
+        # Use full semantic content for hash to avoid collisions
+        margin_str = f"|margin={margin}" if margin is not None else ""
+        full_content = f"{context}|chosen={chosen}|rejected={rejected}{margin_str}"
+        return Fact(
+            context_key=self.context_key,
+            type=self.fact_type,
+            content=content_text,
+            content_hash=self._compute_content_hash(full_content),
+            category=category,
+            source="user",
+            confidence=1.0,
+            active=True,
+        )
+
     def record(
         self,
         context: str,
@@ -64,16 +84,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
         self._validate_preference_inputs(context, chosen, rejected, margin)
 
         with self._session_factory() as session:
-            preview = context[:100] + "..." if len(context) > 100 else context
-            fact = Fact(
-                profile_id=self.profile_id,
-                type=self.fact_type,
-                content=f"Preference: {preview}",
-                category=category,
-                source="user",
-                confidence=1.0,
-                active=True,
-            )
+            fact = self._create_preference_fact(context, chosen, rejected, margin, category)
             session.add(fact)
             session.flush()
 
@@ -100,11 +111,14 @@ class PreferencesClient(FactClient[PreferenceDetails]):
                 select(Fact)
                 .join(PreferenceDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
                     Fact.type == self.fact_type,
                     Fact.category == category,
                 )
             )
+
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
 
             if active_only:
                 stmt = stmt.where(Fact.active == True)  # noqa: E712
@@ -121,16 +135,16 @@ class PreferencesClient(FactClient[PreferenceDetails]):
     def get_categories(self) -> list[str]:
         """Get list of unique categories."""
         with self._session_factory() as session:
-            stmt = (
-                select(Fact.category)
-                .where(
-                    Fact.profile_id == self.profile_id,
-                    Fact.type == self.fact_type,
-                    Fact.category.isnot(None),
-                )
-                .distinct()
-                .order_by(Fact.category)
+            stmt = select(Fact.category).where(
+                Fact.type == self.fact_type,
+                Fact.category.isnot(None),
             )
+
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
+            stmt = stmt.distinct().order_by(Fact.category)
             return [c for c in session.scalars(stmt).all() if c is not None]
 
     def search(
@@ -145,11 +159,14 @@ class PreferencesClient(FactClient[PreferenceDetails]):
                 select(Fact)
                 .join(PreferenceDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
                     Fact.type == self.fact_type,
                     PreferenceDetails.context.ilike(f"%{query}%"),
                 )
             )
+
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
 
             if active_only:
                 stmt = stmt.where(Fact.active == True)  # noqa: E712

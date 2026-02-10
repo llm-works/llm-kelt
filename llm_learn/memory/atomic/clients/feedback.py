@@ -1,6 +1,7 @@
 """Feedback client for explicit user signals on content."""
 
 import math
+import uuid
 from typing import Literal, cast
 
 from appinfra.db.utils import detach, detach_all
@@ -22,7 +23,7 @@ class FeedbackClient(FactClient[FeedbackDetails]):
     content items, with optional strength and tags.
 
     Usage:
-        feedback = FeedbackClient(session_factory, profile_id="a3f8b2c1...")
+        feedback = FeedbackClient(session_factory, context_key="my-agent")
 
         # Record feedback
         fact_id = feedback.record(
@@ -49,6 +50,25 @@ class FeedbackClient(FactClient[FeedbackDetails]):
         if not math.isfinite(strength) or strength < 0.0 or strength > 1.0:
             raise ValidationError(f"strength must be between 0.0 and 1.0, got {strength}")
 
+    def _create_feedback_fact(
+        self, signal: SignalType, content_id: int | None, strength: float, category: str | None
+    ) -> Fact:
+        """Create a Fact for feedback."""
+        content_desc = f" on content {content_id}" if content_id else ""
+        content_text = f"{signal} feedback{content_desc}"
+        # Include UUID to ensure unique content_hash for each feedback event
+        unique_content = f"{content_text}|{uuid.uuid4()}"
+        return Fact(
+            context_key=self.context_key,
+            type=self.fact_type,
+            content=content_text,
+            content_hash=self._compute_content_hash(unique_content),
+            category=category,
+            source="user",
+            confidence=strength,
+            active=True,
+        )
+
     def record(
         self,
         signal: SignalType,
@@ -63,16 +83,7 @@ class FeedbackClient(FactClient[FeedbackDetails]):
         self._validate_feedback_inputs(signal, strength)
 
         with self._session_factory() as session:
-            content_desc = f" on content {content_id}" if content_id else ""
-            fact = Fact(
-                profile_id=self.profile_id,
-                type=self.fact_type,
-                content=f"{signal} feedback{content_desc}",
-                category=category,
-                source="user",
-                confidence=strength,
-                active=True,
-            )
+            fact = self._create_feedback_fact(signal, content_id, strength, category)
             session.add(fact)
             session.flush()
 
@@ -100,11 +111,14 @@ class FeedbackClient(FactClient[FeedbackDetails]):
                 select(Fact)
                 .join(FeedbackDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
                     Fact.type == self.fact_type,
                     FeedbackDetails.signal == signal,
                 )
             )
+
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
 
             if active_only:
                 stmt = stmt.where(Fact.active == True)  # noqa: E712
@@ -129,13 +143,16 @@ class FeedbackClient(FactClient[FeedbackDetails]):
                 select(Fact)
                 .join(FeedbackDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
                     Fact.type == self.fact_type,
                     FeedbackDetails.content_id == content_id,
                 )
-                .order_by(Fact.created_at.desc())
-                .limit(limit)
             )
+
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
+            stmt = stmt.order_by(Fact.created_at.desc()).limit(limit)
 
             facts = list(session.scalars(stmt).all())
             for fact in facts:
@@ -154,10 +171,14 @@ class FeedbackClient(FactClient[FeedbackDetails]):
                     .select_from(FeedbackDetails)
                     .join(Fact)
                     .where(
-                        Fact.profile_id == self.profile_id,
                         Fact.type == self.fact_type,
                         FeedbackDetails.signal == signal,
                     )
                 )
+
+                context_filter = self._build_context_filter(Fact.context_key)
+                if context_filter is not None:
+                    stmt = stmt.where(context_filter)
+
                 counts[signal] = session.scalar(stmt) or 0
             return counts

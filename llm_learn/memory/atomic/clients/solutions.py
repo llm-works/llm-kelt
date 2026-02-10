@@ -20,7 +20,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
     - answer: What the agent produced (the output)
 
     Usage:
-        solutions = SolutionsClient(session_factory, profile_id="a3f8b2c1...")
+        solutions = SolutionsClient(session_factory, context_key="my-agent")
 
         # Record a solution
         fact_id = solutions.record(
@@ -67,6 +67,47 @@ class SolutionsClient(FactClient[SolutionDetails]):
             if any(not isinstance(tc, dict) for tc in tool_calls):
                 raise ValidationError("tool_calls elements must be dicts")
 
+    def _create_fact(
+        self, agent_name: str, problem: str, category: str | None, source: str
+    ) -> Fact:
+        """Create Fact record for solution."""
+        content_text = f"{agent_name} solved: {problem[:100]}{'...' if len(problem) > 100 else ''}"
+        return Fact(
+            context_key=self.context_key,
+            type=self.fact_type,
+            content=content_text,
+            content_hash=self._compute_content_hash(content_text),
+            category=category,
+            source=source,
+            confidence=1.0,
+            active=True,
+        )
+
+    def _create_solution_details(
+        self,
+        fact_id: int,
+        agent_name: str,
+        problem: str,
+        problem_context: dict,
+        answer: dict,
+        tokens_used: int,
+        latency_ms: int,
+        answer_text: str | None,
+        tool_calls: list[dict] | None,
+    ) -> SolutionDetails:
+        """Create SolutionDetails record."""
+        return SolutionDetails(
+            fact_id=fact_id,
+            agent_name=agent_name.strip(),
+            problem=problem.strip(),
+            problem_context=problem_context,
+            answer=answer,
+            answer_text=answer_text.strip() if answer_text else None,
+            tokens_used=tokens_used,
+            latency_ms=latency_ms,
+            tool_calls=tool_calls,
+        )
+
     def record(
         self,
         agent_name: str,
@@ -86,28 +127,20 @@ class SolutionsClient(FactClient[SolutionDetails]):
         )
 
         with self._session_factory() as session:
-            fact = Fact(
-                profile_id=self.profile_id,
-                type=self.fact_type,
-                content=f"{agent_name} solved: {problem[:100]}{'...' if len(problem) > 100 else ''}",
-                category=category,
-                source=source,
-                confidence=1.0,
-                active=True,
-            )
+            fact = self._create_fact(agent_name, problem, category, source)
             session.add(fact)
             session.flush()
 
-            details = SolutionDetails(
-                fact_id=fact.id,
-                agent_name=agent_name.strip(),
-                problem=problem.strip(),
-                problem_context=problem_context,
-                answer=answer,
-                answer_text=answer_text.strip() if answer_text else None,
-                tokens_used=tokens_used,
-                latency_ms=latency_ms,
-                tool_calls=tool_calls,
+            details = self._create_solution_details(
+                fact.id,
+                agent_name,
+                problem,
+                problem_context,
+                answer,
+                tokens_used,
+                latency_ms,
+                answer_text,
+                tool_calls,
             )
             session.add(details)
             return fact.id
@@ -124,7 +157,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
                 select(Fact)
                 .join(SolutionDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     SolutionDetails.agent_name == agent_name,
                 )
@@ -151,7 +184,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
         """List solutions in a specific category."""
         with self._session_factory() as session:
             stmt = select(Fact).where(
-                Fact.profile_id == self.profile_id,
+                Fact.context_key == self.context_key,
                 Fact.type == self.fact_type,
                 Fact.category == category,
             )
@@ -175,7 +208,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
                 select(SolutionDetails.agent_name)
                 .join(Fact)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                 )
                 .distinct()
@@ -197,7 +230,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
                 .select_from(SolutionDetails)
                 .join(Fact)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                 )
             )
@@ -224,7 +257,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
                 select(Fact)
                 .join(SolutionDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     SolutionDetails.problem.ilike(f"%{query}%"),
                 )

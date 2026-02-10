@@ -1,5 +1,6 @@
 """Interactions client for implicit behavioral signals."""
 
+import uuid
 from typing import Literal, cast
 
 from appinfra.db.utils import detach, detach_all
@@ -25,7 +26,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
     - dismiss: User dismissed without engagement
 
     Usage:
-        interactions = InteractionsClient(session_factory, profile_id="a3f8b2c1...")
+        interactions = InteractionsClient(session_factory, context_key="my-agent")
 
         # Record a read interaction
         fact_id = interactions.record(
@@ -69,10 +70,14 @@ class InteractionsClient(FactClient[InteractionDetails]):
 
         with self._session_factory() as session:
             content_desc = f" on content {content_id}" if content_id else ""
+            content_text = f"{interaction_type} interaction{content_desc}"
+            # Include UUID to ensure unique content_hash for each interaction event
+            unique_content = f"{content_text}|{uuid.uuid4()}"
             fact = Fact(
-                profile_id=self.profile_id,
+                context_key=self.context_key,
                 type=self.fact_type,
-                content=f"{interaction_type} interaction{content_desc}",
+                content=content_text,
+                content_hash=self._compute_content_hash(unique_content),
                 category=category,
                 source="observed",
                 confidence=1.0,
@@ -103,7 +108,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
                 select(Fact)
                 .join(InteractionDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     InteractionDetails.interaction_type == interaction_type,
                 )
@@ -129,7 +134,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
                 select(Fact)
                 .join(InteractionDetails)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     InteractionDetails.content_id == content_id,
                 )
@@ -154,7 +159,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
                     .select_from(InteractionDetails)
                     .join(Fact)
                     .where(
-                        Fact.profile_id == self.profile_id,
+                        Fact.context_key == self.context_key,
                         Fact.type == self.fact_type,
                         InteractionDetails.interaction_type == itype,
                     )
@@ -174,7 +179,7 @@ class InteractionsClient(FactClient[InteractionDetails]):
                 .select_from(InteractionDetails)
                 .join(Fact)
                 .where(
-                    Fact.profile_id == self.profile_id,
+                    Fact.context_key == self.context_key,
                     Fact.type == self.fact_type,
                     InteractionDetails.content_id == content_id,
                 )

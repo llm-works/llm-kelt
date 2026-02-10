@@ -12,7 +12,6 @@ from .content import Content, ContentStore
 
 # Database
 from .database import Database
-from .domain import Domain
 from .embedding import Embedding, EmbeddingStore
 
 # Exceptions
@@ -25,16 +24,11 @@ from .exceptions import (
     ValidationError,
 )
 
-# Identity resolution
-from .identity import IdentityResolver, ProfileIdentity
-from .profile import Profile
-
 # Schema management
 from .schema import SchemaManager, SchemaState, SchemaStatus
 
 # Types
 from .types import PagedResult, ScoredEntity
-from .workspace import Workspace
 
 __all__ = [
     # Base
@@ -44,9 +38,6 @@ __all__ = [
     # Database
     "Database",
     # Models
-    "Domain",
-    "Workspace",
-    "Profile",
     "Content",
     "ContentStore",
     "Embedding",
@@ -65,7 +56,4 @@ __all__ = [
     "DatabaseError",
     "ConfigurationError",
     "SchemaVersionError",
-    # Identity
-    "ProfileIdentity",
-    "IdentityResolver",
 ]
