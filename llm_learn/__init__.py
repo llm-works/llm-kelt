@@ -4,14 +4,23 @@ Provides tools for storing facts, feedback, preferences, solutions, and other
 signals that can be injected into LLM prompts or used for training.
 
 Architecture:
-    - core: Domain, Workspace, Profile hierarchy with hash-based IDs
+    - core: Content storage with flexible isolation via context_key
     - memory.atomic: Fact-based storage with type-specific detail tables
+    - memory.isolation: Context-based data partitioning with glob pattern support
 
 Usage:
-    from llm_learn import LearnClient
+    from llm_learn import LearnClientFactory, IsolationContext
+    from appinfra.config import Config
+    from appinfra.log import LoggerFactory, LogConfig
 
-    # Create client scoped to a profile (32-char hash ID)
-    learn = LearnClient(profile_id="a3f8b2c1d4e5f6a7b8c9d0e1f2a3b4c5")
+    # Initialize
+    config = Config("etc/llm-learn.yaml")
+    lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
+    factory = LearnClientFactory(lg)
+
+    # Create client with isolation context
+    context = IsolationContext(context_key="my-agent")
+    learn = factory.create_from_config(context=context, config=config)
 
     # Access atomic memory primitives via learn.atomic.*
     learn.atomic.assertions.add("Timezone: UTC", category="settings")
