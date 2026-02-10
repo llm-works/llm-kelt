@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, Index, Integer, String, UniqueConstraint, select
@@ -22,7 +22,7 @@ def ensure_session(session: Any | None, session_factory: Callable[[], Any]):
     Context manager that either uses provided session or creates a new one.
 
     If session is provided, yields it without committing (caller controls transaction).
-    If session is None, creates new session and commits on successful exit.
+    If session is None, creates new session (factory auto-commits on successful exit).
 
     Args:
         session: Optional existing session to use.
@@ -35,10 +35,9 @@ def ensure_session(session: Any | None, session_factory: Callable[[], Any]):
         # Use provided session, don't commit (caller controls transaction)
         yield session
     else:
-        # Create new session and commit on success
+        # Create new session (factory commits on successful exit)
         with session_factory() as sess:
             yield sess
-            sess.commit()
 
 
 def _validate_embedding(embedding: list[float] | None) -> None:
@@ -161,6 +160,37 @@ class EmbeddingStore:
             embedding=embedding,
         )
 
+    def _get_existing_embedding(
+        self, sess: Any, entity_type: str, entity_id: str, model_name: str
+    ) -> Embedding | None:
+        """Get existing embedding record if present."""
+        stmt = select(Embedding).where(
+            Embedding.entity_type == entity_type,
+            Embedding.entity_id == entity_id,
+            Embedding.model_name == model_name,
+        )
+        return cast(Embedding | None, sess.scalar(stmt))
+
+    def _insert_with_race_protection(
+        self, sess: Any, emb: Embedding, entity_type: str, entity_id: str, model_name: str
+    ) -> Embedding:
+        """Insert embedding using nested transaction to handle race conditions."""
+        try:
+            # Use nested transaction to avoid rolling back caller's transaction
+            with sess.begin_nested():
+                sess.add(emb)
+                sess.flush()
+        except IntegrityError:
+            # Only the nested transaction was rolled back
+            # Remove orphaned in-memory object
+            sess.expunge(emb)
+            existing = self._get_existing_embedding(sess, entity_type, entity_id, model_name)
+            if existing:
+                return existing
+            raise
+        sess.refresh(emb)
+        return emb
+
     def store(
         self,
         entity_type: str,
@@ -189,32 +219,13 @@ class EmbeddingStore:
         _validate_embedding(embedding)
 
         with ensure_session(session, self._session_factory) as sess:
-            # Check for existing
-            stmt = select(Embedding).where(
-                Embedding.entity_type == entity_type,
-                Embedding.entity_id == entity_id,
-                Embedding.model_name == model_name,
-            )
-            existing: Embedding | None = sess.scalar(stmt)
+            existing = self._get_existing_embedding(sess, entity_type, entity_id, model_name)
             if existing:
                 self._update_embedding(existing, embedding)
                 return existing
 
             emb = self._create_embedding(entity_type, entity_id, model_name, embedding)
-            sess.add(emb)
-            try:
-                # Use nested transaction to avoid rolling back caller's transaction
-                with sess.begin_nested():
-                    sess.flush()
-            except IntegrityError:
-                # Only the nested transaction was rolled back
-                existing = sess.scalar(stmt)
-                if existing:
-                    self._update_embedding(existing, embedding)
-                    return existing
-                raise
-            sess.refresh(emb)
-            return emb
+            return self._insert_with_race_protection(sess, emb, entity_type, entity_id, model_name)
 
     def search(
         self,

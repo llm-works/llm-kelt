@@ -153,6 +153,8 @@ class Protocol:
     @property
     def embeddings(self) -> EmbeddingAdapter:
         """Embedding operations for atomic facts."""
+        # Defensive: adapter is eagerly created in __init__ if embedding_store is set
+        # This lazy fallback handles edge cases where adapter was reset or not initialized
         if self._embedding_adapter is None:
             if self._embedding_store is None:
                 raise RuntimeError("No embedding store configured")
