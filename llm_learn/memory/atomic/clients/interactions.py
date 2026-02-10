@@ -1,5 +1,6 @@
 """Interactions client for implicit behavioral signals."""
 
+import uuid
 from typing import Literal, cast
 
 from appinfra.db.utils import detach, detach_all
@@ -70,11 +71,13 @@ class InteractionsClient(FactClient[InteractionDetails]):
         with self._session_factory() as session:
             content_desc = f" on content {content_id}" if content_id else ""
             content_text = f"{interaction_type} interaction{content_desc}"
+            # Include UUID to ensure unique content_hash for each interaction event
+            unique_content = f"{content_text}|{uuid.uuid4()}"
             fact = Fact(
                 context_key=self.context_key,
                 type=self.fact_type,
                 content=content_text,
-                content_hash=self._compute_content_hash(content_text),
+                content_hash=self._compute_content_hash(unique_content),
                 category=category,
                 source="observed",
                 confidence=1.0,

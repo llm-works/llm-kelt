@@ -137,11 +137,11 @@ def upgrade() -> None:  # cq: exempt
         postgresql_ops={"context_key": "text_pattern_ops"},
     )
     # Partial unique index for NULL context_key to ensure deduplication works
-    # When context_key IS NULL, content_hash must be unique (global scope deduplication)
+    # When context_key IS NULL, (type, content_hash) must be unique per fact type
     op.create_index(
         "uq_atomic_facts_null_context_hash",
         "atomic_facts",
-        ["content_hash"],
+        ["type", "content_hash"],
         unique=True,
         postgresql_where=sa.text("context_key IS NULL"),
     )

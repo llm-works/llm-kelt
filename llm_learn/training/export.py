@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from ..core.models import Content
 from ..core.utils import utc_now
 from ..memory.atomic.models import Fact, FeedbackDetails, PreferenceDetails
+from ..memory.isolation import build_context_filter
 
 
 @dataclass
@@ -111,8 +112,6 @@ def _build_feedback_query(
     signals: list[str] | None = None,
 ):
     """Build SQLAlchemy query for feedback with content."""
-    from llm_learn.memory.isolation import build_context_filter
-
     stmt = (
         select(Fact, FeedbackDetails, Content)
         .join(FeedbackDetails, Fact.id == FeedbackDetails.fact_id)
@@ -142,8 +141,6 @@ def _build_preferences_query(
     min_margin: float | None,
 ):
     """Build SQLAlchemy query for preference pairs."""
-    from llm_learn.memory.isolation import build_context_filter
-
     stmt = (
         select(Fact, PreferenceDetails)
         .join(PreferenceDetails, Fact.id == PreferenceDetails.fact_id)

@@ -63,6 +63,9 @@ class FactClient(Generic[T]):
 
         Returns:
             SQLAlchemy filter condition, or None if no filtering needed.
+
+        Note:
+            Lazy import used to avoid circular dependency with memory.isolation.
         """
         from llm_learn.memory.isolation import build_context_filter
 
@@ -70,8 +73,6 @@ class FactClient(Generic[T]):
 
     def _get_fact(self, session: Session, fact_id: int) -> Fact | None:
         """Get fact by ID, verifying context ownership."""
-        from sqlalchemy import select
-
         # Build query with all filters upfront (single query)
         stmt = select(Fact).where(Fact.id == fact_id, Fact.type == self.fact_type)
 

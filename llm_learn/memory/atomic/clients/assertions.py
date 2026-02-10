@@ -168,10 +168,13 @@ class AssertionsClient(FactClient[None]):
         """
         with self._session_factory() as session:
             stmt = select(Fact).where(
-                Fact.context_key == self.context_key,
                 Fact.type == self.fact_type,
                 Fact.category == category,
             )
+
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
 
             if active_only:
                 stmt = stmt.where(Fact.active == True)  # noqa: E712
@@ -199,10 +202,13 @@ class AssertionsClient(FactClient[None]):
         """
         with self._session_factory() as session:
             stmt = select(Fact).where(
-                Fact.context_key == self.context_key,
                 Fact.type == self.fact_type,
                 Fact.source == source,
             )
+
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
 
             if active_only:
                 stmt = stmt.where(Fact.active == True)  # noqa: E712
@@ -233,10 +239,13 @@ class AssertionsClient(FactClient[None]):
         """
         with self._session_factory() as session:
             stmt = select(Fact).where(
-                Fact.context_key == self.context_key,
                 Fact.type == self.fact_type,
                 Fact.content.ilike(f"%{query}%"),
             )
+
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
 
             if active_only:
                 stmt = stmt.where(Fact.active == True)  # noqa: E712
@@ -253,16 +262,16 @@ class AssertionsClient(FactClient[None]):
             List of distinct category names (excluding None).
         """
         with self._session_factory() as session:
-            stmt = (
-                select(Fact.category)
-                .where(
-                    Fact.context_key == self.context_key,
-                    Fact.type == self.fact_type,
-                    Fact.category.isnot(None),
-                )
-                .distinct()
-                .order_by(Fact.category)
+            stmt = select(Fact.category).where(
+                Fact.type == self.fact_type,
+                Fact.category.isnot(None),
             )
+
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
+            stmt = stmt.distinct().order_by(Fact.category)
             return [c for c in session.scalars(stmt).all() if c is not None]
 
     def list_active(
@@ -284,11 +293,14 @@ class AssertionsClient(FactClient[None]):
         """
         with self._session_factory() as session:
             stmt = select(Fact).where(
-                Fact.context_key == self.context_key,
                 Fact.type == self.fact_type,
                 Fact.active == True,  # noqa: E712
                 Fact.confidence >= min_confidence,
             )
+
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
 
             if category is not None:
                 stmt = stmt.where(Fact.category == category)
@@ -305,14 +317,15 @@ class AssertionsClient(FactClient[None]):
             Dict mapping category name (or None) to count.
         """
         with self._session_factory() as session:
-            stmt = (
-                select(Fact.category, func.count(Fact.id))
-                .where(
-                    Fact.context_key == self.context_key,
-                    Fact.type == self.fact_type,
-                    Fact.active == True,  # noqa: E712
-                )
-                .group_by(Fact.category)
+            stmt = select(Fact.category, func.count(Fact.id)).where(
+                Fact.type == self.fact_type,
+                Fact.active == True,  # noqa: E712
             )
+
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
+            stmt = stmt.group_by(Fact.category)
             results = session.execute(stmt).all()
             return {cat: count for cat, count in results}
