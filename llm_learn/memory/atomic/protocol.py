@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from appinfra.log import Logger
+
 from llm_learn.core.embedding import EmbeddingStore
 
 from .clients import (
@@ -45,6 +47,7 @@ class Protocol:
 
     def __init__(
         self,
+        lg: Logger,
         session_factory: Callable[[], Any],
         context_key: str | None,
         *,
@@ -55,11 +58,13 @@ class Protocol:
         Initialize Atomic memory protocol.
 
         Args:
+            lg: Logger instance for all atomic operations.
             session_factory: Database session factory.
             context_key: Context key to scope all operations to (None = no filtering).
             embedder: Optional embedder for generating embeddings.
             embedding_store: Optional embedding store for vector operations.
         """
+        self._lg = lg
         self._session_factory = session_factory
         self._context_key = context_key
         self._embedder = embedder
@@ -80,7 +85,7 @@ class Protocol:
         """Simple facts about the user."""
         if self._assertions is None:
             self._assertions = AssertionsClient(
-                self._session_factory, self._context_key, self._embedding_adapter
+                self._lg, self._session_factory, self._context_key, self._embedding_adapter
             )
         return self._assertions
 
@@ -89,7 +94,7 @@ class Protocol:
         """Agent problem/answer records."""
         if self._solutions is None:
             self._solutions = SolutionsClient(
-                self._session_factory, self._context_key, self._embedding_adapter
+                self._lg, self._session_factory, self._context_key, self._embedding_adapter
             )
         return self._solutions
 
@@ -98,7 +103,7 @@ class Protocol:
         """Hypothesis tracking for calibration."""
         if self._predictions is None:
             self._predictions = PredictionsClient(
-                self._session_factory, self._context_key, self._embedding_adapter
+                self._lg, self._session_factory, self._context_key, self._embedding_adapter
             )
         return self._predictions
 
@@ -106,7 +111,7 @@ class Protocol:
     def feedback(self) -> FeedbackClient:
         """Explicit user signals on content."""
         if self._feedback is None:
-            self._feedback = FeedbackClient(self._session_factory, self._context_key)
+            self._feedback = FeedbackClient(self._lg, self._session_factory, self._context_key)
         return self._feedback
 
     @property
@@ -114,7 +119,7 @@ class Protocol:
         """Standing user instructions."""
         if self._directives is None:
             self._directives = DirectivesClient(
-                self._session_factory, self._context_key, self._embedding_adapter
+                self._lg, self._session_factory, self._context_key, self._embedding_adapter
             )
         return self._directives
 
@@ -122,14 +127,18 @@ class Protocol:
     def interactions(self) -> InteractionsClient:
         """Implicit behavioral signals."""
         if self._interactions is None:
-            self._interactions = InteractionsClient(self._session_factory, self._context_key)
+            self._interactions = InteractionsClient(
+                self._lg, self._session_factory, self._context_key
+            )
         return self._interactions
 
     @property
     def preferences(self) -> PreferencesClient:
         """DPO training pairs."""
         if self._preferences is None:
-            self._preferences = PreferencesClient(self._session_factory, self._context_key)
+            self._preferences = PreferencesClient(
+                self._lg, self._session_factory, self._context_key
+            )
         return self._preferences
 
     @property

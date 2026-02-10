@@ -61,13 +61,17 @@ class EmbeddingAdapter:
         self._store = store
         self._embedder = embedder
 
-    def embed_fact(self, fact: Fact, model_name: str | None = None) -> None:
+    def embed_fact(
+        self, fact: Fact, model_name: str | None = None, session: Any | None = None
+    ) -> None:
         """
         Generate and store embedding for a fact.
 
         Args:
             fact: The fact to embed (uses fact.content).
             model_name: Embedding model name. If None, uses embedder's default model.
+            session: Optional session to use. If None, creates new session and commits.
+                     If provided, uses existing session without committing (caller controls).
 
         Raises:
             RuntimeError: If no embedder is configured.
@@ -86,6 +90,7 @@ class EmbeddingAdapter:
             entity_id=str(fact.id),
             embedding=result.embedding,
             model_name=model,
+            session=session,
         )
 
     def set_embedding(

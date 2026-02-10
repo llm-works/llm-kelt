@@ -161,7 +161,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
 
             # Auto-embed if embedder configured and answer_text provided
             if answer_text:
-                self._auto_embed_fact(fact)
+                self._auto_embed_fact(fact, session)
 
             return fact.id
 

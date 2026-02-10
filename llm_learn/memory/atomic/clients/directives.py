@@ -87,7 +87,7 @@ class DirectivesClient(FactClient[DirectiveDetails]):
             session.flush()
 
             # Auto-embed if embedder configured
-            self._auto_embed_fact(fact)
+            self._auto_embed_fact(fact, session)
 
             return fact.id
 
