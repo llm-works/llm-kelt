@@ -98,7 +98,7 @@ class DpoTrainer:
         from peft import get_peft_model, prepare_model_for_kbit_training
         from transformers import AutoModelForCausalLM
 
-        self._lg.info(f"Loading base model: {self.base_model}")
+        self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
 
         self._quant_config = self._setup_quantization_config()
@@ -127,9 +127,9 @@ class DpoTrainer:
         self.train_dataset, self.eval_dataset = _load_dpo_dataset(
             self.data_path, self.training_config.eval_split
         )
-        self._lg.info(f"Loaded {len(self.train_dataset)} training preference pairs")
+        self._lg.info(f"loaded {len(self.train_dataset)} training preference pairs")
         if self.eval_dataset:
-            self._lg.info(f"Loaded {len(self.eval_dataset)} eval pairs")
+            self._lg.info(f"loaded {len(self.eval_dataset)} eval pairs")
 
     def _create_training_args(self):
         """Create DPO training arguments."""
@@ -189,7 +189,7 @@ class DpoTrainer:
         final_path = self.output_dir / "final"
         self.trainer.save_model(str(final_path))
         self.tokenizer.save_pretrained(str(final_path))
-        self._lg.info(f"Saved adapter to {final_path}")
+        self._lg.info(f"saved adapter to {final_path}")
 
         metrics: dict = {}
         if self.trainer.state.log_history:
@@ -240,7 +240,7 @@ class DpoTrainer:
         started_at = utc_now()
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self._lg.info(f"Starting DPO training: {self.data_path} -> {self.output_dir}")
+        self._lg.info(f"starting DPO training: {self.data_path} -> {self.output_dir}")
 
         self._load_data()
         self._load_model()

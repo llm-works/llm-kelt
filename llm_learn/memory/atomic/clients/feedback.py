@@ -2,6 +2,7 @@
 
 import math
 import uuid
+from datetime import datetime
 from typing import Literal, cast
 
 from appinfra.db.utils import detach, detach_all
@@ -78,8 +79,24 @@ class FeedbackClient(FactClient[FeedbackDetails]):
         comment: str | None = None,
         context: dict | None = None,
         category: str | None = None,
+        provider_type: str | None = None,
+        provider: str | None = None,
+        feedback_at: datetime | None = None,
     ) -> int:
-        """Record user feedback."""
+        """Record user feedback.
+
+        Args:
+            signal: Feedback signal type (positive, negative, dismiss)
+            content_id: Optional content item this feedback is about
+            strength: Signal strength (0.0 to 1.0)
+            tags: Optional tags for categorization
+            comment: Optional free-text comment
+            context: Optional type-specific metadata (JSONB)
+            category: Optional category for the fact
+            provider_type: Optional provider category (e.g., 'llm', 'manual', 'api')
+            provider: Optional provider identifier (e.g., 'alice', 'llm_gpt4')
+            feedback_at: Optional feedback timestamp (defaults to NOW())
+        """
         self._validate_feedback_inputs(signal, strength)
 
         with self._session_factory() as session:
@@ -95,6 +112,9 @@ class FeedbackClient(FactClient[FeedbackDetails]):
                 tags=tags,
                 comment=comment,
                 context=context,
+                provider_type=provider_type,
+                provider=provider,
+                feedback_at=feedback_at,
             )
             session.add(details)
             return fact.id

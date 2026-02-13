@@ -202,6 +202,11 @@ def upgrade() -> None:  # cq: exempt
         sa.Column("content_id", sa.BigInteger(), nullable=True),
         sa.Column("signal", sa.String(20), nullable=False),
         sa.Column("strength", sa.Float(), server_default="1.0", nullable=False),
+        sa.Column(
+            "feedback_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column("provider_type", sa.String(50), nullable=True),
+        sa.Column("provider", sa.String(100), nullable=True),
         sa.Column("tags", postgresql.ARRAY(sa.String(50)), nullable=True),
         sa.Column("comment", sa.Text(), nullable=True),
         sa.Column("context", postgresql.JSONB(), nullable=True),
@@ -213,6 +218,11 @@ def upgrade() -> None:  # cq: exempt
     op.create_index("idx_atomic_feedback_fact", "atomic_feedback_details", ["fact_id"])
     op.create_index("idx_atomic_feedback_content", "atomic_feedback_details", ["content_id"])
     op.create_index("idx_atomic_feedback_signal", "atomic_feedback_details", ["signal"])
+    op.create_index(
+        "idx_atomic_feedback_provider_type", "atomic_feedback_details", ["provider_type"]
+    )
+    op.create_index("idx_atomic_feedback_provider", "atomic_feedback_details", ["provider"])
+    op.create_index("idx_atomic_feedback_at", "atomic_feedback_details", ["feedback_at"])
 
     op.create_table(
         "atomic_directive_details",
