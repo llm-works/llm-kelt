@@ -252,7 +252,7 @@ class FeedbackDetails(Base):
         Index("idx_atomic_feedback_signal", "signal"),
         Index("idx_atomic_feedback_provider_type", "provider_type"),
         Index("idx_atomic_feedback_provider", "provider"),
-        Index("idx_atomic_feedback_at", "feedback_at", postgresql_using="btree"),
+        Index("idx_atomic_feedback_at", "feedback_at"),
     )
 
     def __repr__(self) -> str:
