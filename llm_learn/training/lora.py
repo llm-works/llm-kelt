@@ -109,7 +109,7 @@ class LoraTrainer:
         from peft import get_peft_model, prepare_model_for_kbit_training
         from transformers import AutoModelForCausalLM
 
-        self._lg.info(f"Loading base model: {self.base_model}")
+        self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
 
         quant_config = self._setup_quantization_config()
@@ -138,9 +138,9 @@ class LoraTrainer:
         self.train_dataset, self.eval_dataset = _load_sft_dataset(
             self.data_path, self.training_config.eval_split
         )
-        self._lg.info(f"Loaded {len(self.train_dataset)} training samples")
+        self._lg.info(f"loaded {len(self.train_dataset)} training samples")
         if self.eval_dataset:
-            self._lg.info(f"Loaded {len(self.eval_dataset)} eval samples")
+            self._lg.info(f"loaded {len(self.eval_dataset)} eval samples")
 
     def _create_training_args(self):
         """Create training arguments for SFT."""
@@ -193,7 +193,7 @@ class LoraTrainer:
         final_path = self.output_dir / "final"
         self.trainer.save_model(str(final_path))
         self.tokenizer.save_pretrained(str(final_path))
-        self._lg.info(f"Saved adapter to {final_path}")
+        self._lg.info(f"saved adapter to {final_path}")
 
         metrics: dict = {}
         if self.trainer.state.log_history:
@@ -238,7 +238,7 @@ class LoraTrainer:
         started_at = utc_now()
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self._lg.info(f"Starting LoRA training: {self.data_path} -> {self.output_dir}")
+        self._lg.info(f"starting LoRA training: {self.data_path} -> {self.output_dir}")
 
         self._load_data()
         self._load_model()
@@ -247,7 +247,7 @@ class LoraTrainer:
             raise RuntimeError("Failed to create trainer")
 
         if resume_from:
-            self._lg.info(f"Resuming from checkpoint: {resume_from}")
+            self._lg.info(f"resuming from checkpoint: {resume_from}")
             self.trainer.train(resume_from_checkpoint=str(resume_from))
         else:
             self.trainer.train()

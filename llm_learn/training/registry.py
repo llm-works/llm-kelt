@@ -56,7 +56,7 @@ class AdapterRegistry:
 
         if not self.base_path.exists():
             self.base_path.mkdir(parents=True, exist_ok=True)
-            self._lg.info(f"Created adapter base path: {self.base_path}")
+            self._lg.info(f"created adapter base path: {self.base_path}")
 
     def _validate_adapter_id(self, adapter_id: str) -> None:
         """Validate adapter_id has no path traversal characters."""
@@ -81,7 +81,7 @@ class AdapterRegistry:
         config_path = adapter_path / "config.yaml"
         with config_path.open("w") as f:
             yaml.safe_dump(config, f)
-        self._lg.info(f"Wrote config: {config_path}")
+        self._lg.info(f"wrote config: {config_path}")
 
     def register(
         self,
@@ -122,11 +122,11 @@ class AdapterRegistry:
         # Remove existing if overwriting
         if adapter_path.exists():
             shutil.rmtree(adapter_path)
-            self._lg.info(f"Removed existing adapter: {adapter_id}")
+            self._lg.info(f"removed existing adapter: {adapter_id}")
 
         # Copy adapter files
         shutil.copytree(training_result.adapter_path, adapter_path)
-        self._lg.info(f"Copied adapter to: {adapter_path}")
+        self._lg.info(f"copied adapter to: {adapter_path}")
 
         desc = description or f"{training_result.method} adapter from {training_result.base_model}"
         self._write_adapter_config(adapter_path, training_result, desc, enabled)
@@ -158,7 +158,7 @@ class AdapterRegistry:
         with config_path.open("w") as f:
             yaml.safe_dump(config, f)
 
-        self._lg.info(f"Set adapter '{adapter_id}' enabled={enabled}")
+        self._lg.info(f"set adapter '{adapter_id}' enabled={enabled}")
 
     def remove(self, adapter_id: str) -> None:
         """Remove an adapter from the registry.
@@ -172,7 +172,7 @@ class AdapterRegistry:
             raise ValueError(f"Adapter '{adapter_id}' not found")
 
         shutil.rmtree(adapter_path)
-        self._lg.info(f"Removed adapter: {adapter_id}")
+        self._lg.info(f"removed adapter: {adapter_id}")
 
     def list(self) -> list[AdapterInfo]:
         """List all registered adapters.
@@ -249,13 +249,13 @@ class AdapterRegistry:
             response = httpx.post(url, params=params, timeout=timeout)
             response.raise_for_status()
             result: dict[str, object] = response.json()
-            self._lg.info(f"Refresh response: {result}")
+            self._lg.info(f"refresh response: {result}")
             return result
         except httpx.ConnectError as e:
-            self._lg.warning(f"Could not connect to llm-infer at {self.infer_url}: {e}")
+            self._lg.warning(f"could not connect to llm-infer at {self.infer_url}: {e}")
             raise ConnectionError(f"llm-infer not available at {self.infer_url}") from e
         except httpx.HTTPStatusError as e:
-            self._lg.error(f"Refresh failed: {e.response.text}")
+            self._lg.error(f"refresh failed: {e.response.text}")
             raise RuntimeError(f"Refresh failed: {e.response.text}") from e
 
     def register_and_refresh(

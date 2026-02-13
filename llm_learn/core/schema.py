@@ -174,7 +174,7 @@ class SchemaManager:
                 conn.execute(text(f"SELECT pg_advisory_lock({_ADVISORY_LOCK_KEY})"))
                 return True
             except Exception as e:
-                self._lg.warning("Failed to acquire schema lock", extra={"exception": e})
+                self._lg.warning("failed to acquire schema lock", extra={"exception": e})
                 return False
         else:
             # Non-blocking attempt
@@ -194,7 +194,7 @@ class SchemaManager:
 
     def _bootstrap_fresh_database(self) -> None:
         """Bootstrap a fresh database with schema from models."""
-        self._lg.info("Bootstrapping fresh database schema")
+        self._lg.info("bootstrapping fresh database schema")
 
         # Create pgvector extension before creating tables (required for Vector columns)
         with self._engine.connect() as conn:
@@ -222,14 +222,14 @@ class SchemaManager:
             )
             conn.commit()
 
-        self._lg.info("Database schema bootstrapped", extra={"version": head_version})
+        self._lg.info("database schema bootstrapped", extra={"version": head_version})
 
     def _run_upgrade(self) -> None:
         """Run Alembic upgrade to head."""
-        self._lg.info("Running schema upgrade to head")
+        self._lg.info("running schema upgrade to head")
         config = self._get_alembic_config()
         command.upgrade(config, "head")
-        self._lg.info("Schema upgrade complete")
+        self._lg.info("schema upgrade complete")
 
     def _check_version_compatible(self, status: SchemaStatus) -> None:
         """Raise SchemaVersionError if schema is too new."""
@@ -272,7 +272,7 @@ class SchemaManager:
 
         # Fast path: already current
         if status.state == SchemaState.CURRENT:
-            self._lg.debug("Schema already current", extra={"version": status.current_version})
+            self._lg.debug("schema already current", extra={"version": status.current_version})
             return status
 
         self._check_version_compatible(status)

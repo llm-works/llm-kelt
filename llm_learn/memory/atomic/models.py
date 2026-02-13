@@ -217,6 +217,7 @@ class FeedbackDetails(Base):
 
     __tablename__ = "atomic_feedback_details"
 
+    # Keys
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     fact_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), nullable=False
@@ -225,8 +226,16 @@ class FeedbackDetails(Base):
         BigInteger, ForeignKey("content.id"), nullable=True
     )
 
+    # Core feedback
     signal: Mapped[str] = mapped_column(String(20), nullable=False)
     strength: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+
+    # Metadata (when and who)
+    feedback_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provider_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # Additional details
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String(50)), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     context: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -239,6 +248,9 @@ class FeedbackDetails(Base):
         Index("idx_atomic_feedback_fact", "fact_id"),
         Index("idx_atomic_feedback_content", "content_id"),
         Index("idx_atomic_feedback_signal", "signal"),
+        Index("idx_atomic_feedback_provider_type", "provider_type"),
+        Index("idx_atomic_feedback_provider", "provider"),
+        Index("idx_atomic_feedback_at", "feedback_at"),
     )
 
     def __repr__(self) -> str:
