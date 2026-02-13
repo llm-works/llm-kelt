@@ -252,7 +252,7 @@ class AdapterRegistry:
             self._lg.info(f"refresh response: {result}")
             return result
         except httpx.ConnectError as e:
-            self._lg.warning(f"Could not connect to llm-infer at {self.infer_url}: {e}")
+            self._lg.warning(f"could not connect to llm-infer at {self.infer_url}: {e}")
             raise ConnectionError(f"llm-infer not available at {self.infer_url}") from e
         except httpx.HTTPStatusError as e:
             self._lg.error(f"refresh failed: {e.response.text}")

@@ -202,9 +202,7 @@ def upgrade() -> None:  # cq: exempt
         sa.Column("content_id", sa.BigInteger(), nullable=True),
         sa.Column("signal", sa.String(20), nullable=False),
         sa.Column("strength", sa.Float(), server_default="1.0", nullable=False),
-        sa.Column(
-            "feedback_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
-        ),
+        sa.Column("feedback_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("provider_type", sa.String(50), nullable=True),
         sa.Column("provider", sa.String(100), nullable=True),
         sa.Column("tags", postgresql.ARRAY(sa.String(50)), nullable=True),

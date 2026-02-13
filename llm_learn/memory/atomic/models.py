@@ -231,9 +231,7 @@ class FeedbackDetails(Base):
     strength: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
 
     # Metadata (when and who)
-    feedback_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utc_now, nullable=False
-    )
+    feedback_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     provider_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
