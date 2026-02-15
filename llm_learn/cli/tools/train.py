@@ -428,6 +428,8 @@ class PipelineTool(ModelResolutionMixin, Tool):
         parser.add_argument("--beta", type=float, help="DPO beta parameter")
         parser.add_argument("--no-quantize", action="store_true", help="Disable quantization")
         parser.add_argument("--epochs", type=int, help="Number of epochs")
+        parser.add_argument("--batch-size", type=int, help="Training batch size")
+        parser.add_argument("--lr", type=float, help="Learning rate")
 
         # Register args
         parser.add_argument("--description", help="Adapter description")
@@ -521,35 +523,56 @@ class PipelineTool(ModelResolutionMixin, Tool):
         print(f"[1/3] Exported {result.count} preference pairs")
         return 0
 
-    def _build_training_params(self) -> tuple[float, bool, TrainingConfig]:
-        """Build training parameters from profile and CLI args."""
-        beta, quantize, params = 0.1, True, {}
-
+    def _load_profile(self, profile_name: str) -> tuple[float, bool, dict[str, Any]]:
+        """Load and validate a training profile."""
         config = DotDict(**dict(self.app.config)) if self.app.config else DotDict()
         training_cfg = getattr(config, "training", None)
+        if training_cfg is None:
+            raise ValueError("No training config section found")
+        profiles = getattr(training_cfg, "profiles", None)
+        if profiles is None:
+            raise ValueError("No training.profiles section found")
+        profile = getattr(profiles, profile_name, None)
+        if profile is None:
+            available = list(profiles.keys()) if hasattr(profiles, "keys") else []
+            raise ValueError(f"Profile '{profile_name}' not found. Available: {available}")
 
-        if training_cfg and (profile_name := getattr(self.args, "profile", None)):
-            profiles = getattr(training_cfg, "profiles", None)
-            if profiles and (profile := getattr(profiles, profile_name, None)):
-                profile_dict = dict(profile)
-                beta = profile_dict.get("beta", beta)
-                quantize = profile_dict.get("quantize", quantize)
-                for key, param in [
-                    ("epochs", "num_epochs"),
-                    ("batch_size", "batch_size"),
-                    ("learning_rate", "learning_rate"),
-                ]:
-                    if key in profile_dict:
-                        params[param] = profile_dict[key]
+        profile_dict = dict(profile)
+        params: dict[str, Any] = {}
+        for key, param in [
+            ("epochs", "num_epochs"),
+            ("batch_size", "batch_size"),
+            ("learning_rate", "learning_rate"),
+        ]:
+            if key in profile_dict:
+                params[param] = profile_dict[key]
+        return profile_dict.get("beta", 0.1), profile_dict.get("quantize", True), params
 
-        # CLI overrides
+    def _apply_cli_overrides(
+        self, beta: float, quantize: bool, params: dict
+    ) -> tuple[float, bool, dict]:
+        """Apply CLI argument overrides to profile settings."""
         if getattr(self.args, "beta", None) is not None:
             beta = self.args.beta
         if getattr(self.args, "no_quantize", False):
             quantize = False
-        if getattr(self.args, "epochs", None) is not None:
-            params["num_epochs"] = self.args.epochs
+        for arg, param in [
+            ("epochs", "num_epochs"),
+            ("batch_size", "batch_size"),
+            ("lr", "learning_rate"),
+        ]:
+            if getattr(self.args, arg, None) is not None:
+                params[param] = getattr(self.args, arg)
+        return beta, quantize, params
 
+    def _build_training_params(self) -> tuple[float, bool, TrainingConfig]:
+        """Build training parameters from profile and CLI args."""
+        beta, quantize, params = 0.1, True, {}
+
+        if profile_name := getattr(self.args, "profile", None):
+            beta, quantize, params = self._load_profile(profile_name)
+
+        beta, quantize, params = self._apply_cli_overrides(beta, quantize, params)
         return beta, quantize, TrainingConfig(**params) if params else TrainingConfig()
 
     def _run_train(
