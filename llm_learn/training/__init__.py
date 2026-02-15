@@ -3,6 +3,7 @@
 Contains utilities for training data preparation and model fine-tuning:
 - export: Data export to training formats (DPO, SFT, classifier)
 - config: Training configuration dataclasses
+- runs: Training run tracking for iterative workflows
 - lora: LoRA/SFT training (requires 'training' extras)
 - dpo: DPO training (requires 'training' extras)
 
@@ -17,6 +18,7 @@ from .export import (
     export_preferences_dpo,
 )
 from .registry import AdapterInfo, AdapterRegistry
+from .runs import TrainingRun, TrainingRunClient, TrainingRunInfo, TrainingRunPair
 
 __all__ = [
     # Export functions
@@ -31,6 +33,11 @@ __all__ = [
     # Adapter registry
     "AdapterRegistry",
     "AdapterInfo",
+    # Training run tracking
+    "TrainingRun",
+    "TrainingRunClient",
+    "TrainingRunInfo",
+    "TrainingRunPair",
     # Training functions (lazy-loaded, require 'training' extras)
     "train_lora",
     "train_dpo",

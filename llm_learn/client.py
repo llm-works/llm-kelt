@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
-from llm_infer.client import LLMClient
+from llm_infer.client import ChatClient
 
 from .core.content import ContentStore
 from .core.database import Database
@@ -78,7 +78,7 @@ class LearnClient:
         database: Database,
         context: IsolationContext,
         embedder: Embedder | None = None,
-        llm_client: LLMClient | None = None,
+        llm_client: ChatClient | None = None,
         learn_config: DotDict | None = None,
         ensure_schema: bool = True,
     ) -> None:
@@ -266,7 +266,7 @@ class LearnClient:
         return self._db
 
     @property
-    def llm_client(self) -> LLMClient | None:
+    def llm_client(self) -> ChatClient | None:
         """Access underlying LLM client (None if not configured)."""
         return self._llm_client
 

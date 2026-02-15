@@ -5,8 +5,8 @@ from __future__ import annotations
 from appinfra.db.pg import PG
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
+from llm_infer.client import ChatClient
 from llm_infer.client import Factory as LLMClientFactory
-from llm_infer.client import LLMClient
 
 from .client import LearnClient
 from .core.database import Database
@@ -49,14 +49,13 @@ class LearnClientFactory:
             return None
         return Embedder(base_url=embed_cfg.base_url, model=embed_cfg.model_name)
 
-    def _create_llm_client(self, config: DotDict) -> LLMClient | None:
+    def _create_llm_client(self, config: DotDict) -> ChatClient | None:
         """Create LLM client from config if llm section exists."""
         llm_cfg = getattr(config, "llm", None)
         if llm_cfg is None:
             return None
         llm_factory = LLMClientFactory(self._lg)
-        client: LLMClient = llm_factory.from_config(llm_cfg.to_dict())
-        return client
+        return llm_factory.from_config(llm_cfg.to_dict())
 
     def create_from_config(
         self,
@@ -109,7 +108,7 @@ class LearnClientFactory:
         context: IsolationContext,
         database: Database,
         embedder: Embedder | None = None,
-        llm_client: LLMClient | None = None,
+        llm_client: ChatClient | None = None,
         learn_config: DotDict | None = None,
         ensure_schema: bool = True,
     ) -> LearnClient:

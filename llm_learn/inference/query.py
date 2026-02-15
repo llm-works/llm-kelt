@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from llm_infer.client import LLMClient
+from llm_infer.client import ChatClient
 
 from .context import ContextBuilder
 
@@ -66,7 +66,7 @@ class ContextQuery:
 
     def __init__(
         self,
-        client: LLMClient,
+        client: ChatClient,
         context_builder: ContextBuilder,
         base_system_prompt: str = "",
         temperature: float = 0.7,
@@ -151,7 +151,7 @@ class ContextQuery:
         messages = self._build_messages(question, conversation)
 
         # Get response
-        response: str = await self._client.chat_async(
+        response = await self._client.chat_async(
             messages=messages,
             system=system if system else None,
             temperature=temperature if temperature is not None else self._temperature,
@@ -160,9 +160,9 @@ class ContextQuery:
 
         # Update conversation if provided
         if conversation:
-            conversation.add_assistant(response)
+            conversation.add_assistant(response.content)
 
-        return response
+        return response.content
 
     async def _build_rag_prompt(
         self,

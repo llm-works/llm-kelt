@@ -97,10 +97,18 @@ def _strip_quantization_suffix(model_name: str) -> str:
 @pytest.fixture(scope="session")
 def model_resolver(logger, config):
     """Model resolver using llm-learn.yaml models config."""
-    from llm_infer.models import ModelResolver, ModelsConfig
+    from llm_infer.models import ModelResolver
 
-    models_config = ModelsConfig.from_dict(config.models.to_dict())
-    return ModelResolver(logger, models_config.locations)
+    # Extract paths from locations config (handles both dict and string formats)
+    locations_raw = config.models.locations
+    locations = []
+    for loc in locations_raw:
+        if isinstance(loc, dict):
+            # Format: {'huggingface': '/path'} - extract the path value
+            locations.extend(loc.values())
+        else:
+            locations.append(loc)
+    return ModelResolver(logger, [Path(p) for p in locations])
 
 
 @pytest.fixture(scope="session")

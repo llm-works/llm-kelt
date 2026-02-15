@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from llm_infer.client import ChatResponse
 
 from llm_learn.inference.context import ContextBuilder
 from llm_learn.inference.embedder import EmbeddingResult
@@ -56,7 +57,7 @@ class TestRAGIntegration:
     def mock_llm_client(self):
         """Create a mock LLM client."""
         client = MagicMock()
-        client.chat_async = AsyncMock(return_value="Test response from LLM")
+        client.chat_async = AsyncMock(return_value=ChatResponse(content="Test response from LLM"))
         client.aclose = AsyncMock()
         return client
 

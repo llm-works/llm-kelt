@@ -42,11 +42,13 @@ class TestFactsEndToEnd:
         question = "What programming language would you recommend for a new backend project?"
 
         # Step 1: Query WITHOUT facts
-        response_without_facts = await llm_client.chat_async(
-            messages=[{"role": "user", "content": question}],
-            system=base_prompt,
-            temperature=0.3,  # Lower temperature for more consistent responses
-        )
+        response_without_facts = (
+            await llm_client.chat_async(
+                messages=[{"role": "user", "content": question}],
+                system=base_prompt,
+                temperature=0.3,  # Lower temperature for more consistent responses
+            )
+        ).content
 
         # Step 2: Add facts about preferences
         facts_learn_client.facts.add(
@@ -67,11 +69,13 @@ class TestFactsEndToEnd:
         assert "FastAPI" in prompt_with_facts
 
         # Step 4: Query WITH facts
-        response_with_facts = await llm_client.chat_async(
-            messages=[{"role": "user", "content": question}],
-            system=prompt_with_facts,
-            temperature=0.3,
-        )
+        response_with_facts = (
+            await llm_client.chat_async(
+                messages=[{"role": "user", "content": question}],
+                system=prompt_with_facts,
+                temperature=0.3,
+            )
+        ).content
 
         # Step 5: Verify the responses are different
         # The response with facts should be more context-aware
@@ -143,11 +147,13 @@ class TestFactsEndToEnd:
         assert "practical examples" in prompt_all_facts
 
         # Query with all facts
-        response = await llm_client.chat_async(
-            messages=[{"role": "user", "content": question}],
-            system=prompt_all_facts,
-            temperature=0.3,
-        )
+        response = (
+            await llm_client.chat_async(
+                messages=[{"role": "user", "content": question}],
+                system=prompt_all_facts,
+                temperature=0.3,
+            )
+        ).content
 
         print("\n" + "=" * 60)
         print("RESPONSE WITH ALL FACTS:")

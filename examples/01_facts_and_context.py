@@ -128,7 +128,7 @@ async def demo_context_query(context_builder: ContextBuilder):
             messages=[{"role": "user", "content": question}],
             system="You are a coding assistant.",
         )
-        plain_clean = response_plain.replace("<think>\n\n</think>\n\n", "").strip()
+        plain_clean = response_plain.content.replace("<think>\n\n</think>\n\n", "").strip()
         print(f"  {LLM_A}{plain_clean[:600]}{RESET}")
         if len(plain_clean) > 600:
             print(f"  {MUTED}[...truncated]{RESET}")
