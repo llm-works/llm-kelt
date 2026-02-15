@@ -17,7 +17,7 @@ from llm_learn.core.models import Base
 from llm_learn.memory.atomic import models as atomic_models  # noqa: F401
 
 # Import training models so they're registered with Base for migrations
-from llm_learn.training import runs as training_runs  # noqa: F401
+from llm_learn.training import dpo as training_dpo  # noqa: F401
 
 # Enable appinfra's schema isolation fixtures for parallel test execution
 pytest_plugins = ["appinfra.db.pg.testing"]

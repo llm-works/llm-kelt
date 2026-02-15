@@ -10,8 +10,9 @@ from pathlib import Path
 
 from appinfra.log import Logger
 
-from ..core.utils import utc_now
-from .config import LoraConfig, TrainingConfig, TrainingResult
+from llm_learn.core.base import utc_now
+
+from ..config import LoraConfig, TrainingConfig, TrainingResult
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 

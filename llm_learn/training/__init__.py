@@ -1,26 +1,31 @@
 """Training modules for Learn framework.
 
 Contains utilities for training data preparation and model fine-tuning:
-- export: Data export to training formats (DPO, SFT, classifier)
+- dpo: DPO training with pair management
+- lora: LoRA/SFT training and adapter registry
+- export: Data export to training formats
 - config: Training configuration dataclasses
-- runs: Training run tracking for iterative workflows
-- lora: LoRA/SFT training (requires 'training' extras)
-- dpo: DPO training (requires 'training' extras)
 
 Install training dependencies with: pip install llm-learn[training]
 """
 
 from .config import LoraConfig, TrainingConfig, TrainingResult
+from .dpo import DpoClient, DpoRun, DpoRunInfo, DpoRunPair, PairList
 from .export import (
     ExportResult,
     export_feedback_classifier,
     export_feedback_sft,
     export_preferences_dpo,
 )
-from .registry import AdapterInfo, AdapterRegistry
-from .runs import TrainingRun, TrainingRunClient, TrainingRunInfo, TrainingRunPair
+from .lora import AdapterInfo, AdapterRegistry
 
 __all__ = [
+    # DPO training
+    "DpoClient",
+    "DpoRun",
+    "DpoRunInfo",
+    "DpoRunPair",
+    "PairList",
     # Export functions
     "ExportResult",
     "export_preferences_dpo",
@@ -33,14 +38,11 @@ __all__ = [
     # Adapter registry
     "AdapterRegistry",
     "AdapterInfo",
-    # Training run tracking
-    "TrainingRun",
-    "TrainingRunClient",
-    "TrainingRunInfo",
-    "TrainingRunPair",
     # Training functions (lazy-loaded, require 'training' extras)
     "train_lora",
     "train_dpo",
+    "DpoTrainer",
+    "LoraTrainer",
 ]
 
 
@@ -54,4 +56,12 @@ def __getattr__(name: str):
         from .dpo import train_dpo
 
         return train_dpo
+    if name == "DpoTrainer":
+        from .dpo import DpoTrainer
+
+        return DpoTrainer
+    if name == "LoraTrainer":
+        from .lora import LoraTrainer
+
+        return LoraTrainer
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

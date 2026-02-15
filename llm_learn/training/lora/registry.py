@@ -14,7 +14,7 @@ import httpx
 import yaml
 from appinfra.log import Logger
 
-from .config import TrainingResult
+from ..config import TrainingResult
 
 
 @dataclass
