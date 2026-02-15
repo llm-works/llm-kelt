@@ -1,11 +1,29 @@
 """E2E test fixtures for training tests."""
 
+import gc
 import json
 from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def cleanup_gpu_memory():
+    """Clear GPU memory after each test to prevent OOM in subsequent tests."""
+    yield
+    # Cleanup after test
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+    except ImportError:
+        pass
+
 
 # Quantization suffixes to strip when finding training models
 QUANTIZATION_SUFFIXES = ("-w4a16", "-w8a16", "-gptq-int4", "-gptq-int8", "-awq", "-gguf")
