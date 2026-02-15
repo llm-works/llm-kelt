@@ -16,8 +16,19 @@ from typing import Any, cast
 
 from appinfra.db.utils import detach
 from appinfra.log import Logger
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, String, Table, Text, select
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    select,
+)
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
 from llm_learn.core.base import Base, utc_now
@@ -47,7 +58,7 @@ class DpoRun(Base):
     __tablename__ = "dpo_runs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    context_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    context_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     adapter_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -97,6 +108,7 @@ class DpoRunPair(Base):
     __table_args__ = (
         Index("idx_dpo_run_pairs_run", "run_id"),
         Index("idx_dpo_run_pairs_fact", "preference_fact_id"),
+        UniqueConstraint("preference_fact_id", name="uq_dpo_run_pair_exclusive"),
     )
 
     def __repr__(self) -> str:
@@ -326,26 +338,37 @@ class DpoClient:
             if run is None:
                 raise NotFoundError(f"DPO run {run_id} not found")
 
-            # Check for already-assigned pairs
-            existing_stmt = select(DpoRunPair.preference_fact_id).where(
-                DpoRunPair.preference_fact_id.in_(pair_fact_ids)
-            )
-            existing_ids = set(session.scalars(existing_stmt).all())
+            self._check_pairs_available(session, pair_fact_ids)
+            self._insert_pairs(session, run_id, pair_fact_ids)
 
-            if existing_ids:
-                raise ConflictError(f"Pairs already assigned to other runs: {sorted(existing_ids)}")
-
-            # Assign pairs
-            for fact_id in pair_fact_ids:
-                pair = DpoRunPair(run_id=run_id, preference_fact_id=fact_id)
-                session.add(pair)
-
-            session.flush()
             self._lg.debug(
                 "assigned pairs to DPO run",
                 extra={"run_id": run_id, "count": len(pair_fact_ids)},
             )
             return len(pair_fact_ids)
+
+    def _check_pairs_available(self, session, pair_fact_ids: Sequence[int]) -> None:
+        """Check that none of the pairs are already assigned."""
+        existing_stmt = select(DpoRunPair.preference_fact_id).where(
+            DpoRunPair.preference_fact_id.in_(pair_fact_ids)
+        )
+        existing_ids = set(session.scalars(existing_stmt).all())
+        if existing_ids:
+            raise ConflictError(f"Pairs already assigned to other runs: {sorted(existing_ids)}")
+
+    def _insert_pairs(self, session, run_id: int, pair_fact_ids: Sequence[int]) -> None:
+        """Insert pairs, handling concurrent assignment race condition."""
+        try:
+            for fact_id in pair_fact_ids:
+                session.add(DpoRunPair(run_id=run_id, preference_fact_id=fact_id))
+            session.flush()
+        except IntegrityError as e:
+            session.rollback()
+            if "uq_dpo_run_pair_exclusive" in str(e):
+                raise ConflictError(
+                    "Pairs were assigned by another process during operation"
+                ) from e
+            raise
 
     def get_pairs(self, run_id: int) -> PairList:
         """
