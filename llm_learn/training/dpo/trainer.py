@@ -200,33 +200,51 @@ class DpoTrainer:
             processing_class=self.tokenizer,
         )
 
+    def _collect_metrics(self) -> dict:
+        """Extract training metrics from trainer log history."""
+        if self.trainer is None:
+            return {}
+
+        metrics: dict = {}
+        if not self.trainer.state.log_history:
+            return metrics
+
+        # Find logs with DPO metrics (exclude final summary which only has train_loss)
+        dpo_logs = [log for log in self.trainer.state.log_history if "rewards/accuracies" in log]
+        if dpo_logs:
+            first_log, last_log = dpo_logs[0], dpo_logs[-1]
+            # Final metrics (most important)
+            metrics["accuracy"] = last_log.get("rewards/accuracies", 0.0)
+            metrics["margins"] = last_log.get("rewards/margins", 0.0)
+            metrics["loss"] = last_log.get("loss", 0.0)
+            # Starting metrics (for comparison)
+            metrics["accuracy_start"] = first_log.get("rewards/accuracies", 0.0)
+            metrics["margins_start"] = first_log.get("rewards/margins", 0.0)
+            metrics["loss_start"] = first_log.get("loss", 0.0)
+
+        # Overall train loss from final summary
+        final_log = self.trainer.state.log_history[-1]
+        metrics["train_loss"] = final_log.get("train_loss", final_log.get("loss", 0.0))
+        metrics["epochs"] = final_log.get("epoch", 0.0)
+
+        if self.eval_dataset:
+            metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
+
+        return metrics
+
     def _save_and_collect_metrics(self) -> tuple[Path, dict]:
         """Save adapter and collect training metrics."""
         if self.trainer is None:
-            raise RuntimeError(
-                "_create_trainer() must be called before _save_and_collect_metrics()"
-            )
+            raise RuntimeError("_create_trainer() must be called first")
         if self.tokenizer is None:
-            raise RuntimeError("_load_model() must be called before _save_and_collect_metrics()")
+            raise RuntimeError("_load_model() must be called first")
 
         final_path = self.output_dir / "final"
         self.trainer.save_model(str(final_path))
         self.tokenizer.save_pretrained(str(final_path))
         self._lg.info(f"saved adapter to {final_path}")
 
-        metrics: dict = {}
-        if self.trainer.state.log_history:
-            last_log = self.trainer.state.log_history[-1]
-            metrics["train_loss"] = last_log.get("train_loss", last_log.get("loss", 0.0))
-            # DPO-specific metrics
-            for key in ["rewards/chosen", "rewards/rejected", "rewards/margins"]:
-                if key in last_log:
-                    metrics[key.replace("/", "_")] = last_log[key]
-
-        if self.eval_dataset:
-            metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
-
-        return final_path, metrics
+        return final_path, self._collect_metrics()
 
     def _build_result(
         self, adapter_path: Path, metrics: dict, started_at: datetime
