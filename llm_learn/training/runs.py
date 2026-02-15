@@ -176,6 +176,7 @@ class TrainingRunClient:
         lg: Logger,
         session_factory: Callable[[], Any],
         context_key: str | None,
+        ensure_schema: bool = False,
     ) -> None:
         """
         Initialize client scoped to a specific context.
@@ -185,10 +186,27 @@ class TrainingRunClient:
             session_factory: Callable that returns a context manager for database sessions.
             context_key: Context key to scope all operations to (None = no filtering).
                 Supports SQL LIKE patterns (% and _) for prefix/pattern matching.
+            ensure_schema: If True, create training tables if they don't exist.
         """
         self._lg = lg
         self._session_factory = session_factory
         self.context_key = context_key
+
+        if ensure_schema:
+            self._ensure_tables()
+
+    def _ensure_tables(self) -> None:
+        """Create training tables if they don't exist."""
+        from sqlalchemy import Table
+
+        with self._session_factory() as session:
+            engine = session.get_bind()
+            tables = [
+                cast(Table, TrainingRun.__table__),
+                cast(Table, TrainingRunPair.__table__),
+            ]
+            Base.metadata.create_all(engine, tables=tables)
+            self._lg.debug("ensured training tables exist")
 
     def _build_context_filter(self, column):
         """Build context filter condition with pattern matching support."""
