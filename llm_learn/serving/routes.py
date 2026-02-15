@@ -22,7 +22,7 @@ from llm_infer.client import (
     BackendRequestError,
     BackendTimeoutError,
     BackendUnavailableError,
-    LLMClient,
+    ChatClient,
 )
 
 # Import directly to avoid circular import in llm_infer.serving.api
@@ -133,7 +133,7 @@ class _RouteHandlers:
     def __init__(
         self,
         model_name: str,
-        llm_client: LLMClient,
+        llm_client: ChatClient,
         context_builder: ContextBuilder,
     ) -> None:
         self.model_name = model_name
@@ -201,7 +201,7 @@ class _RouteHandlers:
     ) -> tuple[str, ChatCompletionUsage | None]:
         """Call backend LLM with error translation."""
         try:
-            response = await self.llm_client.chat_full_async(
+            response = await self.llm_client.chat_async(
                 messages=messages,
                 system=system,
                 temperature=temperature if temperature is not None else 0.7,
@@ -230,7 +230,7 @@ class _RouteHandlers:
 
 def create_router(
     model_name: str,
-    llm_client: LLMClient,
+    llm_client: ChatClient,
     context_builder: ContextBuilder,
 ) -> APIRouter:
     """Create API router with chat completions endpoint.

@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from llm_infer.client import ChatResponse
 
 from llm_learn.core.types import ScoredEntity
 from llm_learn.inference.embedder import EmbeddingResult
@@ -70,7 +71,7 @@ class TestContextQueryRAG:
     def mock_client(self):
         """Create mock LLM client."""
         client = MagicMock()
-        client.chat_async = AsyncMock(return_value="Test response")
+        client.chat_async = AsyncMock(return_value=ChatResponse(content="Test response"))
         client.aclose = AsyncMock()
         return client
 
@@ -464,7 +465,7 @@ class TestContextQueryBasic:
     def mock_client(self):
         """Create mock LLM client."""
         client = MagicMock()
-        client.chat_async = AsyncMock(return_value="Response")
+        client.chat_async = AsyncMock(return_value=ChatResponse(content="Response"))
         client.aclose = AsyncMock()
         return client
 

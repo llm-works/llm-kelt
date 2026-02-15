@@ -35,3 +35,9 @@ class SchemaVersionError(LearnError):
     """Raised when schema version is incompatible (e.g., newer than library)."""
 
     pass
+
+
+class ConflictError(LearnError):
+    """Raised when an operation conflicts with existing state."""
+
+    pass

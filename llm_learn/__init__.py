@@ -47,6 +47,7 @@ Usage:
 from .client import LearnClient
 from .core.exceptions import (
     ConfigurationError,
+    ConflictError,
     DatabaseError,
     LearnError,
     NotFoundError,
@@ -64,6 +65,7 @@ __all__ = [
     "NotFoundError",
     "DatabaseError",
     "ConfigurationError",
+    "ConflictError",
     "SchemaVersionError",
     "IsolationContext",
 ]
