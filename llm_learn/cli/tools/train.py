@@ -567,7 +567,8 @@ class PipelineTool(ModelResolutionMixin, Tool):
 
     def _build_training_params(self) -> tuple[float, bool, TrainingConfig]:
         """Build training parameters from profile and CLI args."""
-        beta, quantize, params = 0.1, True, {}
+        params: dict[str, Any] = {}
+        beta, quantize = 0.1, True
 
         if profile_name := getattr(self.args, "profile", None):
             beta, quantize, params = self._load_profile(profile_name)
