@@ -240,9 +240,16 @@ class DpoClient:
 
         Returns:
             DpoRunInfo with the new run's details.
+
+        Raises:
+            ValidationError: If client was created with a glob-pattern context_key.
         """
+        if _is_pattern(self.context_key):
+            raise ValidationError(
+                "Cannot create runs with a glob-pattern context_key; use an exact context."
+            )
         run = DpoRun(
-            context_key=self.context_key if not _is_pattern(self.context_key) else None,
+            context_key=self.context_key,
             adapter_name=adapter_name,
             config=config,
         )

@@ -354,6 +354,17 @@ class TestContextIsolation:
         assert len(runs) == 2
         assert {r.adapter_name for r in runs} == {"a1-run", "a2-run"}
 
+    def test_create_with_glob_pattern_raises(self, logger, database, clean_tables):
+        """Test that creating a run with glob-pattern context raises ValidationError."""
+        client = DpoClient(lg=logger, session_factory=database.session, context_key="tenant:*")
+
+        # Listing works with glob pattern
+        assert client.list() == []
+
+        # Creating should fail - glob patterns are read-only
+        with pytest.raises(ValidationError, match="glob-pattern"):
+            client.create(adapter_name="should-fail")
+
 
 class TestResetAll:
     """Test reset_all functionality."""
