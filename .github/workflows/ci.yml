@@ -88,7 +88,7 @@ jobs:
           python -m pip install sqlalchemy psycopg2-binary pgvector alembic httpx fastapi uvicorn pydantic
           # Install appinfra from develop branch (policy: use @develop during active development,
           # pin to specific commit for releases)
-          python -m pip install "appinfra @ git+https://github.com/serendip-ml/appinfra.git@develop"
+          python -m pip install "appinfra[all] @ git+https://github.com/serendip-ml/appinfra.git@develop"
           # Install llm-infer from develop branch (policy: use @develop during active development,
           # pin to specific commit for releases)
           python -m pip install "llm-infer @ git+https://github.com/serendip-ml/llm-infer.git@develop" --no-deps
@@ -143,7 +143,7 @@ jobs:
           python -m pip install sqlalchemy psycopg2-binary pgvector alembic httpx fastapi uvicorn pydantic
           # Install appinfra from develop branch (policy: use @develop during active development,
           # pin to specific commit for releases)
-          python -m pip install "appinfra @ git+https://github.com/serendip-ml/appinfra.git@develop"
+          python -m pip install "appinfra[all] @ git+https://github.com/serendip-ml/appinfra.git@develop"
           # Install llm-infer from develop branch (policy: use @develop during active development,
           # pin to specific commit for releases)
           python -m pip install "llm-infer @ git+https://github.com/serendip-ml/llm-infer.git@develop" --no-deps

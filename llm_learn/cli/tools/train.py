@@ -724,6 +724,236 @@ class PipelineTool(ModelResolutionMixin, Tool):
         return metrics
 
 
+class ResetTool(Tool):
+    """Reset DPO training data for a context."""
+
+    # Display name for NULL context_key (used in list output)
+    _NULL_CONTEXT_DISPLAY = "(no context)"
+
+    def __init__(self, parent: Any = None) -> None:
+        config = ToolConfig(
+            name="reset",
+            help_text="Reset DPO training runs for a context",
+        )
+        super().__init__(parent, config)
+
+    def add_args(self, parser) -> None:
+        parser.add_argument(
+            "--context",
+            default=None,
+            help="Context key to reset (omit to list contexts)",
+        )
+        parser.add_argument("--all", action="store_true", help="Reset ALL contexts")
+        parser.add_argument("--confirm", action="store_true", help="Skip confirmation prompt")
+
+    def _get_database(self) -> Database:
+        """Get Database instance from config."""
+        config = DotDict(**dict(self.app.config)) if self.app.config else DotDict()
+        dbs = getattr(config, "dbs", None)
+        if dbs is None or not hasattr(dbs, "main"):
+            raise ValueError("Database not configured: missing dbs.main in config")
+        return Database(self.lg, PG(self.lg, dbs.main))
+
+    def _normalize_context_key(self, context_key: str) -> str | None:
+        """Convert display name back to database value (handles NULL context)."""
+        return None if context_key == self._NULL_CONTEXT_DISPLAY else context_key
+
+    def _context_filter(self, column, context_key: str | None):
+        """Build SQLAlchemy filter for context_key (handles NULL correctly)."""
+        return column.is_(None) if context_key is None else column == context_key
+
+    def _list_contexts(self, session) -> list[tuple[str, int, int]]:
+        """List all contexts with run and pair counts."""
+        from sqlalchemy import func, select
+
+        from ...training.dpo import DpoRun, DpoRunPair
+
+        # Get distinct contexts with run counts
+        stmt = (
+            select(DpoRun.context_key, func.count(DpoRun.id).label("run_count"))
+            .group_by(DpoRun.context_key)
+            .order_by(DpoRun.context_key)
+        )
+        results = []
+        for row in session.execute(stmt):
+            display_key = row.context_key or self._NULL_CONTEXT_DISPLAY
+            run_count = row.run_count
+
+            # Count pairs for this context (use _context_filter for NULL handling)
+            pair_stmt = (
+                select(func.count())
+                .select_from(DpoRunPair)
+                .join(DpoRun, DpoRunPair.run_id == DpoRun.id)
+                .where(self._context_filter(DpoRun.context_key, row.context_key))
+            )
+            pair_count = session.scalar(pair_stmt) or 0
+            results.append((display_key, run_count, pair_count))
+
+        return results
+
+    def _count_data(self, session, context_key: str | None) -> tuple[int, int]:
+        """Count runs and pairs for the context."""
+        from sqlalchemy import func, select
+
+        from ...training.dpo import DpoRun, DpoRunPair
+
+        context_filter = self._context_filter(DpoRun.context_key, context_key)
+
+        # Count runs
+        run_count_stmt = select(func.count()).select_from(DpoRun).where(context_filter)
+        run_count = session.scalar(run_count_stmt) or 0
+
+        # Count pairs linked to those runs
+        pair_count_stmt = (
+            select(func.count())
+            .select_from(DpoRunPair)
+            .join(DpoRun, DpoRunPair.run_id == DpoRun.id)
+            .where(context_filter)
+        )
+        pair_count = session.scalar(pair_count_stmt) or 0
+
+        return run_count, pair_count
+
+    def _delete_data(self, session, context_key: str | None) -> tuple[int, int]:
+        """Delete runs and pairs for the context. Returns (runs_deleted, pairs_deleted)."""
+        from sqlalchemy import delete, select
+
+        from ...training.dpo import DpoRun, DpoRunPair
+
+        context_filter = self._context_filter(DpoRun.context_key, context_key)
+
+        # Get run IDs for this context
+        run_ids_stmt = select(DpoRun.id).where(context_filter)
+        run_ids = list(session.scalars(run_ids_stmt).all())
+
+        if not run_ids:
+            return 0, 0
+
+        # Delete pairs first (FK constraint)
+        pairs_stmt = delete(DpoRunPair).where(DpoRunPair.run_id.in_(run_ids))
+        pairs_result = session.execute(pairs_stmt)
+        pairs_deleted = pairs_result.rowcount
+
+        # Delete runs
+        runs_stmt = delete(DpoRun).where(DpoRun.id.in_(run_ids))
+        runs_result = session.execute(runs_stmt)
+        runs_deleted = runs_result.rowcount
+
+        return runs_deleted, pairs_deleted
+
+    def _count_all_data(self, session) -> tuple[int, int]:
+        """Count all runs and pairs across all contexts."""
+        from sqlalchemy import func, select
+
+        from ...training.dpo import DpoRun, DpoRunPair
+
+        run_count = session.scalar(select(func.count()).select_from(DpoRun)) or 0
+        pair_count = session.scalar(select(func.count()).select_from(DpoRunPair)) or 0
+        return run_count, pair_count
+
+    def _delete_all_data(self, session) -> tuple[int, int]:
+        """Delete all runs and pairs. Returns (runs_deleted, pairs_deleted)."""
+        from sqlalchemy import delete
+
+        from ...training.dpo import DpoRun, DpoRunPair
+
+        # Delete pairs first (FK constraint)
+        pairs_result = session.execute(delete(DpoRunPair))
+        pairs_deleted = pairs_result.rowcount
+
+        # Delete runs
+        runs_result = session.execute(delete(DpoRun))
+        runs_deleted = runs_result.rowcount
+
+        return runs_deleted, pairs_deleted
+
+    def run(self, **kwargs: Any) -> int:
+        context_key = getattr(self.args, "context", None)
+        reset_all = getattr(self.args, "all", False)
+        confirm = getattr(self.args, "confirm", False)
+
+        db = self._get_database()
+
+        with db.session() as session:
+            # Handle --all: reset everything
+            if reset_all:
+                return self._run_reset_all(session, confirm)
+
+            # List contexts if none specified
+            if not context_key:
+                return self._run_list_contexts(session)
+
+            # Reset specific context
+            return self._run_reset_context(session, context_key, confirm)
+
+    def _run_list_contexts(self, session) -> int:
+        """List available contexts."""
+        contexts = self._list_contexts(session)
+        if not contexts:
+            print("No training runs found.")
+            return 0
+
+        print("\nAvailable contexts:\n")
+        print(f"  {'Context':<30} {'Runs':>8} {'Pairs':>10}")
+        print(f"  {'-' * 30} {'-' * 8} {'-' * 10}")
+        for ctx, runs, pairs in contexts:
+            print(f"  {ctx:<30} {runs:>8} {pairs:>10}")
+        print("\nUse --context <name> to reset a specific context.")
+        return 0
+
+    def _run_reset_context(self, session, context_key: str, confirm: bool) -> int:
+        """Reset a specific context."""
+        # Convert display name to database value (handles "(no context)" -> None)
+        db_context_key = self._normalize_context_key(context_key)
+        run_count, pair_count = self._count_data(session, db_context_key)
+
+        if run_count == 0:
+            print(f"No training data found for context '{context_key}'")
+            return 0
+
+        print(f"\nThis will delete for context '{context_key}':")
+        print(f"  Training runs:    {run_count}")
+        print(f"  Run-pair links:   {pair_count}")
+        print()
+
+        if not confirm:
+            response = input("Proceed? [y/N] ").strip().lower()
+            if response != "y":
+                print("Aborted.")
+                return 1
+
+        runs_deleted, pairs_deleted = self._delete_data(session, db_context_key)
+        session.commit()
+
+        print(f"Deleted {runs_deleted} runs, {pairs_deleted} run-pair links")
+        return 0
+
+    def _run_reset_all(self, session, confirm: bool) -> int:
+        """Reset all contexts."""
+        run_count, pair_count = self._count_all_data(session)
+
+        if run_count == 0:
+            print("No training data found.")
+            return 0
+
+        print("\nThis will delete ALL training data:")
+        print(f"  Training runs:    {run_count}")
+        print(f"  Run-pair links:   {pair_count}")
+        print()
+
+        if not confirm:
+            response = input("Are you sure? [y/N] ").strip().lower()
+            if response != "y":
+                print("Aborted.")
+                return 1
+
+        runs_deleted, pairs_deleted = self._delete_all_data(session)
+        session.commit()
+
+        print(f"Deleted {runs_deleted} runs, {pairs_deleted} run-pair links")
+        return 0
+
+
 class TrainTool(Tool):
     """Training commands for DPO workflow."""
 
@@ -738,6 +968,7 @@ class TrainTool(Tool):
         self.add_tool(DpoTool(self))
         self.add_tool(RegisterTool(self))
         self.add_tool(PipelineTool(self))
+        self.add_tool(ResetTool(self))
 
     def run(self, **kwargs: Any) -> int:
         """Delegate to subtool."""
