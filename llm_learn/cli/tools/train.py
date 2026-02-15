@@ -19,7 +19,8 @@ class ModelResolutionMixin:
     def _get_models_config(self) -> DotDict:
         """Get models config section."""
         config = DotDict(**dict(self.app.config)) if self.app.config else DotDict()  # type: ignore[attr-defined]
-        return getattr(config, "models", DotDict())
+        models = getattr(config, "models", None)
+        return models if isinstance(models, DotDict) else DotDict()
 
     def _get_model_locations(self) -> list[Path]:
         """Get model search locations from config."""
@@ -114,12 +115,20 @@ class ExportTool(Tool):
         """Parse ISO date string to datetime."""
         if date_str is None:
             return None
-        return datetime.fromisoformat(date_str)
+        try:
+            return datetime.fromisoformat(date_str)
+        except ValueError as e:
+            raise ValueError(
+                f"Invalid date format '{date_str}': expected ISO format (e.g., 2024-01-15)"
+            ) from e
 
     def _get_database(self) -> Database:
         """Create Database from config."""
         config = DotDict(**dict(self.app.config)) if self.app.config else DotDict()
-        return Database(self.lg, PG(self.lg, config.dbs.main))
+        dbs = getattr(config, "dbs", None)
+        if dbs is None or not hasattr(dbs, "main"):
+            raise ValueError("Database not configured: missing dbs.main in config")
+        return Database(self.lg, PG(self.lg, dbs.main))
 
     def _get_export_filters(self) -> dict[str, Any]:
         """Extract export filters from args."""
@@ -223,7 +232,8 @@ class DpoTool(ModelResolutionMixin, Tool):
 
     def _build_configs(self) -> tuple[float, bool, TrainingConfig]:
         """Build training configuration from args and profile."""
-        beta, quantize, params = 0.1, True, {}
+        params: dict[str, Any] = {}
+        beta, quantize = 0.1, True
 
         profile_name = getattr(self.args, "profile", None)
         if profile_name:
@@ -334,12 +344,10 @@ class RegisterTool(Tool):
         config = DotDict(**dict(self.app.config)) if self.app.config else DotDict()
         adapters_cfg = getattr(config, "adapters", None)
         lora_cfg = getattr(adapters_cfg, "lora", None) if adapters_cfg else None
-        base_path = lora_cfg.base_path if lora_cfg and hasattr(lora_cfg, "base_path") else None
-
-        if base_path is None:
+        if not lora_cfg or not hasattr(lora_cfg, "base_path"):
             raise ValueError("adapters.lora.base_path not configured")
 
-        return base_path
+        return str(lora_cfg.base_path)
 
     def _build_training_result(self, adapter_path: Path) -> TrainingResult:
         """Build a minimal TrainingResult for registration."""
@@ -401,6 +409,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
             help_text="Run full DPO workflow: export -> train -> register",
         )
         super().__init__(parent, config)
+        self._db: Database | None = None
         self._dpo_client = None
         self._run_id: int | None = None
 
@@ -440,16 +449,24 @@ class PipelineTool(ModelResolutionMixin, Tool):
 
         return Path("./training-output")
 
+    def _get_database(self) -> Database:
+        """Get or create cached Database instance."""
+        if self._db is None:
+            config = DotDict(**dict(self.app.config)) if self.app.config else DotDict()
+            dbs = getattr(config, "dbs", None)
+            if dbs is None or not hasattr(dbs, "main"):
+                raise ValueError("Database not configured: missing dbs.main in config")
+            self._db = Database(self.lg, PG(self.lg, dbs.main))
+        return self._db
+
     def _get_dpo_client(self):
         """Get or create DpoClient for run tracking."""
         if self._dpo_client is None:
             from ...training.dpo import DpoClient
 
-            config = DotDict(**dict(self.app.config)) if self.app.config else DotDict()
-            db = Database(self.lg, PG(self.lg, config.dbs.main))
             self._dpo_client = DpoClient(
                 lg=self.lg,
-                session_factory=db.session,
+                session_factory=self._get_database().session,
                 context_key=self.args.context,
             )
         return self._dpo_client
@@ -465,26 +482,23 @@ class PipelineTool(ModelResolutionMixin, Tool):
                 raise ValueError(f"DPO run {run_id} not found")
             if run.status != "pending":
                 raise ValueError(f"DPO run {run_id} is {run.status}, expected pending")
-            return run_id
+            return int(run_id)
 
         # Look for existing pending run with same adapter name
         pending = client.list(status="pending")
         for run in pending:
             if run.adapter_name == self.args.id:
                 self.lg.info("using existing pending run", extra={"run_id": run.id})
-                return run.id
+                return int(run.id)
 
         # Create new run
         run = client.create(adapter_name=self.args.id)
         self.lg.info("created new DPO run", extra={"run_id": run.id})
-        return run.id
+        return int(run.id)
 
     def _run_export(self, output_path: Path) -> int:
         """Run export step."""
         from ...training.export import export_preferences_dpo
-
-        config = DotDict(**dict(self.app.config)) if self.app.config else DotDict()
-        db = Database(self.lg, PG(self.lg, config.dbs.main))
 
         context_key = self.args.context
         category = getattr(self.args, "category", None)
@@ -493,7 +507,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
         self.lg.info("step 1/3: exporting preferences", extra={"context": context_key})
 
         result = export_preferences_dpo(
-            session_factory=db.session,
+            session_factory=self._get_database().session,
             context_key=context_key,
             output_path=output_path,
             category=category,
@@ -520,7 +534,11 @@ class PipelineTool(ModelResolutionMixin, Tool):
                 profile_dict = dict(profile)
                 beta = profile_dict.get("beta", beta)
                 quantize = profile_dict.get("quantize", quantize)
-                for key, param in [("epochs", "num_epochs"), ("batch_size", "batch_size")]:
+                for key, param in [
+                    ("epochs", "num_epochs"),
+                    ("batch_size", "batch_size"),
+                    ("learning_rate", "learning_rate"),
+                ]:
                     if key in profile_dict:
                         params[param] = profile_dict[key]
 
@@ -548,7 +566,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
         )
 
         try:
-            result = train_dpo(
+            result: TrainingResult = train_dpo(
                 lg=self.lg,
                 data_path=data_path,
                 output_dir=adapter_path,
