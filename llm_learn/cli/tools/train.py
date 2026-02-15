@@ -613,6 +613,16 @@ class PipelineTool(ModelResolutionMixin, Tool):
         lora_cfg = getattr(adapters_cfg, "lora", None) if adapters_cfg else None
         return lora_cfg.base_path if lora_cfg and hasattr(lora_cfg, "base_path") else None
 
+    def _do_register(self, registry, training_result: TrainingResult, overwrite: bool):
+        """Perform the actual adapter registration."""
+        return registry.register(
+            training_result=training_result,
+            adapter_id=self.args.id,
+            description=getattr(self.args, "description", None),
+            enabled=True,
+            overwrite=overwrite,
+        )
+
     def _run_register(self, training_result: TrainingResult) -> int:
         """Run registration step."""
         from ...training.lora import AdapterRegistry
@@ -624,19 +634,23 @@ class PipelineTool(ModelResolutionMixin, Tool):
 
         registry = AdapterRegistry(self.lg, base_path)
         self.lg.info("step 3/3: registering adapter", extra={"adapter_id": self.args.id})
+        overwrite = getattr(self.args, "overwrite", False)
 
         try:
-            info = registry.register(
-                training_result=training_result,
-                adapter_id=self.args.id,
-                description=getattr(self.args, "description", None),
-                enabled=True,
-                overwrite=getattr(self.args, "overwrite", False),
-            )
+            info = self._do_register(registry, training_result, overwrite)
             print(f"[3/3] Registered adapter '{info.adapter_id}'")
             return 0
         except ValueError as e:
-            self.lg.error("registration failed", extra={"error": str(e)})
+            error_msg = str(e)
+            if "already exists" in error_msg and not overwrite:
+                response = input(f"\nAdapter '{self.args.id}' already exists. Overwrite? [y/N] ")
+                if response.lower() in ("y", "yes"):
+                    info = self._do_register(registry, training_result, overwrite=True)
+                    print(f"[3/3] Registered adapter '{info.adapter_id}'")
+                    return 0
+                print("Registration skipped.")
+                return 1
+            self.lg.error("registration failed", extra={"error": error_msg})
             return 1
 
     def _validate_args(self) -> bool:
@@ -690,30 +704,36 @@ class PipelineTool(ModelResolutionMixin, Tool):
 
         if self._run_export(data_path) != 0:
             client.fail(self._run_id, "Export failed: no preferences found")
-            print("\nPipeline failed at step 1 (export)")
-            return 1
+            return self._pipeline_fail("step 1 (export)")
 
-        # Mark run as started before training
         client.start(self._run_id)
-
         training_result = self._run_train(data_path, adapter_path, model_path)
         if training_result is None:
             client.fail(self._run_id, "Training failed")
-            print("\nPipeline failed at step 2 (training)")
-            return 1
+            return self._pipeline_fail("step 2 (training)")
 
-        if getattr(self.args, "skip_register", False):
-            client.complete(self._run_id, metrics=self._extract_metrics(training_result))
-            print(f"\nTraining complete! Adapter at: {training_result.adapter_path}")
-            return 0
+        return self._finish_pipeline(client, training_result)
 
-        if self._run_register(training_result) != 0:
-            client.fail(self._run_id, "Registration failed")
-            print("\nPipeline failed at step 3 (registration)")
-            return 1
+    def _pipeline_fail(self, step: str) -> int:
+        """Print pipeline failure message and return error code."""
+        print(f"\nPipeline failed at {step}")
+        return 1
 
+    def _finish_pipeline(self, client, training_result: TrainingResult) -> int:
+        """Handle registration and completion after successful training."""
+        skip_register = getattr(self.args, "skip_register", False)
+        reg_failed = False if skip_register else self._run_register(training_result) != 0
+
+        # Always record metrics if training succeeded
         client.complete(self._run_id, metrics=self._extract_metrics(training_result))
-        print(f"\nPipeline complete! Adapter '{self.args.id}' is ready.")
+
+        if skip_register:
+            print(f"\nTraining complete! Adapter at: {training_result.adapter_path}")
+        elif reg_failed:
+            print("\nTraining complete, but registration failed (see above)")
+            return 1
+        else:
+            print(f"\nPipeline complete! Adapter '{self.args.id}' is ready.")
         return 0
 
     def _extract_metrics(self, result: TrainingResult) -> dict:
@@ -763,14 +783,15 @@ class ResetTool(Tool):
         return column.is_(None) if context_key is None else column == context_key
 
     def _list_contexts(self, session) -> list[tuple[str, int, int]]:
-        """List all contexts with run and pair counts."""
+        """List all contexts with run and pair counts (excludes deleted runs)."""
         from sqlalchemy import func, select
 
         from ...training.dpo import DpoRun, DpoRunPair
 
-        # Get distinct contexts with run counts
+        # Get distinct contexts with run counts (excluding deleted)
         stmt = (
             select(DpoRun.context_key, func.count(DpoRun.id).label("run_count"))
+            .where(DpoRun.status != "deleted")
             .group_by(DpoRun.context_key)
             .order_by(DpoRun.context_key)
         )
@@ -784,7 +805,10 @@ class ResetTool(Tool):
                 select(func.count())
                 .select_from(DpoRunPair)
                 .join(DpoRun, DpoRunPair.run_id == DpoRun.id)
-                .where(self._context_filter(DpoRun.context_key, row.context_key))
+                .where(
+                    self._context_filter(DpoRun.context_key, row.context_key),
+                    DpoRun.status != "deleted",
+                )
             )
             pair_count = session.scalar(pair_stmt) or 0
             results.append((display_key, run_count, pair_count))
@@ -792,15 +816,19 @@ class ResetTool(Tool):
         return results
 
     def _count_data(self, session, context_key: str | None) -> tuple[int, int]:
-        """Count runs and pairs for the context."""
+        """Count runs and pairs for the context (excludes deleted runs)."""
         from sqlalchemy import func, select
 
         from ...training.dpo import DpoRun, DpoRunPair
 
         context_filter = self._context_filter(DpoRun.context_key, context_key)
 
-        # Count runs
-        run_count_stmt = select(func.count()).select_from(DpoRun).where(context_filter)
+        # Count runs (excluding deleted)
+        run_count_stmt = (
+            select(func.count())
+            .select_from(DpoRun)
+            .where(context_filter, DpoRun.status != "deleted")
+        )
         run_count = session.scalar(run_count_stmt) or 0
 
         # Count pairs linked to those runs
@@ -815,54 +843,67 @@ class ResetTool(Tool):
         return run_count, pair_count
 
     def _delete_data(self, session, context_key: str | None) -> tuple[int, int]:
-        """Delete runs and pairs for the context. Returns (runs_deleted, pairs_deleted)."""
-        from sqlalchemy import delete, select
+        """Soft-delete runs for the context. Returns (runs_deleted, pairs_freed)."""
+        from sqlalchemy import delete, select, update
 
         from ...training.dpo import DpoRun, DpoRunPair
 
         context_filter = self._context_filter(DpoRun.context_key, context_key)
 
-        # Get run IDs for this context
-        run_ids_stmt = select(DpoRun.id).where(context_filter)
+        # Get run IDs for this context (excluding already deleted)
+        run_ids_stmt = select(DpoRun.id).where(context_filter, DpoRun.status != "deleted")
         run_ids = list(session.scalars(run_ids_stmt).all())
 
         if not run_ids:
             return 0, 0
 
-        # Delete pairs first (FK constraint)
+        # Delete pairs to free them for reuse (hard delete - they're just links)
         pairs_stmt = delete(DpoRunPair).where(DpoRunPair.run_id.in_(run_ids))
         pairs_result = session.execute(pairs_stmt)
         pairs_deleted = pairs_result.rowcount
 
-        # Delete runs
-        runs_stmt = delete(DpoRun).where(DpoRun.id.in_(run_ids))
+        # Soft-delete runs (set status to 'deleted')
+        runs_stmt = update(DpoRun).where(DpoRun.id.in_(run_ids)).values(status="deleted")
         runs_result = session.execute(runs_stmt)
         runs_deleted = runs_result.rowcount
 
         return runs_deleted, pairs_deleted
 
     def _count_all_data(self, session) -> tuple[int, int]:
-        """Count all runs and pairs across all contexts."""
+        """Count all runs and pairs across all contexts (excludes deleted)."""
         from sqlalchemy import func, select
 
         from ...training.dpo import DpoRun, DpoRunPair
 
-        run_count = session.scalar(select(func.count()).select_from(DpoRun)) or 0
+        run_count = (
+            session.scalar(
+                select(func.count()).select_from(DpoRun).where(DpoRun.status != "deleted")
+            )
+            or 0
+        )
         pair_count = session.scalar(select(func.count()).select_from(DpoRunPair)) or 0
         return run_count, pair_count
 
     def _delete_all_data(self, session) -> tuple[int, int]:
-        """Delete all runs and pairs. Returns (runs_deleted, pairs_deleted)."""
-        from sqlalchemy import delete
+        """Soft-delete all runs. Returns (runs_deleted, pairs_freed)."""
+        from sqlalchemy import delete, select, update
 
         from ...training.dpo import DpoRun, DpoRunPair
 
-        # Delete pairs first (FK constraint)
-        pairs_result = session.execute(delete(DpoRunPair))
+        # Get IDs of non-deleted runs
+        run_ids = list(session.scalars(select(DpoRun.id).where(DpoRun.status != "deleted")).all())
+
+        if not run_ids:
+            return 0, 0
+
+        # Delete pairs to free them (hard delete - they're just links)
+        pairs_result = session.execute(delete(DpoRunPair).where(DpoRunPair.run_id.in_(run_ids)))
         pairs_deleted = pairs_result.rowcount
 
-        # Delete runs
-        runs_result = session.execute(delete(DpoRun))
+        # Soft-delete runs
+        runs_result = session.execute(
+            update(DpoRun).where(DpoRun.id.in_(run_ids)).values(status="deleted")
+        )
         runs_deleted = runs_result.rowcount
 
         return runs_deleted, pairs_deleted

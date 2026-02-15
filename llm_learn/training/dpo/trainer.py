@@ -52,6 +52,7 @@ class DpoTrainer:
         training_config: TrainingConfig | None = None,
         beta: float = 0.1,
         quantize: bool = True,
+        reference_free: bool = False,
     ):
         self._lg = lg
         self.data_path = Path(data_path)
@@ -61,8 +62,10 @@ class DpoTrainer:
         self.training_config = training_config or TrainingConfig()
         self.beta = beta
         self.quantize = quantize
+        self.reference_free = reference_free
 
         self.model = None
+        self.ref_model = None
         self.tokenizer = None
         self.trainer = None
         self.train_dataset = None
@@ -123,6 +126,30 @@ class DpoTrainer:
             f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
         )
 
+    def _load_reference_model(self):
+        """Load reference model for DPO (unless reference-free mode).
+
+        DPO requires comparing policy model outputs against a reference model.
+        Loading a separate reference model uses more VRAM but produces correct
+        gradients. The reference_free option skips this to save memory at the
+        cost of training quality.
+        """
+        if self.reference_free:
+            self._lg.info("reference-free mode: skipping reference model")
+            return
+
+        import torch
+        from transformers import AutoModelForCausalLM
+
+        self._lg.info("loading reference model for DPO")
+        self.ref_model = AutoModelForCausalLM.from_pretrained(
+            self.base_model,
+            quantization_config=self._quant_config,
+            device_map="auto",
+            torch_dtype=torch.bfloat16 if self._quant_config is None else None,
+            trust_remote_code=True,
+        )
+
     def _load_data(self):
         """Load training and eval datasets."""
         self.train_dataset, self.eval_dataset = _load_dpo_dataset(
@@ -161,50 +188,63 @@ class DpoTrainer:
         )
 
     def _create_trainer(self):
-        """Create the DPOTrainer.
-
-        Note: ref_model=None is intentional. When model is a PEFT model, TRL's
-        DPOTrainer computes reference logprobs by temporarily disabling the LoRA
-        adapter. This saves ~50% GPU memory vs loading a separate reference model.
-        """
+        """Create the DPOTrainer."""
         from trl import DPOTrainer
 
         self.trainer = DPOTrainer(
             model=self.model,
-            ref_model=None,
+            ref_model=self.ref_model,
             args=self._create_training_args(),
             train_dataset=self.train_dataset,
             eval_dataset=self.eval_dataset,
             processing_class=self.tokenizer,
         )
 
+    def _collect_metrics(self) -> dict:
+        """Extract training metrics from trainer log history."""
+        if self.trainer is None:
+            return {}
+
+        metrics: dict = {}
+        if not self.trainer.state.log_history:
+            return metrics
+
+        # Find logs with DPO metrics (exclude final summary which only has train_loss)
+        dpo_logs = [log for log in self.trainer.state.log_history if "rewards/accuracies" in log]
+        if dpo_logs:
+            first_log, last_log = dpo_logs[0], dpo_logs[-1]
+            # Final metrics (most important)
+            metrics["accuracy"] = last_log.get("rewards/accuracies", 0.0)
+            metrics["margins"] = last_log.get("rewards/margins", 0.0)
+            metrics["loss"] = last_log.get("loss", 0.0)
+            # Starting metrics (for comparison)
+            metrics["accuracy_start"] = first_log.get("rewards/accuracies", 0.0)
+            metrics["margins_start"] = first_log.get("rewards/margins", 0.0)
+            metrics["loss_start"] = first_log.get("loss", 0.0)
+
+        # Overall train loss from final summary
+        final_log = self.trainer.state.log_history[-1]
+        metrics["train_loss"] = final_log.get("train_loss", final_log.get("loss", 0.0))
+        metrics["epochs"] = final_log.get("epoch", 0.0)
+
+        if self.eval_dataset:
+            metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
+
+        return metrics
+
     def _save_and_collect_metrics(self) -> tuple[Path, dict]:
         """Save adapter and collect training metrics."""
         if self.trainer is None:
-            raise RuntimeError(
-                "_create_trainer() must be called before _save_and_collect_metrics()"
-            )
+            raise RuntimeError("_create_trainer() must be called first")
         if self.tokenizer is None:
-            raise RuntimeError("_load_model() must be called before _save_and_collect_metrics()")
+            raise RuntimeError("_load_model() must be called first")
 
         final_path = self.output_dir / "final"
         self.trainer.save_model(str(final_path))
         self.tokenizer.save_pretrained(str(final_path))
         self._lg.info(f"saved adapter to {final_path}")
 
-        metrics: dict = {}
-        if self.trainer.state.log_history:
-            last_log = self.trainer.state.log_history[-1]
-            metrics["train_loss"] = last_log.get("loss", 0.0)
-            # DPO-specific metrics
-            for key in ["rewards/chosen", "rewards/rejected", "rewards/margins"]:
-                if key in last_log:
-                    metrics[key.replace("/", "_")] = last_log[key]
-
-        if self.eval_dataset:
-            metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
-
-        return final_path, metrics
+        return final_path, self._collect_metrics()
 
     def _build_result(
         self, adapter_path: Path, metrics: dict, started_at: datetime
@@ -228,7 +268,7 @@ class DpoTrainer:
                     "learning_rate": self.training_config.learning_rate,
                     "max_seq_length": self.training_config.max_seq_length,
                 },
-                "dpo": {"beta": self.beta},
+                "dpo": {"beta": self.beta, "reference_free": self.reference_free},
                 "quantize": self.quantize,
             },
             started_at=started_at,
@@ -245,6 +285,7 @@ class DpoTrainer:
 
         self._load_data()
         self._load_model()
+        self._load_reference_model()
         self._create_trainer()
         if self.trainer is None:
             raise RuntimeError("Failed to create trainer")
@@ -264,6 +305,7 @@ def train_dpo(
     training_config: TrainingConfig | None = None,
     beta: float = 0.1,
     quantize: bool = True,
+    reference_free: bool = False,
 ) -> TrainingResult:
     """Train a LoRA adapter using Direct Preference Optimization.
 
@@ -276,6 +318,7 @@ def train_dpo(
         training_config: Training hyperparameters. Uses sensible defaults if not provided.
         beta: DPO beta parameter (higher = more conservative).
         quantize: Use 4-bit quantization (QLoRA). Reduces VRAM ~4x.
+        reference_free: Skip reference model to save VRAM (may reduce quality).
 
     Returns:
         TrainingResult with adapter path, metrics, and training metadata.
@@ -289,5 +332,6 @@ def train_dpo(
         training_config=training_config,
         beta=beta,
         quantize=quantize,
+        reference_free=reference_free,
     )
     return trainer.train()

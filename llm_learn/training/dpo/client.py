@@ -157,12 +157,13 @@ class DpoRunInfo:
 # =============================================================================
 
 # Valid status values and allowed transitions
-VALID_STATUSES = {"pending", "running", "completed", "failed"}
+VALID_STATUSES = {"pending", "running", "completed", "failed", "deleted"}
 STATUS_TRANSITIONS = {
-    "pending": {"running", "failed"},  # Can start or fail directly
-    "running": {"completed", "failed"},  # Can complete or fail
-    "completed": set(),  # Terminal state
-    "failed": set(),  # Terminal state
+    "pending": {"running", "failed", "deleted"},  # Can start, fail, or be deleted
+    "running": {"completed", "failed", "deleted"},  # Can complete, fail, or be deleted
+    "completed": {"deleted"},  # Can only be deleted
+    "failed": {"deleted"},  # Can only be deleted
+    "deleted": set(),  # Terminal state
 }
 
 
@@ -277,14 +278,16 @@ class DpoClient:
         status: str | None = None,
         limit: int = 100,
         descending: bool = True,
+        include_deleted: bool = False,
     ) -> list[DpoRunInfo]:
         """
         List DPO runs.
 
         Args:
-            status: Filter by status (pending, running, completed, failed).
+            status: Filter by status (pending, running, completed, failed, deleted).
             limit: Maximum number of runs to return.
             descending: Order by created_at descending (newest first).
+            include_deleted: Include deleted runs (default False).
 
         Returns:
             List of DpoRunInfo.
@@ -299,6 +302,8 @@ class DpoClient:
                 stmt = stmt.where(context_filter)
             if status is not None:
                 stmt = stmt.where(DpoRun.status == status)
+            elif not include_deleted:
+                stmt = stmt.where(DpoRun.status != "deleted")
             order = DpoRun.created_at.desc() if descending else DpoRun.created_at.asc()
             stmt = stmt.order_by(order).limit(limit)
 

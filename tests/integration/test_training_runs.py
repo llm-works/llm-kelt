@@ -283,21 +283,21 @@ class TestLifecycle:
             dpo_client.complete(run.id)
 
     def test_invalid_transition_completed_to_failed(self, dpo_client, clean_tables):
-        """Test that completed runs cannot transition."""
+        """Test that completed runs cannot transition to failed (only to deleted)."""
         run = dpo_client.create()
         dpo_client.start(run.id)
         dpo_client.complete(run.id)
 
-        with pytest.raises(ValidationError, match="Cannot transition.*terminal"):
+        with pytest.raises(ValidationError, match="Cannot transition"):
             dpo_client.fail(run.id, "error")
 
     def test_invalid_transition_failed_to_running(self, dpo_client, clean_tables):
-        """Test that failed runs cannot restart."""
+        """Test that failed runs cannot restart (only transition to deleted)."""
         run = dpo_client.create()
         dpo_client.start(run.id)
         dpo_client.fail(run.id, "error")
 
-        with pytest.raises(ValidationError, match="Cannot transition.*terminal"):
+        with pytest.raises(ValidationError, match="Cannot transition"):
             dpo_client.start(run.id)
 
     def test_start_nonexistent_run(self, dpo_client, clean_tables):
