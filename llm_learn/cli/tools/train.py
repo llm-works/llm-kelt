@@ -779,12 +779,12 @@ class ResetTool(Tool):
             display_key = row.context_key or self._NULL_CONTEXT_DISPLAY
             run_count = row.run_count
 
-            # Count pairs for this context
+            # Count pairs for this context (use _context_filter for NULL handling)
             pair_stmt = (
                 select(func.count())
                 .select_from(DpoRunPair)
                 .join(DpoRun, DpoRunPair.run_id == DpoRun.id)
-                .where(DpoRun.context_key == row.context_key)
+                .where(self._context_filter(DpoRun.context_key, row.context_key))
             )
             pair_count = session.scalar(pair_stmt) or 0
             results.append((display_key, run_count, pair_count))
