@@ -2,7 +2,7 @@
 # Used by llm-infer's ModelResolver to find local models
 
 locations:
-  - !include "../.env.yaml#paths.models"
+  - !include "../.env.yaml#paths.models.huggingface"
 
 # Model selection defaults
 selection:
@@ -11,8 +11,14 @@ selection:
   embed:
     default: bge-small-en-v1.5
 
-# Model-specific configurations (optional)
-models: {}
-
 defaults:
   system_prompt: null
+
+# Model-specific configurations
+# Matched by model name (from selected.yaml or --model)
+
+models:
+  # ---------------------------------------------------------------------------
+  # Qwen2.5 instruct models
+  # ---------------------------------------------------------------------------
+  qwen2.5-coder-3b-instruct-bnb-4bit: {}

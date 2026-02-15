@@ -37,4 +37,31 @@ learn:
   # Default system prompt (can be overridden per query)
   default_system_prompt: ""
 
+# Training configuration (for DPO workflow)
+training:
+  base_model: Qwen/Qwen2.5-3B-Instruct  # Default base model for training
+  output_dir: ./training-output          # Default output directory
+
+  profiles:
+    default:
+      beta: 0.1
+      quantize: true
+      epochs: 3
+      batch_size: 4
+      learning_rate: 2e-4
+
+    aggressive:
+      beta: 0.05
+      quantize: true
+      epochs: 5
+      batch_size: 4
+      learning_rate: 5e-4
+
+    quick:
+      beta: 0.1
+      quantize: true
+      epochs: 1
+      batch_size: 2
+      learning_rate: 2e-4
+
 models: !include "./models.yaml"
