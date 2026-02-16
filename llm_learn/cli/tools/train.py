@@ -7,10 +7,20 @@ from typing import Any
 from appinfra.app.tools import Tool, ToolConfig
 from appinfra.db.pg import PG
 from appinfra.dot_dict import DotDict
+from llm_infer import compute_adapter_metadata
 from llm_infer.models import ModelResolver
 
 from ...core.database import Database
 from ...training.config import LoraConfig, TrainingConfig, TrainingResult
+
+
+def _print_adapter_metadata(adapter_path: Path, label: str = "Adapter") -> None:
+    """Print adapter metadata (mtime, md5) for verification."""
+    meta = compute_adapter_metadata(adapter_path)
+    if meta.md5 == "unknown":
+        print(f"  {label} metadata: (weights file not found)")
+    else:
+        print(f"  {label} metadata: mtime={meta.mtime}, md5={meta.md5}")
 
 
 class ModelResolutionMixin:
@@ -312,6 +322,7 @@ class DpoTool(ModelResolutionMixin, Tool):
         print(f"  Base model: {result.base_model}")
         print(f"  Duration: {result.duration_seconds:.1f}s")
         print(f"  Samples trained: {result.samples_trained}")
+        _print_adapter_metadata(result.adapter_path)
         if result.metrics:
             print("  Metrics:")
             for key, value in result.metrics.items():
@@ -386,7 +397,9 @@ class RegisterTool(Tool):
             return 1
 
         status = "enabled" if info.enabled else "disabled"
-        print(f"Registered adapter '{info.adapter_id}' to {info.path}\n  Status: {status}")
+        print(f"Registered adapter '{info.adapter_id}' to {info.path}")
+        print(f"  Status: {status}")
+        _print_adapter_metadata(info.path)
         return 0
 
     def run(self, **kwargs: Any) -> int:
@@ -601,6 +614,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
                 quantize=quantize,
             )
             print(f"[2/3] Training complete ({result.duration_seconds:.1f}s)")
+            _print_adapter_metadata(result.adapter_path, label="Trained adapter")
             return result
         except Exception as e:
             self.lg.error("training failed", extra={"exception": e})
@@ -639,6 +653,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
         try:
             info = self._do_register(registry, training_result, overwrite)
             print(f"[3/3] Registered adapter '{info.adapter_id}'")
+            _print_adapter_metadata(info.path, label="Deployed adapter")
             return 0
         except ValueError as e:
             error_msg = str(e)
@@ -647,6 +662,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
                 if response.lower() in ("y", "yes"):
                     info = self._do_register(registry, training_result, overwrite=True)
                     print(f"[3/3] Registered adapter '{info.adapter_id}'")
+                    _print_adapter_metadata(info.path, label="Deployed adapter")
                     return 0
                 print("Registration skipped.")
                 return 1
@@ -709,8 +725,9 @@ class PipelineTool(ModelResolutionMixin, Tool):
         client.start(self._run_id)
         training_result = self._run_train(data_path, adapter_path, model_path)
         if training_result is None:
-            client.fail(self._run_id, "Training failed")
-            return self._pipeline_fail("step 2 (training)")
+            # Reset to pending - training crash is often transient (OOM, etc.)
+            client.reset(self._run_id)
+            return self._pipeline_fail("step 2 (training) - run reset to pending for retry")
 
         return self._finish_pipeline(client, training_result)
 
@@ -741,6 +758,10 @@ class PipelineTool(ModelResolutionMixin, Tool):
         metrics = dict(result.metrics) if result.metrics else {}
         metrics["duration_seconds"] = result.duration_seconds
         metrics["samples_trained"] = result.samples_trained
+
+        # Add adapter metadata for identification/verification
+        adapter_meta = compute_adapter_metadata(result.adapter_path)
+        metrics["adapter"] = adapter_meta.to_dict()
         return metrics
 
 

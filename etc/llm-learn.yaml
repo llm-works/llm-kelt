@@ -40,7 +40,7 @@ learn:
 # Training configuration (for DPO workflow)
 training:
   base_model: Qwen/Qwen2.5-3B-Instruct          # Default base model for training
-  output_dir: ./tmp/llm-learn/training-output   # Default output directory
+  output_dir: /tmp/llm-learn/training-output   # Default output directory
 
   profiles:
     default:

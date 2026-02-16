@@ -160,7 +160,12 @@ class DpoRunInfo:
 VALID_STATUSES = {"pending", "running", "completed", "failed", "deleted"}
 STATUS_TRANSITIONS = {
     "pending": {"running", "failed", "deleted"},  # Can start, fail, or be deleted
-    "running": {"completed", "failed", "deleted"},  # Can complete, fail, or be deleted
+    "running": {
+        "pending",
+        "completed",
+        "failed",
+        "deleted",
+    },  # Can reset, complete, fail, or delete
     "completed": {"deleted"},  # Can only be deleted
     "failed": {"deleted"},  # Can only be deleted
     "deleted": set(),  # Terminal state
@@ -479,12 +484,17 @@ class DpoClient:
         """Mark a DPO run as failed."""
         self._transition(run_id, "failed", error_message=error)
 
+    def reset(self, run_id: int) -> None:
+        """Reset a running DPO run back to pending (for retry after transient failure)."""
+        self._transition(run_id, "pending", clear_started=True)
+
     def _transition(
         self,
         run_id: int,
         new_status: str,
         metrics: dict | None = None,
         error_message: str | None = None,
+        clear_started: bool = False,
     ) -> None:
         """Transition a run to a new status with validation."""
         with self._session_factory() as session:
@@ -499,23 +509,25 @@ class DpoClient:
                     f"Allowed transitions: {allowed or 'none (terminal state)'}"
                 )
 
-            now = utc_now()
-            run.status = new_status
-
-            if new_status == "running":
-                run.started_at = now
-            elif new_status in ("completed", "failed"):
-                run.completed_at = now
-
-            if metrics is not None:
-                run.metrics = metrics
-            if error_message is not None:
-                run.error_message = error_message
-
+            self._apply_transition(run, new_status, metrics, error_message, clear_started)
             self._lg.debug(
-                "DPO run status changed",
-                extra={"run_id": run_id, "new_status": new_status},
+                "DPO run status changed", extra={"run_id": run_id, "new_status": new_status}
             )
+
+    def _apply_transition(self, run, new_status, metrics, error_message, clear_started):
+        """Apply status transition and update timestamps/fields."""
+        run.status = new_status
+        now = utc_now()
+        if new_status == "running":
+            run.started_at = now
+        elif new_status in ("completed", "failed"):
+            run.completed_at = now
+        elif clear_started:
+            run.started_at = None
+        if metrics is not None:
+            run.metrics = metrics
+        if error_message is not None:
+            run.error_message = error_message
 
     # -------------------------------------------------------------------------
     # Utility
