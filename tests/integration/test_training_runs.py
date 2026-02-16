@@ -81,6 +81,76 @@ class TestRunCRUD:
         with pytest.raises(NotFoundError, match="Parent run 99999 not found"):
             dpo_client.create(adapter_name="orphan", based_on=99999)
 
+    def test_replace_stale_reuses_pending_run(self, dpo_client, clean_tables):
+        """Test that replace_stale=True (default) reuses existing pending run."""
+        first = dpo_client.create(adapter_name="first")
+        second = dpo_client.create(adapter_name="second")  # Should reuse first
+
+        # Same run ID - it was reused, not created new
+        assert second.id == first.id
+        # Only one run exists
+        assert len(dpo_client.list_runs()) == 1
+
+    def test_replace_stale_false_creates_new(self, dpo_client, clean_tables):
+        """Test that replace_stale=False always creates a new run."""
+        first = dpo_client.create(adapter_name="first")
+        second = dpo_client.create(adapter_name="second", replace_stale=False)
+
+        assert second.id != first.id
+        assert len(dpo_client.list_runs()) == 2
+
+    def test_replace_stale_clears_pairs(self, dpo_client, sample_preferences, clean_tables):
+        """Test that resetting a pending run clears its pairs."""
+        pairs = make_pairs(sample_preferences[:2])
+
+        first = dpo_client.create(adapter_name="first")
+        dpo_client.assign_pairs(first.id, pairs)
+        assert dpo_client.count_pending_pairs() == 2
+
+        # Create again - should reset and clear pairs
+        second = dpo_client.create(adapter_name="second")
+        assert second.id == first.id
+        assert dpo_client.count_pending_pairs() == 0
+
+    def test_replace_stale_callback_rejects(self, dpo_client, clean_tables):
+        """Test that on_replace callback can reject replacement."""
+        first = dpo_client.create(adapter_name="first")
+
+        # Callback returns False - should create new run instead
+        second = dpo_client.create(
+            adapter_name="second",
+            on_replace=lambda existing: False,
+        )
+
+        assert second.id != first.id
+        assert len(dpo_client.list_runs()) == 2
+
+    def test_replace_stale_callback_accepts(self, dpo_client, clean_tables):
+        """Test that on_replace callback can accept replacement."""
+        callback_called = []
+
+        first = dpo_client.create(adapter_name="first")
+
+        def track_callback(existing):
+            callback_called.append(existing.id)
+            return True
+
+        second = dpo_client.create(adapter_name="second", on_replace=track_callback)
+
+        assert second.id == first.id
+        assert callback_called == [first.id]
+
+    def test_replace_stale_ignores_running_runs(self, dpo_client, clean_tables):
+        """Test that running runs are not replaced."""
+        first = dpo_client.create(adapter_name="first")
+        dpo_client.start(first.id)  # Now it's running
+
+        second = dpo_client.create(adapter_name="second")
+
+        # Should create new since first is running, not pending
+        assert second.id != first.id
+        assert len(dpo_client.list_runs()) == 2
+
     def test_get_run(self, dpo_client, clean_tables):
         """Test getting a run by ID."""
         created = dpo_client.create(adapter_name="get-test")
@@ -97,17 +167,17 @@ class TestRunCRUD:
 
     def test_list_runs(self, dpo_client, clean_tables):
         """Test listing runs."""
-        dpo_client.create(adapter_name="run-1")
-        dpo_client.create(adapter_name="run-2")
-        dpo_client.create(adapter_name="run-3")
+        dpo_client.create(adapter_name="run-1", replace_stale=False)
+        dpo_client.create(adapter_name="run-2", replace_stale=False)
+        dpo_client.create(adapter_name="run-3", replace_stale=False)
 
         runs = dpo_client.list_runs()
         assert len(runs) == 3
 
     def test_list_runs_with_status_filter(self, dpo_client, clean_tables):
         """Test listing runs filtered by status."""
-        dpo_client.create(adapter_name="pending-run")
-        started_run = dpo_client.create(adapter_name="started-run")
+        dpo_client.create(adapter_name="pending-run", replace_stale=False)
+        started_run = dpo_client.create(adapter_name="started-run", replace_stale=False)
         dpo_client.start(started_run.id)
 
         pending = dpo_client.list_runs(status="pending")
@@ -125,9 +195,9 @@ class TestRunCRUD:
 
     def test_list_runs_descending(self, dpo_client, clean_tables):
         """Test listing runs in descending order (default)."""
-        dpo_client.create(adapter_name="first")
-        dpo_client.create(adapter_name="second")
-        dpo_client.create(adapter_name="third")
+        dpo_client.create(adapter_name="first", replace_stale=False)
+        dpo_client.create(adapter_name="second", replace_stale=False)
+        dpo_client.create(adapter_name="third", replace_stale=False)
 
         runs = dpo_client.list_runs(descending=True)
         assert runs[0].adapter_name == "third"  # Most recent first
@@ -456,9 +526,9 @@ class TestResetAll:
         """Test resetting all runs in context."""
         pairs = make_pairs(sample_preferences)
 
-        # Create runs and assign pairs
-        run1 = dpo_client.create(adapter_name="run-1")
-        run2 = dpo_client.create(adapter_name="run-2")
+        # Create runs and assign pairs (replace_stale=False to create multiple)
+        run1 = dpo_client.create(adapter_name="run-1", replace_stale=False)
+        run2 = dpo_client.create(adapter_name="run-2", replace_stale=False)
         dpo_client.assign_pairs(run1.id, pairs[:2])
         dpo_client.assign_pairs(run2.id, pairs[2:4])
 

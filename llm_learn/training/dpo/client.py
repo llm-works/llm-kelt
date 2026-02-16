@@ -312,16 +312,27 @@ class Client:
         adapter_name: str | None = None,
         config: dict | None = None,
         based_on: int | None = None,
+        replace_stale: bool = True,
+        on_replace: Callable[[RunInfo], bool] | None = None,
     ) -> RunInfo:
-        """Create a new DPO training run.
+        """Create a new DPO training run, or reset an existing pending run.
+
+        If a pending run already exists for this context and `replace_stale=True`,
+        clears its pairs and returns it (no new run created). This allows callers
+        to safely retry run creation without accumulating orphan runs.
 
         Args:
             adapter_name: Optional name for the adapter being trained.
             config: Optional training configuration dict.
             based_on: Optional run ID to base this run on (for lineage).
+            replace_stale: If True (default), reuse any existing pending run for
+                this context by clearing its pairs. If False, always create new.
+            on_replace: Optional callback invoked before resetting a pending run.
+                Receives the existing RunInfo. If it returns False, a new run is
+                created instead. Defaults to always True (reset without prompting).
 
         Returns:
-            RunInfo with the new run's details.
+            RunInfo with the run's details (existing reset or newly created).
 
         Raises:
             ValidationError: If client was created with a glob-pattern context_key.
@@ -332,6 +343,30 @@ class Client:
                 "Cannot create runs with a glob-pattern context_key; use an exact context."
             )
 
+        with self._session_factory() as session:
+            # Check for existing pending run to reuse (only when not creating child run)
+            if replace_stale and based_on is None:
+                existing = self._find_pending_run(session)
+                if existing is not None:
+                    # Check callback - if False, fall through to create new
+                    if on_replace is None or on_replace(RunInfo.from_model(existing)):
+                        return self._reset_pending_run(session, existing)
+
+            return self._create_new_run(session, adapter_name, config, based_on)
+
+    def _create_new_run(
+        self,
+        session,
+        adapter_name: str | None,
+        config: dict | None,
+        based_on: int | None,
+    ) -> RunInfo:
+        """Create a new training run in the database."""
+        if based_on is not None:
+            parent = self._get_run(session, based_on)
+            if parent is None:
+                raise NotFoundError(f"Parent run {based_on} not found")
+
         adapter = {"name": adapter_name} if adapter_name else None
         run = Run(
             method=self.method,
@@ -340,22 +375,36 @@ class Client:
             based_on=based_on,
             config=config,
         )
+        session.add(run)
+        session.flush()
+        info = RunInfo.from_model(run)
+        self._lg.debug(
+            "created training run",
+            extra={"run_id": info.id, "method": self.method, "adapter_name": adapter_name},
+        )
+        return info
 
-        with self._session_factory() as session:
-            # Validate based_on exists if specified
-            if based_on is not None:
-                parent = self._get_run(session, based_on)
-                if parent is None:
-                    raise NotFoundError(f"Parent run {based_on} not found")
+    def _find_pending_run(self, session) -> Run | None:
+        """Find existing pending run for this context."""
+        stmt = (
+            select(Run)
+            .where(Run.method == self.method)
+            .where(Run.context_key == self.context_key)
+            .where(Run.status == "pending")
+            .where(_not_deleted_filter(Run))
+            .order_by(Run.created_at.desc())
+            .limit(1)
+        )
+        return cast(Run | None, session.scalar(stmt))
 
-            session.add(run)
-            session.flush()
-            info = RunInfo.from_model(run)
-            self._lg.debug(
-                "created training run",
-                extra={"run_id": info.id, "method": self.method, "adapter_name": adapter_name},
-            )
-            return info
+    def _reset_pending_run(self, session, run: Run) -> RunInfo:
+        """Clear pairs from pending run and return it for reuse."""
+        self._clear_pending_pairs(session, run.id)
+        self._lg.debug(
+            "reset pending run for reuse",
+            extra={"run_id": run.id, "context_key": run.context_key},
+        )
+        return RunInfo.from_model(run)
 
     def get(self, run_id: int) -> RunInfo | None:
         """Get a training run by ID."""
