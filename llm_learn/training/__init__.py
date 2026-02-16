@@ -29,7 +29,7 @@ from .export import (
     generate_dpo_pairs,
 )
 from .lora import AdapterInfo, AdapterRegistry
-from .train_client import TrainClient
+from .client import Client as TrainClient
 
 __all__ = [
     # DPO training - models

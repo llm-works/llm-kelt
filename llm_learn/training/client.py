@@ -1,4 +1,4 @@
-"""TrainClient - aggregator for training method clients."""
+"""Training client - aggregator for training method clients."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from .dpo import DpoClient
 
 
-class TrainClient:
+class Client:
     """
     Aggregates all training method clients. Access via LearnClient.train.
 
@@ -34,7 +34,7 @@ class TrainClient:
         context_key: str | None,
     ) -> None:
         """
-        Initialize TrainClient.
+        Initialize training client.
 
         Args:
             lg: Logger instance for all training operations.
