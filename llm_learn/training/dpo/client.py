@@ -115,7 +115,7 @@ class TrainingRun(Base):
         return f"<TrainingRun(id={self.id}, method={self.method!r}, status={self.status!r})>"
 
 
-class DpoPendingPair(Base):
+class PendingPair(Base):
     """Temporary table for pairs assigned to pending/running DPO runs.
 
     Pairs reference solution facts via chosen/rejected fact IDs.
@@ -141,10 +141,10 @@ class DpoPendingPair(Base):
     __table_args__ = (Index("idx_dpo_pending_pairs_run", "run_id"),)
 
     def __repr__(self) -> str:
-        return f"<DpoPendingPair(run={self.run_id}, chosen={self.chosen_fact_id}, rejected={self.rejected_fact_id})>"
+        return f"<PendingPair(run={self.run_id}, chosen={self.chosen_fact_id}, rejected={self.rejected_fact_id})>"
 
 
-class DpoTrainedPair(Base):
+class TrainedPair(Base):
     """Permanent history of pairs used in completed DPO training.
 
     Pairs are moved here when a run completes successfully.
@@ -170,7 +170,7 @@ class DpoTrainedPair(Base):
     __table_args__ = (Index("idx_dpo_trained_pairs_run", "run_id"),)
 
     def __repr__(self) -> str:
-        return f"<DpoTrainedPair(run={self.run_id}, chosen={self.chosen_fact_id}, rejected={self.rejected_fact_id})>"
+        return f"<TrainedPair(run={self.run_id}, chosen={self.chosen_fact_id}, rejected={self.rejected_fact_id})>"
 
 
 # =============================================================================
@@ -230,10 +230,6 @@ class TrainingRunInfo:
         )
 
 
-# Backward compatibility alias
-DpoRunInfo = TrainingRunInfo
-
-
 # =============================================================================
 # Client
 # =============================================================================
@@ -248,7 +244,7 @@ STATUS_TRANSITIONS = {
 }
 
 
-class DpoClient:
+class Client:
     """Client for DPO training with pair management.
 
     Manages:
@@ -287,8 +283,8 @@ class DpoClient:
             engine = session.get_bind()
             tables = [
                 cast(Table, TrainingRun.__table__),
-                cast(Table, DpoPendingPair.__table__),
-                cast(Table, DpoTrainedPair.__table__),
+                cast(Table, PendingPair.__table__),
+                cast(Table, TrainedPair.__table__),
             ]
             Base.metadata.create_all(engine, tables=tables)
             self._lg.debug("ensured training tables exist")
@@ -486,8 +482,8 @@ class DpoClient:
         lineage_cte = lineage_cte.union_all(recursive)
 
         # Get trained pairs from all runs in lineage
-        stmt = select(DpoTrainedPair.chosen_fact_id, DpoTrainedPair.rejected_fact_id).where(
-            DpoTrainedPair.run_id.in_(select(lineage_cte.c.id))
+        stmt = select(TrainedPair.chosen_fact_id, TrainedPair.rejected_fact_id).where(
+            TrainedPair.run_id.in_(select(lineage_cte.c.id))
         )
 
         results = session.execute(stmt).all()
@@ -497,7 +493,7 @@ class DpoClient:
         """Insert pairs into pending table."""
         for chosen_id, rejected_id, prompt in pairs:
             session.add(
-                DpoPendingPair(
+                PendingPair(
                     run_id=run_id,
                     chosen_fact_id=chosen_id,
                     rejected_fact_id=rejected_id,
@@ -510,14 +506,14 @@ class DpoClient:
         """Delete all pending pairs for a run."""
         from sqlalchemy import delete
 
-        stmt = delete(DpoPendingPair).where(DpoPendingPair.run_id == run_id)
+        stmt = delete(PendingPair).where(PendingPair.run_id == run_id)
         result = session.execute(stmt)
         return int(result.rowcount)
 
     def _move_pairs_to_trained(self, session, run_id: int) -> int:
         """Move pairs from pending to trained (on completion)."""
         # Get pending pairs
-        stmt = select(DpoPendingPair).where(DpoPendingPair.run_id == run_id)
+        stmt = select(PendingPair).where(PendingPair.run_id == run_id)
         pending = list(session.scalars(stmt).all())
 
         if not pending:
@@ -527,7 +523,7 @@ class DpoClient:
         now = utc_now()
         for pair in pending:
             session.add(
-                DpoTrainedPair(
+                TrainedPair(
                     run_id=run_id,
                     chosen_fact_id=pair.chosen_fact_id,
                     rejected_fact_id=pair.rejected_fact_id,
@@ -539,7 +535,7 @@ class DpoClient:
         # Delete from pending
         from sqlalchemy import delete
 
-        session.execute(delete(DpoPendingPair).where(DpoPendingPair.run_id == run_id))
+        session.execute(delete(PendingPair).where(PendingPair.run_id == run_id))
 
         return len(pending)
 
@@ -562,12 +558,12 @@ class DpoClient:
 
             stmt = (
                 select(
-                    DpoPendingPair.chosen_fact_id,
-                    DpoPendingPair.rejected_fact_id,
-                    DpoPendingPair.prompt,
+                    PendingPair.chosen_fact_id,
+                    PendingPair.rejected_fact_id,
+                    PendingPair.prompt,
                 )
-                .where(DpoPendingPair.run_id == run_id)
-                .order_by(DpoPendingPair.assigned_at)
+                .where(PendingPair.run_id == run_id)
+                .order_by(PendingPair.assigned_at)
             )
 
             results = session.execute(stmt).all()
@@ -592,12 +588,12 @@ class DpoClient:
 
             stmt = (
                 select(
-                    DpoTrainedPair.chosen_fact_id,
-                    DpoTrainedPair.rejected_fact_id,
-                    DpoTrainedPair.prompt,
+                    TrainedPair.chosen_fact_id,
+                    TrainedPair.rejected_fact_id,
+                    TrainedPair.prompt,
                 )
-                .where(DpoTrainedPair.run_id == run_id)
-                .order_by(DpoTrainedPair.trained_at)
+                .where(TrainedPair.run_id == run_id)
+                .order_by(TrainedPair.trained_at)
             )
 
             results = session.execute(stmt).all()
@@ -608,10 +604,10 @@ class DpoClient:
         with self._session_factory() as session:
             from sqlalchemy import func
 
-            stmt = select(func.count()).select_from(DpoPendingPair)
+            stmt = select(func.count()).select_from(PendingPair)
 
             if run_id is not None:
-                stmt = stmt.where(DpoPendingPair.run_id == run_id)
+                stmt = stmt.where(PendingPair.run_id == run_id)
             else:
                 # Count for all runs in context
                 subq = select(TrainingRun.id).where(
@@ -621,7 +617,7 @@ class DpoClient:
                 context_filter = self._build_context_filter(TrainingRun.context_key)
                 if context_filter is not None:
                     subq = subq.where(context_filter)
-                stmt = stmt.where(DpoPendingPair.run_id.in_(subq))
+                stmt = stmt.where(PendingPair.run_id.in_(subq))
 
             return session.scalar(stmt) or 0
 
@@ -773,7 +769,7 @@ class DpoClient:
             if not run_ids:
                 return 0
 
-            stmt = delete(DpoPendingPair).where(DpoPendingPair.run_id.in_(run_ids))
+            stmt = delete(PendingPair).where(PendingPair.run_id.in_(run_ids))
             result = session.execute(stmt)
             count = int(result.rowcount)
 
@@ -786,8 +782,3 @@ def _is_pattern(context_key: str | None) -> bool:
     if context_key is None:
         return False
     return "*" in context_key or "?" in context_key
-
-
-# Backward compatibility aliases
-DpoRun = TrainingRun
-DpoRunPair = DpoPendingPair

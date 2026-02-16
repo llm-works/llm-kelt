@@ -13,10 +13,10 @@ from sqlalchemy import delete, func, or_, select
 
 from ...core.database import Database
 from ...core.utils import utc_now
-from ...training.config import LoraConfig, TrainingConfig, TrainingResult
-from ...training.dpo import DpoClient, DpoPendingPair, TrainingRun
+from ...training.config import RunConfig, RunResult
+from ...training.dpo import Client as DpoClient, PendingPair, TrainingRun
 from ...training.export import export_preferences_dpo
-from ...training.lora import AdapterRegistry
+from ...training.lora import AdapterRegistry, Config as LoraConfig
 
 
 def _print_adapter_metadata(adapter_path: Path, label: str = "Adapter") -> None:
@@ -244,7 +244,7 @@ class DpoTool(ModelResolutionMixin, Tool):
                 params[param] = getattr(self.args, arg)
         return beta, quantize, params
 
-    def _build_configs(self) -> tuple[float, bool, TrainingConfig]:
+    def _build_configs(self) -> tuple[float, bool, RunConfig]:
         """Build training configuration from args and profile."""
         params: dict[str, Any] = {}
         beta, quantize = 0.1, True
@@ -254,7 +254,7 @@ class DpoTool(ModelResolutionMixin, Tool):
             beta, quantize, params = self._apply_profile(self._load_profile(profile_name))
 
         beta, quantize, params = self._apply_cli_overrides(beta, quantize, params)
-        return beta, quantize, TrainingConfig(**params) if params else TrainingConfig()
+        return beta, quantize, RunConfig(**params) if params else RunConfig()
 
     def _validate_args(self) -> tuple[Path, Path] | None:
         """Validate args and return (data_path, output_dir) or None on error."""
@@ -325,7 +325,7 @@ class DpoTool(ModelResolutionMixin, Tool):
         self._print_result(result)
         return 0
 
-    def _print_result(self, result: TrainingResult) -> None:
+    def _print_result(self, result: RunResult) -> None:
         """Print training result summary."""
         print("\nTraining complete!")
         print(f"  Adapter: {result.adapter_path}")
@@ -370,10 +370,10 @@ class RegisterTool(Tool):
 
         return str(lora_cfg.base_path)
 
-    def _build_training_result(self, adapter_path: Path) -> TrainingResult:
-        """Build a minimal TrainingResult for registration."""
+    def _build_training_result(self, adapter_path: Path) -> RunResult:
+        """Build a minimal RunResult for registration."""
 
-        return TrainingResult(
+        return RunResult(
             adapter_path=adapter_path,
             base_model="unknown",
             method="dpo",
@@ -595,7 +595,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
                 params[param] = getattr(self.args, arg)
         return beta, quantize, params
 
-    def _build_training_params(self) -> tuple[float, bool, TrainingConfig]:
+    def _build_training_params(self) -> tuple[float, bool, RunConfig]:
         """Build training parameters from profile and CLI args."""
         params: dict[str, Any] = {}
         beta, quantize = 0.1, True
@@ -604,7 +604,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
             beta, quantize, params = self._load_profile(profile_name)
 
         beta, quantize, params = self._apply_cli_overrides(beta, quantize, params)
-        return beta, quantize, TrainingConfig(**params) if params else TrainingConfig()
+        return beta, quantize, RunConfig(**params) if params else RunConfig()
 
     def _resolve_based_on(self) -> Path | None:
         """Resolve --based-on argument to adapter path."""
@@ -625,7 +625,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
 
     def _run_train(  # cq: exempt=32
         self, data_path: Path, adapter_path: Path, model_path: Path
-    ) -> TrainingResult | None:
+    ) -> RunResult | None:
         """Run training step."""
         from ...training.dpo import train_dpo
 
@@ -642,7 +642,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
         )
 
         try:
-            result: TrainingResult = train_dpo(
+            result: RunResult = train_dpo(
                 lg=self.lg,
                 data_path=data_path,
                 output_dir=adapter_path,
@@ -667,7 +667,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
         lora_cfg = getattr(adapters_cfg, "lora", None) if adapters_cfg else None
         return lora_cfg.base_path if lora_cfg and hasattr(lora_cfg, "base_path") else None
 
-    def _do_register(self, registry, training_result: TrainingResult, overwrite: bool):
+    def _do_register(self, registry, training_result: RunResult, overwrite: bool):
         """Perform the actual adapter registration."""
         return registry.register(
             training_result=training_result,
@@ -677,7 +677,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
             overwrite=overwrite,
         )
 
-    def _run_register(self, training_result: TrainingResult) -> int:
+    def _run_register(self, training_result: RunResult) -> int:
         """Run registration step."""
 
         base_path = self._get_adapter_base_path()
@@ -775,7 +775,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
         print(f"\nPipeline failed at {step}")
         return 1
 
-    def _finish_pipeline(self, client, training_result: TrainingResult) -> int:
+    def _finish_pipeline(self, client, training_result: RunResult) -> int:
         """Handle registration and completion after successful training."""
         skip_register = getattr(self.args, "skip_register", False)
         reg_failed = False if skip_register else self._run_register(training_result) != 0
@@ -792,7 +792,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
             print(f"\nPipeline complete! Adapter '{self.args.id}' is ready.")
         return 0
 
-    def _extract_metrics(self, result: TrainingResult) -> dict:
+    def _extract_metrics(self, result: RunResult) -> dict:
         """Extract metrics from training result for DB storage."""
         metrics = dict(result.metrics) if result.metrics else {}
         metrics["duration_seconds"] = result.duration_seconds
@@ -860,8 +860,8 @@ class ResetTool(Tool):
 
         stmt = (
             select(func.count())
-            .select_from(DpoPendingPair)
-            .join(TrainingRun, DpoPendingPair.run_id == TrainingRun.id)
+            .select_from(PendingPair)
+            .join(TrainingRun, PendingPair.run_id == TrainingRun.id)
             .where(
                 self._context_filter(TrainingRun.context_key, context_key),
                 TrainingRun.method == "dpo",
@@ -903,8 +903,8 @@ class ResetTool(Tool):
         # Count pending pairs linked to those runs
         pair_count_stmt = (
             select(func.count())
-            .select_from(DpoPendingPair)
-            .join(TrainingRun, DpoPendingPair.run_id == TrainingRun.id)
+            .select_from(PendingPair)
+            .join(TrainingRun, PendingPair.run_id == TrainingRun.id)
             .where(context_filter, TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun))
         )
         pair_count = session.scalar(pair_count_stmt) or 0
@@ -928,7 +928,7 @@ class ResetTool(Tool):
         run_ids = [r.id for r in runs]
 
         # Delete pending pairs (hard delete - they become available for other runs)
-        pairs_stmt = delete(DpoPendingPair).where(DpoPendingPair.run_id.in_(run_ids))
+        pairs_stmt = delete(PendingPair).where(PendingPair.run_id.in_(run_ids))
         pairs_result = session.execute(pairs_stmt)
         pairs_deleted = pairs_result.rowcount
 
@@ -954,8 +954,8 @@ class ResetTool(Tool):
         pair_count = (
             session.scalar(
                 select(func.count())
-                .select_from(DpoPendingPair)
-                .join(TrainingRun, DpoPendingPair.run_id == TrainingRun.id)
+                .select_from(PendingPair)
+                .join(TrainingRun, PendingPair.run_id == TrainingRun.id)
                 .where(TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun))
             )
             or 0
@@ -981,7 +981,7 @@ class ResetTool(Tool):
 
         # Delete pending pairs (hard delete)
         pairs_result = session.execute(
-            delete(DpoPendingPair).where(DpoPendingPair.run_id.in_(run_ids))
+            delete(PendingPair).where(PendingPair.run_id.in_(run_ids))
         )
         pairs_deleted = pairs_result.rowcount
 

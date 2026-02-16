@@ -3,7 +3,8 @@
 import pytest
 
 from llm_learn import NotFoundError, ValidationError
-from llm_learn.training import DpoClient, PairTuple
+from llm_learn.training import PairTuple
+from llm_learn.training.dpo import Client as DpoClient
 
 
 @pytest.fixture

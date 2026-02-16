@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Export to classifier format (`export_feedback_classifier`) for binary classification
 - LoRA training with QLoRA support (`train_lora`)
 - DPO training (`train_dpo`)
-- `LoraConfig` and `TrainingConfig` for training configuration
+- `lora.Config` and `RunConfig` for training configuration
 - `AdapterRegistry` for managing trained adapters
 
 #### Infrastructure

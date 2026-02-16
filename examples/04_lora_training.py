@@ -36,8 +36,8 @@ from llm_learn import LearnClient, LearnClientFactory
 from llm_learn.training import (
     AdapterRegistry,
     LoraConfig,
-    TrainingConfig,
-    TrainingResult,
+    RunConfig,
+    RunResult,
     export_feedback_sft,
     train_lora,
 )
@@ -224,7 +224,7 @@ def export_training_data(learn: LearnClient, output_dir: Path) -> Path:
     return sft_path
 
 
-def run_training(lg: Logger, data_path: Path, output_dir: Path, base_model: str) -> TrainingResult:
+def run_training(lg: Logger, data_path: Path, output_dir: Path, base_model: str) -> RunResult:
     """Run LoRA training."""
     print(f"\n{H2}▶ Training LoRA Adapter{RESET}")
     print(f"  {MUTED}Base model: {base_model}{RESET}")
@@ -240,7 +240,7 @@ def run_training(lg: Logger, data_path: Path, output_dir: Path, base_model: str)
 
     import torch
 
-    training_config = TrainingConfig(
+    training_config = RunConfig(
         num_epochs=2,  # Quick demo
         batch_size=2,
         gradient_accumulation_steps=2,
@@ -277,7 +277,7 @@ def run_training(lg: Logger, data_path: Path, output_dir: Path, base_model: str)
 
 
 def register_adapter(
-    lg: Logger, result: TrainingResult, infer_url: str, adapter_base_path: Path
+    lg: Logger, result: RunResult, infer_url: str, adapter_base_path: Path
 ) -> AdapterRegistry:
     """Register adapter with llm-infer."""
     print(f"\n{H2}▶ Registering Adapter{RESET}")

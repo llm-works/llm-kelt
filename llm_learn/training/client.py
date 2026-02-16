@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from appinfra.log import Logger
 
 if TYPE_CHECKING:
-    from .dpo import DpoClient
+    from .dpo import Client as DpoClient
 
 
 class Client:
@@ -52,7 +52,7 @@ class Client:
     def dpo(self) -> DpoClient:
         """Access DPO training client."""
         if self._dpo is None:
-            from .dpo import DpoClient
+            from .dpo import Client as DpoClient
 
             self._dpo = DpoClient(self._lg, self._session_factory, self._context_key)
         return self._dpo

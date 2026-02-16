@@ -541,7 +541,7 @@ class TrainingJob:
     context_key: str
     method: str                   # "lora", "dpo", "classifier"
     status: str                   # "pending", "running", "completed", "failed"
-    config: TrainingConfig
+    config: RunConfig
     input_path: str               # Path to exported data
     output_path: str | None       # Path to trained artifact
     created_at: datetime

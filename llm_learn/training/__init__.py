@@ -9,14 +9,8 @@ Contains utilities for training data preparation and model fine-tuning:
 Install training dependencies with: pip install llm-learn[training]
 """
 
-from .config import LoraConfig, TrainingConfig, TrainingResult
+from .config import RunConfig, RunResult
 from .dpo import (
-    DpoClient,
-    DpoPendingPair,
-    DpoRun,
-    DpoRunInfo,
-    DpoRunPair,
-    DpoTrainedPair,
     PairTuple,
     TrainingRun,
     TrainingRunInfo,
@@ -32,17 +26,10 @@ from .lora import AdapterInfo, AdapterRegistry
 from .client import Client as TrainClient
 
 __all__ = [
-    # DPO training - models
-    "DpoClient",
+    # DPO training - models (access via training.dpo.*)
     "TrainingRun",
     "TrainingRunInfo",
-    "DpoPendingPair",
-    "DpoTrainedPair",
     "PairTuple",
-    # Backward compatibility aliases
-    "DpoRun",
-    "DpoRunInfo",
-    "DpoRunPair",
     # Export functions
     "ExportResult",
     "export_preferences_dpo",
@@ -50,9 +37,8 @@ __all__ = [
     "export_feedback_classifier",
     "generate_dpo_pairs",
     # Config dataclasses
-    "LoraConfig",
-    "TrainingConfig",
-    "TrainingResult",
+    "RunConfig",
+    "RunResult",
     # Adapter registry
     "AdapterRegistry",
     "AdapterInfo",
@@ -61,8 +47,6 @@ __all__ = [
     # Training functions (lazy-loaded, require 'training' extras)
     "train_lora",
     "train_dpo",
-    "DpoTrainer",
-    "LoraTrainer",
 ]
 
 
@@ -76,12 +60,4 @@ def __getattr__(name: str):
         from .dpo import train_dpo
 
         return train_dpo
-    if name == "DpoTrainer":
-        from .dpo import DpoTrainer
-
-        return DpoTrainer
-    if name == "LoraTrainer":
-        from .lora import LoraTrainer
-
-        return LoraTrainer
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

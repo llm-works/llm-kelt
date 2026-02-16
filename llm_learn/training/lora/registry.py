@@ -25,7 +25,7 @@ import httpx
 import yaml
 from appinfra.log import Logger
 
-from ..config import TrainingResult
+from ..config import RunResult
 
 
 @dataclass
@@ -82,7 +82,7 @@ class AdapterRegistry:
     def _write_adapter_config(
         self,
         adapter_path: Path,
-        training_result: TrainingResult,
+        training_result: RunResult,
         description: str,
     ) -> None:
         """Write config.yaml for the adapter."""
@@ -161,7 +161,7 @@ class AdapterRegistry:
 
     def register(
         self,
-        training_result: TrainingResult,
+        training_result: RunResult,
         adapter_id: str,
         description: str | None = None,
         deploy: bool = True,
@@ -351,7 +351,7 @@ class AdapterRegistry:
 
     def register_and_refresh(
         self,
-        training_result: TrainingResult,
+        training_result: RunResult,
         adapter_id: str,
         description: str | None = None,
         deploy: bool = True,

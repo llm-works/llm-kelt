@@ -12,7 +12,8 @@ from appinfra.log import Logger
 
 from llm_learn.core.base import utc_now
 
-from ..config import LoraConfig, TrainingConfig, TrainingResult
+from ..config import RunConfig, RunResult
+from .config import Config as LoraConfig
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
@@ -53,7 +54,7 @@ def _format_sft_example(example: dict) -> str:
     return f"### Instruction:\n{user_content}\n\n### Response:\n{output}"
 
 
-class LoraTrainer:
+class Trainer:
     """Trainer for LoRA adapters using supervised fine-tuning."""
 
     def __init__(
@@ -63,7 +64,7 @@ class LoraTrainer:
         output_dir: str | Path,
         base_model: str = DEFAULT_BASE_MODEL,
         lora_config: LoraConfig | None = None,
-        training_config: TrainingConfig | None = None,
+        training_config: RunConfig | None = None,
         quantize: bool = True,
     ):
         self._lg = lg
@@ -71,7 +72,7 @@ class LoraTrainer:
         self.output_dir = Path(output_dir)
         self.base_model = base_model
         self.lora_config = lora_config or LoraConfig()
-        self.training_config = training_config or TrainingConfig()
+        self.training_config = training_config or RunConfig()
         self.quantize = quantize
 
         self.model = None
@@ -207,9 +208,9 @@ class LoraTrainer:
 
     def _build_result(
         self, adapter_path: Path, metrics: dict, started_at: datetime
-    ) -> TrainingResult:
+    ) -> RunResult:
         """Build the training result."""
-        return TrainingResult(
+        return RunResult(
             adapter_path=adapter_path,
             base_model=self.base_model,
             method="lora",
@@ -234,7 +235,7 @@ class LoraTrainer:
             samples_trained=len(self.train_dataset) * self.training_config.num_epochs,  # type: ignore[arg-type]
         )
 
-    def train(self, resume_from: str | Path | None = None) -> TrainingResult:
+    def train(self, resume_from: str | Path | None = None) -> RunResult:
         """Run the full training pipeline."""
         started_at = utc_now()
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -263,10 +264,10 @@ def train_lora(
     output_dir: str | Path,
     base_model: str = DEFAULT_BASE_MODEL,
     lora_config: LoraConfig | None = None,
-    training_config: TrainingConfig | None = None,
+    training_config: RunConfig | None = None,
     quantize: bool = True,
     resume_from: str | Path | None = None,
-) -> TrainingResult:
+) -> RunResult:
     """Train a LoRA adapter using supervised fine-tuning.
 
     Args:
@@ -280,9 +281,9 @@ def train_lora(
         resume_from: Path to checkpoint to resume training from.
 
     Returns:
-        TrainingResult with adapter path, metrics, and training metadata.
+        RunResult with adapter path, metrics, and training metadata.
     """
-    trainer = LoraTrainer(
+    trainer = Trainer(
         lg=lg,
         data_path=data_path,
         output_dir=output_dir,

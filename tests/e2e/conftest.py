@@ -187,7 +187,7 @@ def adapter_lora_base_path(config) -> Path:
 @pytest.fixture
 def fast_lora_config():
     """Minimal LoRA config for fast tests."""
-    from llm_learn.training import LoraConfig
+    from llm_learn.training.lora import Config as LoraConfig
 
     return LoraConfig(
         r=8,
@@ -202,9 +202,9 @@ def fast_training_config():
     """Minimal training config for fast tests."""
     import torch
 
-    from llm_learn.training import TrainingConfig
+    from llm_learn.training import RunConfig
 
-    return TrainingConfig(
+    return RunConfig(
         num_epochs=1,
         batch_size=2,
         gradient_accumulation_steps=1,

@@ -12,7 +12,8 @@ from appinfra.log import Logger
 
 from llm_learn.core.base import utc_now
 
-from ..config import LoraConfig, TrainingConfig, TrainingResult
+from ..config import RunConfig, RunResult
+from ..lora import Config as LoraConfig
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
@@ -39,7 +40,7 @@ def _load_dpo_dataset(data_path: Path, eval_split: float):
     return dataset, None
 
 
-class DpoTrainer:
+class Trainer:
     """Trainer for LoRA adapters using Direct Preference Optimization."""
 
     def __init__(
@@ -49,7 +50,7 @@ class DpoTrainer:
         output_dir: str | Path,
         base_model: str = DEFAULT_BASE_MODEL,
         lora_config: LoraConfig | None = None,
-        training_config: TrainingConfig | None = None,
+        training_config: RunConfig | None = None,
         beta: float = 0.1,
         quantize: bool = True,
         reference_free: bool = False,
@@ -60,7 +61,7 @@ class DpoTrainer:
         self.output_dir = Path(output_dir)
         self.base_model = base_model
         self.lora_config = lora_config or LoraConfig()
-        self.training_config = training_config or TrainingConfig()
+        self.training_config = training_config or RunConfig()
         self.beta = beta
         self.quantize = quantize
         self.reference_free = reference_free
@@ -266,9 +267,9 @@ class DpoTrainer:
 
     def _build_result(
         self, adapter_path: Path, metrics: dict, started_at: datetime
-    ) -> TrainingResult:
+    ) -> RunResult:
         """Build the training result."""
-        return TrainingResult(
+        return RunResult(
             adapter_path=adapter_path,
             base_model=self.base_model,
             method="dpo",
@@ -295,7 +296,7 @@ class DpoTrainer:
             based_on=self.based_on,
         )
 
-    def train(self) -> TrainingResult:
+    def train(self) -> RunResult:
         """Run the full training pipeline."""
         started_at = utc_now()
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -321,12 +322,12 @@ def train_dpo(
     output_dir: str | Path,
     base_model: str = DEFAULT_BASE_MODEL,
     lora_config: LoraConfig | None = None,
-    training_config: TrainingConfig | None = None,
+    training_config: RunConfig | None = None,
     beta: float = 0.1,
     quantize: bool = True,
     reference_free: bool = False,
     based_on: Path | None = None,
-) -> TrainingResult:
+) -> RunResult:
     """Train a LoRA adapter using Direct Preference Optimization.
 
     Args:
@@ -342,9 +343,9 @@ def train_dpo(
         based_on: Path to existing adapter to train on top of (for lineage).
 
     Returns:
-        TrainingResult with adapter path, metrics, and training metadata.
+        RunResult with adapter path, metrics, and training metadata.
     """
-    trainer = DpoTrainer(
+    trainer = Trainer(
         lg=lg,
         data_path=data_path,
         output_dir=output_dir,

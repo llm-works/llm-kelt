@@ -139,7 +139,8 @@ result = export_feedback_sft(
 
 ```python
 from appinfra.log import LogConfig, LoggerFactory
-from llm_learn.training import train_lora, LoraConfig, TrainingConfig
+from llm_learn.training import train_lora, RunConfig
+from llm_learn.training.lora import Config as LoraConfig
 
 lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
 
@@ -150,7 +151,7 @@ result = train_lora(
     output_dir="./my_adapter",
     base_model="Qwen/Qwen2.5-7B-Instruct",
     lora_config=LoraConfig(r=16, lora_alpha=32),
-    training_config=TrainingConfig(
+    training_config=RunConfig(
         num_epochs=3,
         batch_size=4,
         learning_rate=2e-4,
@@ -235,8 +236,8 @@ See the [`examples/`](examples/) directory for complete working examples:
 | `export_feedback_classifier` | Export for binary classification |
 | `train_lora` | Train LoRA adapter with SFT |
 | `train_dpo` | Train with Direct Preference Optimization |
-| `LoraConfig` | LoRA hyperparameters |
-| `TrainingConfig` | Training hyperparameters |
+| `lora.Config` | LoRA hyperparameters |
+| `RunConfig` | Training hyperparameters |
 | `AdapterRegistry` | Manage trained adapters |
 
 ## Requirements
