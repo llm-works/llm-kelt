@@ -1,7 +1,8 @@
 """DPO export functions.
 
 Exports preference data for DPO training:
-- export_preferences: Export to TRL DPO format
+- export_run_pairs: Export pending pairs for a run to TRL DPO format
+- export_preferences: Export from atomic preferences (legacy)
 - generate_pairs: Generate pairs for Client.assign_pairs()
 """
 
@@ -12,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from ...core.utils import utc_now
 from ...memory.atomic.models import Fact, PreferenceDetails
@@ -88,6 +89,44 @@ def export_preferences(
 
     return ExportResult(
         path=output_path, count=count, context_key=context_key, format="dpo", exported_at=utc_now()
+    )
+
+
+def export_run_pairs(
+    session_factory: Callable[[], AbstractContextManager[Session]],
+    run_id: int,
+    output_path: str | Path,
+) -> ExportResult:
+    """Export pending pairs for a run in TRL DPO format: {prompt, chosen, rejected}.
+
+    Reads from dpo_pending_pairs and joins atomic_facts to get chosen/rejected content.
+    """
+    from .client import PendingPair  # Import here to avoid circular import
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Alias Fact for chosen and rejected joins
+    ChosenFact = aliased(Fact)
+    RejectedFact = aliased(Fact)
+
+    with session_factory() as session:
+        stmt = (
+            select(PendingPair.prompt, ChosenFact.content, RejectedFact.content)
+            .join(ChosenFact, PendingPair.chosen_fact_id == ChosenFact.id)
+            .join(RejectedFact, PendingPair.rejected_fact_id == RejectedFact.id)
+            .where(PendingPair.run_id == run_id)
+        )
+
+        count = 0
+        with output_path.open("w", encoding="utf-8") as f:
+            for prompt, chosen, rejected in session.execute(stmt):
+                record = {"prompt": prompt, "chosen": chosen, "rejected": rejected}
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                count += 1
+
+    return ExportResult(
+        path=output_path, count=count, context_key=None, format="dpo", exported_at=utc_now()
     )
 
 

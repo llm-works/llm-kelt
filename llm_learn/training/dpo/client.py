@@ -674,8 +674,19 @@ class Client:
         """Mark a training run as started."""
         self._transition(run_id, "running")
 
-    def complete(self, run_id: int, metrics: dict | None = None) -> None:
-        """Mark a training run as completed and move pairs to trained."""
+    def complete(
+        self,
+        run_id: int,
+        metrics: dict | None = None,
+        adapter_info: dict | None = None,
+    ) -> None:
+        """Mark a training run as completed and move pairs to trained.
+
+        Args:
+            run_id: The run to complete.
+            metrics: Optional training metrics to store.
+            adapter_info: Optional adapter metadata (mtime, md5) to merge into adapter field.
+        """
         with self._session_factory() as session:
             run = self._get_run(session, run_id)
             if run is None:
@@ -696,6 +707,9 @@ class Client:
             run.completed_at = utc_now()
             if metrics is not None:
                 run.metrics = metrics
+            if adapter_info is not None:
+                # Merge adapter_info into existing adapter field
+                run.adapter = {**(run.adapter or {}), **adapter_info}
 
             self._lg.debug(
                 "completed training run",

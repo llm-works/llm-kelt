@@ -87,6 +87,7 @@ class AdapterRegistry:
     ) -> None:
         """Write config.yaml for the adapter."""
         config: dict = {
+            "enabled": True,  # Deployment controlled via symlinks, not this flag
             "description": description,
             "base_model": training_result.base_model,
             "method": training_result.method,

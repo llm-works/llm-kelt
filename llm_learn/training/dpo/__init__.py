@@ -4,7 +4,8 @@ Provides:
 - Client: Training run management with pair assignment
 - Trainer: Actual DPO training using TRL
 - train_dpo: Convenience function for training
-- export_preferences: Export to TRL DPO format
+- export_run_pairs: Export pending pairs for a run to TRL DPO format
+- export_preferences: Export from atomic preferences (legacy)
 - generate_pairs: Generate pairs for Client.assign_pairs()
 """
 
@@ -15,7 +16,7 @@ from .client import (
     RunInfo,
     TrainedPair,
 )
-from .export import PairTuple, export_preferences, generate_pairs
+from .export import PairTuple, export_preferences, export_run_pairs, generate_pairs
 
 __all__ = [
     # Core client
@@ -28,6 +29,7 @@ __all__ = [
     # Export
     "PairTuple",
     "export_preferences",
+    "export_run_pairs",
     "generate_pairs",
     # Training functions (lazy-loaded, require 'training' extras)
     "Trainer",

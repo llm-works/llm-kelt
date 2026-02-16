@@ -14,7 +14,7 @@ from sqlalchemy import delete, func, or_, select
 from ...core.database import Database
 from ...core.utils import utc_now
 from ...training.config import RunConfig, RunResult
-from ...training.dpo import PendingPair, Run, export_preferences
+from ...training.dpo import PendingPair, Run, export_run_pairs
 from ...training.lora import AdapterRegistry
 from ...training.lora import Config as LoraConfig
 
@@ -511,8 +511,8 @@ class PipelineTool(ModelResolutionMixin, Tool):
         """Get resolved adapter ID."""
         return self._resolved_adapter_id or self.args.id
 
-    def _find_pending_run(self, context_arg: str | None):
-        """Find earliest pending DPO run, optionally filtered by context."""
+    def _find_pending_run(self, context_arg: str | None) -> tuple[int, str, str | None] | None:
+        """Find earliest pending DPO run. Returns (id, context_key, adapter_name) or None."""
         from sqlalchemy import select
 
         from llm_learn.training.dpo.client import Run
@@ -526,7 +526,12 @@ class PipelineTool(ModelResolutionMixin, Tool):
             )
             if context_arg:
                 stmt = stmt.where(Run.context_key == context_arg)
-            return session.scalar(stmt)
+            run = session.scalar(stmt)
+            if run is None:
+                return None
+            # Extract values while still in session
+            adapter_name = run.adapter.get("name") if run.adapter else None
+            return (run.id, run.context_key, adapter_name)
 
     def _resolve_from_queue(self) -> None:
         """Resolve context and adapter_id from pending queue if not provided."""
@@ -539,19 +544,16 @@ class PipelineTool(ModelResolutionMixin, Tool):
             self._resolved_adapter_id = id_arg
             return
 
-        run = self._find_pending_run(context_arg)
-        if run is None:
+        result = self._find_pending_run(context_arg)
+        if result is None:
             if context_arg:
                 raise ValueError(f"No pending DPO runs found for context '{context_arg}'")
             raise ValueError("No pending DPO runs in queue")
 
-        self._resolved_context = run.context_key
-        self._resolved_adapter_id = run.adapter.get("name") if run.adapter else None
-        self._run_id = run.id
-
+        self._run_id, self._resolved_context, self._resolved_adapter_id = result
         self.lg.info(
             "resolved run from queue",
-            extra={"run_id": run.id, "context": self._resolved_context},
+            extra={"run_id": self._run_id, "context": self._resolved_context},
         )
 
     def _get_or_create_run(self) -> int:
@@ -584,27 +586,20 @@ class PipelineTool(ModelResolutionMixin, Tool):
         return int(run.id)
 
     def _run_export(self, output_path: Path) -> int:
-        """Run export step."""
+        """Run export step - exports pending pairs for this run."""
+        self.lg.info("step 1/3: exporting pairs", extra={"run_id": self._run_id})
 
-        context_key = self._resolved_context or self.args.context
-        category = getattr(self.args, "category", None)
-        min_margin = getattr(self.args, "min_margin", None)
-
-        self.lg.info("step 1/3: exporting preferences", extra={"context": context_key})
-
-        result = export_preferences(
+        result = export_run_pairs(
             session_factory=self._get_database().session,
-            context_key=context_key,
+            run_id=self._run_id,
             output_path=output_path,
-            category=category,
-            min_margin=min_margin,
         )
 
         if result.count == 0:
-            self.lg.error("no preferences found to export")
+            self.lg.error("no pairs found for run")
             return 1
 
-        print(f"[1/3] Exported {result.count} preference pairs")
+        print(f"[1/3] Exported {result.count} pairs")
         return 0
 
     def _load_profile(self, profile_name: str) -> tuple[float, bool, dict[str, Any]]:
@@ -834,8 +829,9 @@ class PipelineTool(ModelResolutionMixin, Tool):
         skip_register = getattr(self.args, "skip_register", False)
         reg_failed = False if skip_register else self._run_register(training_result) != 0
 
-        # Always record metrics if training succeeded
-        client.complete(self._run_id, metrics=self._extract_metrics(training_result))
+        # Record metrics and adapter info
+        metrics, adapter_info = self._extract_run_data(training_result)
+        client.complete(self._run_id, metrics=metrics, adapter_info=adapter_info)
 
         if skip_register:
             print(f"\nTraining complete! Adapter at: {training_result.adapter_path}")
@@ -846,16 +842,15 @@ class PipelineTool(ModelResolutionMixin, Tool):
             print(f"\nPipeline complete! Adapter '{self._adapter_id}' is ready.")
         return 0
 
-    def _extract_metrics(self, result: RunResult) -> dict:
-        """Extract metrics from training result for DB storage."""
+    def _extract_run_data(self, result: RunResult) -> tuple[dict, dict]:
+        """Extract metrics and adapter info from training result."""
         metrics = dict(result.metrics) if result.metrics else {}
         metrics["duration_seconds"] = result.duration_seconds
         metrics["samples_trained"] = result.samples_trained
 
-        # Add adapter metadata for identification/verification
         adapter_meta = compute_adapter_metadata(result.adapter_path)
-        metrics["adapter"] = adapter_meta.to_dict()
-        return metrics
+        adapter_info = {"mtime": adapter_meta.mtime, "md5": adapter_meta.md5}
+        return metrics, adapter_info
 
 
 def _not_deleted_filter(model):
