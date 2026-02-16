@@ -431,6 +431,9 @@ class PipelineTool(ModelResolutionMixin, Tool):
         self._db: Database | None = None
         self._learn_client = None
         self._run_id: int | None = None
+        # Resolved from queue when --context/--id not provided
+        self._resolved_context: str | None = None
+        self._resolved_adapter_id: str | None = None
 
     def add_args(self, parser) -> None:
         # Export args
@@ -489,7 +492,8 @@ class PipelineTool(ModelResolutionMixin, Tool):
             from llm_learn import LearnClient
             from llm_learn.memory import IsolationContext
 
-            context = IsolationContext(context_key=self.args.context)
+            context_key = self._resolved_context or self.args.context
+            context = IsolationContext(context_key=context_key)
             self._learn_client = LearnClient(
                 lg=self.lg,
                 database=self._get_database(),
@@ -502,11 +506,63 @@ class PipelineTool(ModelResolutionMixin, Tool):
         """Get DpoClient via LearnClient."""
         return self._get_learn_client().train.dpo
 
+    @property
+    def _adapter_id(self) -> str:
+        """Get resolved adapter ID."""
+        return self._resolved_adapter_id or self.args.id
+
+    def _find_pending_run(self, context_arg: str | None):
+        """Find earliest pending DPO run, optionally filtered by context."""
+        from sqlalchemy import select
+
+        from llm_learn.training.dpo.client import Run
+
+        with self._get_database().session() as session:
+            stmt = (
+                select(Run)
+                .where(Run.method == "dpo")
+                .where(Run.status == "pending")
+                .order_by(Run.created_at.asc())
+            )
+            if context_arg:
+                stmt = stmt.where(Run.context_key == context_arg)
+            return session.scalar(stmt)
+
+    def _resolve_from_queue(self) -> None:
+        """Resolve context and adapter_id from pending queue if not provided."""
+        context_arg = getattr(self.args, "context", None)
+        id_arg = getattr(self.args, "id", None)
+
+        # If both provided, nothing to resolve
+        if context_arg and id_arg:
+            self._resolved_context = context_arg
+            self._resolved_adapter_id = id_arg
+            return
+
+        run = self._find_pending_run(context_arg)
+        if run is None:
+            if context_arg:
+                raise ValueError(f"No pending DPO runs found for context '{context_arg}'")
+            raise ValueError("No pending DPO runs in queue")
+
+        self._resolved_context = run.context_key
+        self._resolved_adapter_id = run.adapter.get("name") if run.adapter else None
+        self._run_id = run.id
+
+        self.lg.info(
+            "resolved run from queue",
+            extra={"run_id": run.id, "context": self._resolved_context},
+        )
+
     def _get_or_create_run(self) -> int:
         """Get existing run or create new one."""
+        # If already resolved from queue, use that
+        if self._run_id is not None:
+            return self._run_id
+
         client = self._get_dpo_client()
 
-        # Use existing run if specified
+        # Use existing run if specified via --run-id
         if run_id := getattr(self.args, "run_id", None):
             run = client.get(run_id)
             if run is None:
@@ -518,19 +574,19 @@ class PipelineTool(ModelResolutionMixin, Tool):
         # Look for existing pending run with same adapter name
         pending = client.list_runs(status="pending")
         for run in pending:
-            if run.adapter_name == self.args.id:
+            if run.adapter_name == self._adapter_id:
                 self.lg.info("using existing pending run", extra={"run_id": run.id})
                 return int(run.id)
 
         # Create new run
-        run = client.create(adapter_name=self.args.id)
+        run = client.create(adapter_name=self._adapter_id)
         self.lg.info("created new DPO run", extra={"run_id": run.id})
         return int(run.id)
 
     def _run_export(self, output_path: Path) -> int:
         """Run export step."""
 
-        context_key = self.args.context
+        context_key = self._resolved_context or self.args.context
         category = getattr(self.args, "category", None)
         min_margin = getattr(self.args, "min_margin", None)
 
@@ -665,18 +721,35 @@ class PipelineTool(ModelResolutionMixin, Tool):
         lora_cfg = getattr(adapters_cfg, "lora", None) if adapters_cfg else None
         return lora_cfg.base_path if lora_cfg and hasattr(lora_cfg, "base_path") else None
 
-    def _do_register(self, registry, training_result: RunResult, overwrite: bool):
+    def _do_register(self, registry, training_result: RunResult, overwrite: bool, deploy: bool):
         """Perform the actual adapter registration."""
         return registry.register(
             training_result=training_result,
-            adapter_id=self.args.id,
+            adapter_id=self._adapter_id,
             description=getattr(self.args, "description", None),
-            deploy=True,
+            deploy=deploy,
             overwrite=overwrite,
         )
 
+    def _confirm_overwrite(self, registry) -> bool | None:
+        """Check if adapter exists and confirm overwrite. Returns None to skip."""
+        if getattr(self.args, "overwrite", False):
+            return True
+        existing = registry.get(self._adapter_id)
+        if not existing:
+            return False
+        response = input(f"Adapter '{self._adapter_id}' already exists. Overwrite? [y/N] ")
+        if response.strip().lower() not in ("y", "yes"):
+            print("Registration skipped.")
+            return None
+        return True
+
     def _run_register(self, training_result: RunResult) -> int:
-        """Run registration step."""
+        """Run registration step with interactive prompts."""
+        response = input("\nCopy to registry? [Y/n] ").strip().lower()
+        if response in ("n", "no"):
+            print(f"Adapter available at: {training_result.adapter_path}")
+            return 0
 
         base_path = self._get_adapter_base_path()
         if base_path is None:
@@ -684,37 +757,22 @@ class PipelineTool(ModelResolutionMixin, Tool):
             return 1
 
         registry = AdapterRegistry(self.lg, base_path)
-        self.lg.info("step 3/3: registering adapter", extra={"adapter_id": self.args.id})
-        overwrite = getattr(self.args, "overwrite", False)
+        overwrite = self._confirm_overwrite(registry)
+        if overwrite is None:
+            return 0
+
+        response = input("Deploy adapter? [Y/n] ").strip().lower()
+        deploy = response not in ("n", "no")
 
         try:
-            info = self._do_register(registry, training_result, overwrite)
-            print(f"[3/3] Registered adapter '{info.adapter_id}'")
-            _print_adapter_metadata(info.path, label="Deployed adapter")
+            info = self._do_register(registry, training_result, overwrite, deploy)
+            status = "and deployed" if deploy else "(not deployed)"
+            print(f"Registered {status} adapter '{info.adapter_id}'")
+            _print_adapter_metadata(info.path, label="Adapter")
             return 0
         except ValueError as e:
-            error_msg = str(e)
-            if "already exists" in error_msg and not overwrite:
-                response = input(f"\nAdapter '{self.args.id}' already exists. Overwrite? [y/N] ")
-                if response.lower() in ("y", "yes"):
-                    info = self._do_register(registry, training_result, overwrite=True)
-                    print(f"[3/3] Registered adapter '{info.adapter_id}'")
-                    _print_adapter_metadata(info.path, label="Deployed adapter")
-                    return 0
-                print("Registration skipped.")
-                return 1
-            self.lg.error("registration failed", extra={"error": error_msg})
+            self.lg.error("registration failed", extra={"error": str(e)})
             return 1
-
-    def _validate_args(self) -> bool:
-        """Validate required arguments."""
-        if not getattr(self.args, "context", None):
-            self.lg.error("--context is required")
-            return False
-        if not getattr(self.args, "id", None):
-            self.lg.error("--id is required")
-            return False
-        return True
 
     def _setup_paths(self, adapter_id: str) -> tuple[Path, Path, Path]:
         """Set up working directory and paths."""
@@ -727,29 +785,27 @@ class PipelineTool(ModelResolutionMixin, Tool):
         if getattr(self.args, "list_models", False):
             return self._list_models()
 
-        if not self._validate_args():
-            return 1
-
         model_path = self._resolve_model(getattr(self.args, "model", None))
         if model_path is None:
             return 1
 
-        # Get or create DPO run for tracking
         try:
+            self._resolve_from_queue()
             self._run_id = self._get_or_create_run()
         except ValueError as e:
             self.lg.error(str(e))
             return 1
 
-        adapter_id = self.args.id
-        work_dir, data_path, adapter_path = self._setup_paths(adapter_id)
+        work_dir, data_path, adapter_path = self._setup_paths(self._adapter_id)
+        self._print_pipeline_header(model_path, work_dir)
+        return self._execute_pipeline(data_path, adapter_path, model_path)
 
-        print(f"\nDPO Pipeline: {self.args.context} -> {adapter_id}")
+    def _print_pipeline_header(self, model_path: Path, work_dir: Path) -> None:
+        """Print pipeline startup info."""
+        print(f"\nDPO Pipeline: {self._resolved_context} -> {self._adapter_id}")
         print(f"Model: {model_path.name}")
         print(f"Output directory: {work_dir}")
         print(f"Run ID: {self._run_id}\n")
-
-        return self._execute_pipeline(data_path, adapter_path, model_path)
 
     def _execute_pipeline(self, data_path: Path, adapter_path: Path, model_path: Path) -> int:
         """Execute the three pipeline steps with run tracking."""
@@ -787,7 +843,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
             print("\nTraining complete, but registration failed (see above)")
             return 1
         else:
-            print(f"\nPipeline complete! Adapter '{self.args.id}' is ready.")
+            print(f"\nPipeline complete! Adapter '{self._adapter_id}' is ready.")
         return 0
 
     def _extract_metrics(self, result: RunResult) -> dict:
