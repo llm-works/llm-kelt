@@ -4,6 +4,7 @@ infra := $(shell appinfra scripts-path)
 # Configuration
 INFRA_DEV_PKG_NAME := llm_learn
 INFRA_PYTEST_COVERAGE_THRESHOLD := 30
+INFRA_DEV_DOCSTRING_THRESHOLD := 90
 
 # Test configuration file (used by integration and e2e tests)
 export LEARN_TEST_CONFIG_FILE := $(local)etc/llm-learn.yaml

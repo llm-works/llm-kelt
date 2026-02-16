@@ -90,6 +90,7 @@ filterwarnings = [
     "ignore:'crypt' is deprecated:DeprecationWarning:passlib",
     "ignore:The argument 'device' of Tensor.pin_memory:DeprecationWarning",
     "ignore:The argument 'device' of Tensor.is_pinned:DeprecationWarning",
+    "ignore:builtin type Swig.*has no __module__:DeprecationWarning",
 ]
 markers = [
     "unit: marks tests as unit tests (fast, no external dependencies)",

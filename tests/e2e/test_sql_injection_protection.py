@@ -55,14 +55,14 @@ class TestSQLInjectionProtection:
         4. No cross-contamination despite similar patterns
         """
         # Add data to each context
-        fact_prod = client_acme_prod.assertions.add("Production setting")
-        fact_dev = client_acme_dev.assertions.add("Development setting")
-        fact_x = client_acme_x_prod.assertions.add("X setting")
+        fact_prod = client_acme_prod.atomic.assertions.add("Production setting")
+        fact_dev = client_acme_dev.atomic.assertions.add("Development setting")
+        fact_x = client_acme_x_prod.atomic.assertions.add("X setting")
 
         # Each client should ONLY see its own data
-        prod_facts = client_acme_prod.assertions.list()
-        dev_facts = client_acme_dev.assertions.list()
-        x_facts = client_acme_x_prod.assertions.list()
+        prod_facts = client_acme_prod.atomic.assertions.list()
+        dev_facts = client_acme_dev.atomic.assertions.list()
+        x_facts = client_acme_x_prod.atomic.assertions.list()
 
         # Verify isolation
         assert len(prod_facts) == 1
@@ -89,12 +89,12 @@ class TestSQLInjectionProtection:
         client_other = LearnClient(database=database, context=context_other, lg=logger)
 
         # Add data
-        fact_percent = client_percent.assertions.add("25% discount setting")
-        fact_other = client_other.assertions.add("25X discount setting")
+        fact_percent = client_percent.atomic.assertions.add("25% discount setting")
+        fact_other = client_other.atomic.assertions.add("25X discount setting")
 
         # Each client should ONLY see its own data
-        percent_facts = client_percent.assertions.list()
-        other_facts = client_other.assertions.list()
+        percent_facts = client_percent.atomic.assertions.list()
+        other_facts = client_other.atomic.assertions.list()
 
         assert len(percent_facts) == 1
         assert percent_facts[0].id == fact_percent
@@ -127,7 +127,7 @@ class TestSQLInjectionProtection:
 
         # Add data to each context
         for ctx_key, client in clients.items():
-            client.assertions.add(f"Data for {ctx_key}")
+            client.atomic.assertions.add(f"Data for {ctx_key}")
 
         # Test exact match - should see only one
         exact_client = LearnClient(
@@ -135,7 +135,7 @@ class TestSQLInjectionProtection:
             context=IsolationContext(context_key="customer_123:prod:agent_a"),
             lg=logger,
         )
-        exact_facts = exact_client.assertions.list()
+        exact_facts = exact_client.atomic.assertions.list()
         assert len(exact_facts) == 1
         assert "customer_123:prod:agent_a" in exact_facts[0].content
 
@@ -145,7 +145,7 @@ class TestSQLInjectionProtection:
             context=IsolationContext(context_key="customer_123:prod:*"),
             lg=logger,
         )
-        pattern_facts = pattern_client.assertions.list()
+        pattern_facts = pattern_client.atomic.assertions.list()
         assert len(pattern_facts) == 2  # agent_a and agent_b
         contents = [f.content for f in pattern_facts]
         assert any("agent_a" in c for c in contents)
@@ -157,7 +157,7 @@ class TestSQLInjectionProtection:
             context=IsolationContext(context_key="customer_123:*"),
             lg=logger,
         )
-        broader_facts = broader_client.assertions.list()
+        broader_facts = broader_client.atomic.assertions.list()
         assert len(broader_facts) == 3  # prod:agent_a, prod:agent_b, dev:agent_a
 
         # Verify customer_456 data is NOT included (isolation maintained)
@@ -180,11 +180,11 @@ class TestSQLInjectionProtection:
         for key in test_keys:
             context = IsolationContext(context_key=key)
             clients[key] = LearnClient(database=database, context=context, lg=logger)
-            clients[key].assertions.add(f"Data for {key}")
+            clients[key].atomic.assertions.add(f"Data for {key}")
 
         # Verify each client sees only its own data (exact match)
         for key, client in clients.items():
-            facts = client.assertions.list()
+            facts = client.atomic.assertions.list()
             assert len(facts) == 1
             assert key in facts[0].content
             # Verify no cross-contamination
