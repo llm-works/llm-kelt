@@ -3,6 +3,7 @@
 Exports collected data to formats suitable for training:
 - DPO format for preference pairs (TRL DPOTrainer)
 - SFT format for feedback (supervised fine-tuning)
+- Pair tuples for DpoClient.assign_pairs()
 """
 
 import json
@@ -19,6 +20,9 @@ from ..core.models import Content
 from ..core.utils import utc_now
 from ..memory.atomic.models import Fact, FeedbackDetails, PreferenceDetails
 from ..memory.isolation import build_context_filter
+
+# Type alias for DPO pairs: (chosen_fact_id, rejected_fact_id, prompt)
+PairTuple = tuple[int, int, str]
 
 
 @dataclass
@@ -290,3 +294,47 @@ def export_feedback_classifier(
         format="classifier",
         exported_at=utc_now(),
     )
+
+
+def generate_dpo_pairs(
+    session_factory: Callable[[], AbstractContextManager[Session]],
+    context_key: str | None,
+    *,
+    category: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    min_margin: float | None = None,
+    exclude_pairs: set[tuple[int, int]] | None = None,
+) -> list[PairTuple]:
+    """Generate DPO pair tuples for run assignment.
+
+    Returns pairs as (fact_id, fact_id, prompt) tuples suitable for
+    DpoClient.assign_pairs(). Currently uses the preference fact ID
+    for both chosen and rejected (since the preference contains both
+    text fields in a single fact).
+
+    Args:
+        session_factory: Database session factory.
+        context_key: Context key to scope query (None = all contexts).
+        category: Filter by category.
+        since: Only include preferences created after this time.
+        until: Only include preferences created before this time.
+        min_margin: Minimum margin threshold.
+        exclude_pairs: Set of (chosen_id, rejected_id) pairs to exclude.
+
+    Returns:
+        List of (chosen_fact_id, rejected_fact_id, prompt) tuples.
+    """
+    with session_factory() as session:
+        stmt = _build_preferences_query(context_key, category, since, until, min_margin)
+        results = []
+
+        for row in session.execute(stmt):
+            fact, details = row
+            # Use fact ID for both chosen/rejected (same preference fact)
+            pair_key = (fact.id, fact.id)
+            if exclude_pairs and pair_key in exclude_pairs:
+                continue
+            results.append((fact.id, fact.id, details.context))
+
+        return results

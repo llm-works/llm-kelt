@@ -9,9 +9,14 @@ from appinfra.db.pg import PG
 from appinfra.dot_dict import DotDict
 from llm_infer import compute_adapter_metadata
 from llm_infer.models import ModelResolver
+from sqlalchemy import delete, func, or_, select
 
 from ...core.database import Database
+from ...core.utils import utc_now
 from ...training.config import LoraConfig, TrainingConfig, TrainingResult
+from ...training.dpo import DpoClient, DpoPendingPair, TrainingRun
+from ...training.export import export_preferences_dpo
+from ...training.lora import AdapterRegistry
 
 
 def _print_adapter_metadata(adapter_path: Path, label: str = "Adapter") -> None:
@@ -151,8 +156,6 @@ class ExportTool(Tool):
         }
 
     def run(self, **kwargs: Any) -> int:
-        from ...training.export import export_preferences_dpo
-
         db = self._get_database()
         output_path = Path(self.args.output)
         filters = self._get_export_filters()
@@ -284,7 +287,9 @@ class DpoTool(ModelResolutionMixin, Tool):
 
         return self._execute_training(data_path, output_dir, model_path)
 
-    def _execute_training(self, data_path: Path, output_dir: Path, model_path: Path) -> int:
+    def _execute_training(  # cq: exempt=33
+        self, data_path: Path, output_dir: Path, model_path: Path
+    ) -> int:
         """Execute the DPO training."""
         from ...training.dpo import train_dpo
 
@@ -367,7 +372,6 @@ class RegisterTool(Tool):
 
     def _build_training_result(self, adapter_path: Path) -> TrainingResult:
         """Build a minimal TrainingResult for registration."""
-        from ...core.utils import utc_now
 
         return TrainingResult(
             adapter_path=adapter_path,
@@ -380,28 +384,27 @@ class RegisterTool(Tool):
             samples_trained=0,
         )
 
-    def _do_register(self, adapter_path: Path, adapter_id: str, enabled: bool) -> int:
+    def _do_register(self, adapter_path: Path, adapter_id: str, deploy: bool) -> int:
         """Execute registration and print result."""
-        from ...training.lora import AdapterRegistry
 
         registry = AdapterRegistry(self.lg, self._get_base_path())
         training_result = self._build_training_result(adapter_path)
 
-        self.lg.info("registering adapter", extra={"adapter_id": adapter_id, "enabled": enabled})
+        self.lg.info("registering adapter", extra={"adapter_id": adapter_id, "deploy": deploy})
 
         try:
             info = registry.register(
                 training_result=training_result,
                 adapter_id=adapter_id,
                 description=getattr(self.args, "description", None),
-                enabled=enabled,
+                deploy=deploy,
                 overwrite=getattr(self.args, "overwrite", False),
             )
         except ValueError as e:
             self.lg.error("registration failed", extra={"error": str(e)})
             return 1
 
-        status = "enabled" if info.enabled else "disabled"
+        status = "deployed" if info.deployed else "not deployed"
         print(f"Registered adapter '{info.adapter_id}' to {info.path}")
         print(f"  Status: {status}")
         _print_adapter_metadata(info.path)
@@ -413,8 +416,8 @@ class RegisterTool(Tool):
             self.lg.error("adapter path not found", extra={"path": str(adapter_path)})
             return 1
 
-        enabled = not getattr(self.args, "disabled", False)
-        return self._do_register(adapter_path, self.args.id, enabled)
+        deploy = not getattr(self.args, "disabled", False)
+        return self._do_register(adapter_path, self.args.id, deploy)
 
 
 class PipelineTool(ModelResolutionMixin, Tool):
@@ -448,7 +451,9 @@ class PipelineTool(ModelResolutionMixin, Tool):
         parser.add_argument("--epochs", type=int, help="Number of epochs")
         parser.add_argument("--batch-size", type=int, help="Training batch size")
         parser.add_argument("--lr", type=float, help="Learning rate")
-        parser.add_argument("--based-on", "-b", help="Train on top of existing adapter (path or ID)")
+        parser.add_argument(
+            "--based-on", "-b", help="Train on top of existing adapter (path or ID)"
+        )
 
         # Register args
         parser.add_argument("--description", help="Adapter description")
@@ -483,8 +488,6 @@ class PipelineTool(ModelResolutionMixin, Tool):
     def _get_dpo_client(self):
         """Get or create DpoClient for run tracking."""
         if self._dpo_client is None:
-            from ...training.dpo import DpoClient
-
             self._dpo_client = DpoClient(
                 lg=self.lg,
                 session_factory=self._get_database().session,
@@ -506,7 +509,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
             return int(run_id)
 
         # Look for existing pending run with same adapter name
-        pending = client.list(status="pending")
+        pending = client.list_runs(status="pending")
         for run in pending:
             if run.adapter_name == self.args.id:
                 self.lg.info("using existing pending run", extra={"run_id": run.id})
@@ -519,7 +522,6 @@ class PipelineTool(ModelResolutionMixin, Tool):
 
     def _run_export(self, output_path: Path) -> int:
         """Run export step."""
-        from ...training.export import export_preferences_dpo
 
         context_key = self.args.context
         category = getattr(self.args, "category", None)
@@ -601,8 +603,6 @@ class PipelineTool(ModelResolutionMixin, Tool):
         if not based_on_arg:
             return None
 
-        from ...training.lora import AdapterRegistry
-
         base_path = self._get_adapter_base_path()
         if base_path is None:
             # No registry configured, try as raw path
@@ -614,7 +614,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
         registry = AdapterRegistry(self.lg, base_path)
         return registry.resolve(based_on_arg)
 
-    def _run_train(
+    def _run_train(  # cq: exempt=32
         self, data_path: Path, adapter_path: Path, model_path: Path
     ) -> TrainingResult | None:
         """Run training step."""
@@ -664,13 +664,12 @@ class PipelineTool(ModelResolutionMixin, Tool):
             training_result=training_result,
             adapter_id=self.args.id,
             description=getattr(self.args, "description", None),
-            enabled=True,
+            deploy=True,
             overwrite=overwrite,
         )
 
     def _run_register(self, training_result: TrainingResult) -> int:
         """Run registration step."""
-        from ...training.lora import AdapterRegistry
 
         base_path = self._get_adapter_base_path()
         if base_path is None:
@@ -796,8 +795,21 @@ class PipelineTool(ModelResolutionMixin, Tool):
         return metrics
 
 
+def _not_deleted_filter(model):
+    """Build filter for non-deleted runs (system_status is NULL or deleted != true)."""
+
+    return or_(
+        model.system_status.is_(None),
+        model.system_status["deleted"].astext != "true",
+    )
+
+
 class ResetTool(Tool):
-    """Reset DPO training data for a context."""
+    """Reset DPO training data for a context.
+
+    Clears pending pairs only - completed runs and their trained pairs remain intact.
+    Uses soft-delete via system_status JSONB.
+    """
 
     # Display name for NULL context_key (used in list output)
     _NULL_CONTEXT_DISPLAY = "(no context)"
@@ -834,131 +846,142 @@ class ResetTool(Tool):
         """Build SQLAlchemy filter for context_key (handles NULL correctly)."""
         return column.is_(None) if context_key is None else column == context_key
 
-    def _list_contexts(self, session) -> list[tuple[str, int, int]]:
-        """List all contexts with run and pair counts (excludes deleted runs)."""
-        from sqlalchemy import func, select
+    def _count_pending_pairs(self, session, context_key: str | None) -> int:
+        """Count pending pairs for a context."""
 
-        from ...training.dpo import DpoRun, DpoRunPair
-
-        # Get distinct contexts with run counts (excluding deleted)
         stmt = (
-            select(DpoRun.context_key, func.count(DpoRun.id).label("run_count"))
-            .where(DpoRun.status != "deleted")
-            .group_by(DpoRun.context_key)
-            .order_by(DpoRun.context_key)
+            select(func.count())
+            .select_from(DpoPendingPair)
+            .join(TrainingRun, DpoPendingPair.run_id == TrainingRun.id)
+            .where(
+                self._context_filter(TrainingRun.context_key, context_key),
+                TrainingRun.method == "dpo",
+                _not_deleted_filter(TrainingRun),
+            )
+        )
+        return session.scalar(stmt) or 0
+
+    def _list_contexts(self, session) -> list[tuple[str, int, int]]:
+        """List all contexts with run and pending pair counts."""
+
+        stmt = (
+            select(TrainingRun.context_key, func.count(TrainingRun.id).label("run_count"))
+            .where(TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun))
+            .group_by(TrainingRun.context_key)
+            .order_by(TrainingRun.context_key)
         )
         results = []
         for row in session.execute(stmt):
             display_key = row.context_key or self._NULL_CONTEXT_DISPLAY
-            run_count = row.run_count
-
-            # Count pairs for this context (use _context_filter for NULL handling)
-            pair_stmt = (
-                select(func.count())
-                .select_from(DpoRunPair)
-                .join(DpoRun, DpoRunPair.run_id == DpoRun.id)
-                .where(
-                    self._context_filter(DpoRun.context_key, row.context_key),
-                    DpoRun.status != "deleted",
-                )
-            )
-            pair_count = session.scalar(pair_stmt) or 0
-            results.append((display_key, run_count, pair_count))
+            pair_count = self._count_pending_pairs(session, row.context_key)
+            results.append((display_key, row.run_count, pair_count))
 
         return results
 
     def _count_data(self, session, context_key: str | None) -> tuple[int, int]:
-        """Count runs and pairs for the context (excludes deleted runs)."""
-        from sqlalchemy import func, select
+        """Count runs and pending pairs for the context."""
 
-        from ...training.dpo import DpoRun, DpoRunPair
+        context_filter = self._context_filter(TrainingRun.context_key, context_key)
 
-        context_filter = self._context_filter(DpoRun.context_key, context_key)
-
-        # Count runs (excluding deleted)
+        # Count runs (excluding soft-deleted)
         run_count_stmt = (
             select(func.count())
-            .select_from(DpoRun)
-            .where(context_filter, DpoRun.status != "deleted")
+            .select_from(TrainingRun)
+            .where(context_filter, TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun))
         )
         run_count = session.scalar(run_count_stmt) or 0
 
-        # Count pairs linked to those runs
+        # Count pending pairs linked to those runs
         pair_count_stmt = (
             select(func.count())
-            .select_from(DpoRunPair)
-            .join(DpoRun, DpoRunPair.run_id == DpoRun.id)
-            .where(context_filter)
+            .select_from(DpoPendingPair)
+            .join(TrainingRun, DpoPendingPair.run_id == TrainingRun.id)
+            .where(context_filter, TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun))
         )
         pair_count = session.scalar(pair_count_stmt) or 0
 
         return run_count, pair_count
 
     def _delete_data(self, session, context_key: str | None) -> tuple[int, int]:
-        """Soft-delete runs for the context. Returns (runs_deleted, pairs_freed)."""
-        from sqlalchemy import delete, select, update
+        """Soft-delete runs and clear pending pairs. Returns (runs_deleted, pairs_freed)."""
 
-        from ...training.dpo import DpoRun, DpoRunPair
+        context_filter = self._context_filter(TrainingRun.context_key, context_key)
 
-        context_filter = self._context_filter(DpoRun.context_key, context_key)
+        # Get runs for this context (excluding already soft-deleted)
+        runs_stmt = select(TrainingRun).where(
+            context_filter, TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun)
+        )
+        runs = list(session.scalars(runs_stmt).all())
 
-        # Get run IDs for this context (excluding already deleted)
-        run_ids_stmt = select(DpoRun.id).where(context_filter, DpoRun.status != "deleted")
-        run_ids = list(session.scalars(run_ids_stmt).all())
-
-        if not run_ids:
+        if not runs:
             return 0, 0
 
-        # Delete pairs to free them for reuse (hard delete - they're just links)
-        pairs_stmt = delete(DpoRunPair).where(DpoRunPair.run_id.in_(run_ids))
+        run_ids = [r.id for r in runs]
+
+        # Delete pending pairs (hard delete - they become available for other runs)
+        pairs_stmt = delete(DpoPendingPair).where(DpoPendingPair.run_id.in_(run_ids))
         pairs_result = session.execute(pairs_stmt)
         pairs_deleted = pairs_result.rowcount
 
-        # Soft-delete runs (set status to 'deleted')
-        runs_stmt = update(DpoRun).where(DpoRun.id.in_(run_ids)).values(status="deleted")
-        runs_result = session.execute(runs_stmt)
-        runs_deleted = runs_result.rowcount
+        # Soft-delete runs via system_status
+        now = utc_now().isoformat()
+        for run in runs:
+            run.system_status = {"deleted": True, "deleted_at": now}
 
-        return runs_deleted, pairs_deleted
+        return len(runs), pairs_deleted
 
     def _count_all_data(self, session) -> tuple[int, int]:
-        """Count all runs and pairs across all contexts (excludes deleted)."""
-        from sqlalchemy import func, select
-
-        from ...training.dpo import DpoRun, DpoRunPair
+        """Count all runs and pending pairs across all contexts."""
 
         run_count = (
             session.scalar(
-                select(func.count()).select_from(DpoRun).where(DpoRun.status != "deleted")
+                select(func.count())
+                .select_from(TrainingRun)
+                .where(TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun))
             )
             or 0
         )
-        pair_count = session.scalar(select(func.count()).select_from(DpoRunPair)) or 0
+        # Only count pending pairs for active runs
+        pair_count = (
+            session.scalar(
+                select(func.count())
+                .select_from(DpoPendingPair)
+                .join(TrainingRun, DpoPendingPair.run_id == TrainingRun.id)
+                .where(TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun))
+            )
+            or 0
+        )
         return run_count, pair_count
 
     def _delete_all_data(self, session) -> tuple[int, int]:
-        """Soft-delete all runs. Returns (runs_deleted, pairs_freed)."""
-        from sqlalchemy import delete, select, update
+        """Soft-delete all runs and clear pending pairs. Returns (runs_deleted, pairs_freed)."""
 
-        from ...training.dpo import DpoRun, DpoRunPair
+        # Get all non-deleted runs
+        runs = list(
+            session.scalars(
+                select(TrainingRun).where(
+                    TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun)
+                )
+            ).all()
+        )
 
-        # Get IDs of non-deleted runs
-        run_ids = list(session.scalars(select(DpoRun.id).where(DpoRun.status != "deleted")).all())
-
-        if not run_ids:
+        if not runs:
             return 0, 0
 
-        # Delete pairs to free them (hard delete - they're just links)
-        pairs_result = session.execute(delete(DpoRunPair).where(DpoRunPair.run_id.in_(run_ids)))
+        run_ids = [r.id for r in runs]
+
+        # Delete pending pairs (hard delete)
+        pairs_result = session.execute(
+            delete(DpoPendingPair).where(DpoPendingPair.run_id.in_(run_ids))
+        )
         pairs_deleted = pairs_result.rowcount
 
-        # Soft-delete runs
-        runs_result = session.execute(
-            update(DpoRun).where(DpoRun.id.in_(run_ids)).values(status="deleted")
-        )
-        runs_deleted = runs_result.rowcount
+        # Soft-delete runs via system_status
+        now = utc_now().isoformat()
+        for run in runs:
+            run.system_status = {"deleted": True, "deleted_at": now}
 
-        return runs_deleted, pairs_deleted
+        return len(runs), pairs_deleted
 
     def run(self, **kwargs: Any) -> int:
         context_key = getattr(self.args, "context", None)
@@ -987,7 +1010,7 @@ class ResetTool(Tool):
             return 0
 
         print("\nAvailable contexts:\n")
-        print(f"  {'Context':<30} {'Runs':>8} {'Pairs':>10}")
+        print(f"  {'Context':<30} {'Runs':>8} {'Pending':>10}")
         print(f"  {'-' * 30} {'-' * 8} {'-' * 10}")
         for ctx, runs, pairs in contexts:
             print(f"  {ctx:<30} {runs:>8} {pairs:>10}")
@@ -1004,9 +1027,10 @@ class ResetTool(Tool):
             print(f"No training data found for context '{context_key}'")
             return 0
 
-        print(f"\nThis will delete for context '{context_key}':")
-        print(f"  Training runs:    {run_count}")
-        print(f"  Run-pair links:   {pair_count}")
+        print(f"\nThis will reset for context '{context_key}':")
+        print(f"  Training runs:    {run_count} (soft-delete)")
+        print(f"  Pending pairs:    {pair_count} (cleared)")
+        print("  Note: Completed runs and trained pairs are preserved.")
         print()
 
         if not confirm:
@@ -1018,7 +1042,7 @@ class ResetTool(Tool):
         runs_deleted, pairs_deleted = self._delete_data(session, db_context_key)
         session.commit()
 
-        print(f"Deleted {runs_deleted} runs, {pairs_deleted} run-pair links")
+        print(f"Soft-deleted {runs_deleted} runs, cleared {pairs_deleted} pending pairs")
         return 0
 
     def _run_reset_all(self, session, confirm: bool) -> int:
@@ -1029,9 +1053,10 @@ class ResetTool(Tool):
             print("No training data found.")
             return 0
 
-        print("\nThis will delete ALL training data:")
-        print(f"  Training runs:    {run_count}")
-        print(f"  Run-pair links:   {pair_count}")
+        print("\nThis will reset ALL training data:")
+        print(f"  Training runs:    {run_count} (soft-delete)")
+        print(f"  Pending pairs:    {pair_count} (cleared)")
+        print("  Note: Completed runs and trained pairs are preserved.")
         print()
 
         if not confirm:
@@ -1043,7 +1068,7 @@ class ResetTool(Tool):
         runs_deleted, pairs_deleted = self._delete_all_data(session)
         session.commit()
 
-        print(f"Deleted {runs_deleted} runs, {pairs_deleted} run-pair links")
+        print(f"Soft-deleted {runs_deleted} runs, cleared {pairs_deleted} pending pairs")
         return 0
 
 

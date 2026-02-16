@@ -10,27 +10,44 @@ Install training dependencies with: pip install llm-learn[training]
 """
 
 from .config import LoraConfig, TrainingConfig, TrainingResult
-from .dpo import DpoClient, DpoRun, DpoRunInfo, DpoRunPair, PairList
+from .dpo import (
+    DpoClient,
+    DpoPendingPair,
+    DpoRun,
+    DpoRunInfo,
+    DpoRunPair,
+    DpoTrainedPair,
+    PairTuple,
+    TrainingRun,
+    TrainingRunInfo,
+)
 from .export import (
     ExportResult,
     export_feedback_classifier,
     export_feedback_sft,
     export_preferences_dpo,
+    generate_dpo_pairs,
 )
 from .lora import AdapterInfo, AdapterRegistry
 
 __all__ = [
-    # DPO training
+    # DPO training - models
     "DpoClient",
+    "TrainingRun",
+    "TrainingRunInfo",
+    "DpoPendingPair",
+    "DpoTrainedPair",
+    "PairTuple",
+    # Backward compatibility aliases
     "DpoRun",
     "DpoRunInfo",
     "DpoRunPair",
-    "PairList",
     # Export functions
     "ExportResult",
     "export_preferences_dpo",
     "export_feedback_sft",
     "export_feedback_classifier",
+    "generate_dpo_pairs",
     # Config dataclasses
     "LoraConfig",
     "TrainingConfig",

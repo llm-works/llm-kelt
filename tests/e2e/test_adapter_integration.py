@@ -121,7 +121,7 @@ class TestAdapterIntegration:
             overwrite=True,
         )
         assert info.adapter_id == adapter_id
-        assert info.enabled is True
+        assert info.deployed is True
 
         try:
             # Query WITHOUT adapter
@@ -161,18 +161,18 @@ class TestAdapterIntegration:
             adapter_registry.remove(adapter_id)
             adapter_registry.refresh()
 
-    def test_adapter_enable_disable(self, trained_adapter, adapter_registry):
-        """Test enabling and disabling adapters."""
-        adapter_id = "test-enable-disable"
+    def test_adapter_deploy_undeploy(self, trained_adapter, adapter_registry):
+        """Test deploying and undeploying adapters."""
+        adapter_id = "test-deploy-undeploy"
 
-        # Register enabled
+        # Register deployed
         info = adapter_registry.register_and_refresh(
             training_result=trained_adapter,
             adapter_id=adapter_id,
-            enabled=True,
+            deploy=True,
             overwrite=True,
         )
-        assert info.enabled is True
+        assert info.deployed is True
 
         # Verify it's in the list
         adapters = adapter_registry.list()
@@ -180,21 +180,21 @@ class TestAdapterIntegration:
         assert adapter_id in adapter_ids
 
         try:
-            # Disable it
-            adapter_registry.set_enabled(adapter_id, False)
+            # Undeploy it
+            adapter_registry.set_deployed(adapter_id, False)
             adapter_registry.refresh(adapter_id)
 
             info = adapter_registry.get(adapter_id)
             assert info is not None
-            assert info.enabled is False
+            assert info.deployed is False
 
-            # Re-enable it
-            adapter_registry.set_enabled(adapter_id, True)
+            # Re-deploy it
+            adapter_registry.set_deployed(adapter_id, True)
             adapter_registry.refresh(adapter_id)
 
             info = adapter_registry.get(adapter_id)
             assert info is not None
-            assert info.enabled is True
+            assert info.deployed is True
 
         finally:
             adapter_registry.remove(adapter_id)

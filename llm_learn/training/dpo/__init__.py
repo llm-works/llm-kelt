@@ -6,14 +6,32 @@ Provides:
 - train_dpo: Convenience function for training
 """
 
-from .client import DpoClient, DpoRun, DpoRunInfo, DpoRunPair, PairList
+from .client import (
+    DpoClient,
+    DpoPendingPair,
+    DpoRun,
+    DpoRunInfo,
+    DpoRunPair,
+    DpoTrainedPair,
+    PairTuple,
+    TrainingRun,
+    TrainingRunInfo,
+)
 
 __all__ = [
+    # Core client
     "DpoClient",
+    # Models
+    "TrainingRun",
+    "TrainingRunInfo",
+    "DpoPendingPair",
+    "DpoTrainedPair",
+    # Backward compatibility aliases
     "DpoRun",
     "DpoRunInfo",
     "DpoRunPair",
-    "PairList",
+    # Type aliases
+    "PairTuple",
     # Training functions (lazy-loaded, require 'training' extras)
     "DpoTrainer",
     "train_dpo",

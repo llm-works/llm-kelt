@@ -50,7 +50,7 @@ test.e2e::
 .PHONY: test.e2e
 
 # Database migrations
-ALEMBIC := $(PYTHON) -m alembic -c migrations/alembic.ini
+ALEMBIC := $(PYTHON) -m alembic -c llm_learn/migrations/alembic.ini
 .PHONY: migrate migrate.status migrate.history
 
 migrate: ## Run database migrations to latest

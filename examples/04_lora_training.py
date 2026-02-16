@@ -298,7 +298,7 @@ def register_adapter(
         training_result=result,
         adapter_id=ADAPTER_ID,
         description="Concise structured responses (example)",
-        enabled=True,
+        deploy=True,
         overwrite=True,
     )
 

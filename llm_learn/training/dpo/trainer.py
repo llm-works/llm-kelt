@@ -65,7 +65,10 @@ class DpoTrainer:
         self.quantize = quantize
         self.reference_free = reference_free
         self.based_on = based_on
+        self._init_state()
 
+    def _init_state(self):
+        """Initialize mutable state to None (set during training)."""
         self.model = None
         self.ref_model = None
         self.tokenizer = None
@@ -98,10 +101,28 @@ class DpoTrainer:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+    def _apply_lora_adapter(self):
+        """Apply LoRA adapter - load existing or create new."""
+        from peft import PeftModel, get_peft_model
+
+        if self.based_on is not None:
+            self._lg.info(f"loading existing adapter: {self.based_on}")
+            self.model = PeftModel.from_pretrained(
+                self.model, str(self.based_on), is_trainable=True
+            )
+        else:
+            peft_config = self.lora_config.to_peft_config()
+            self.model = get_peft_model(self.model, peft_config)
+
+        trainable, total = self.model.get_nb_trainable_parameters()
+        self._lg.info(
+            f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
+        )
+
     def _load_model(self):
         """Load base model with optional quantization and apply LoRA."""
         import torch
-        from peft import PeftModel, get_peft_model, prepare_model_for_kbit_training
+        from peft import prepare_model_for_kbit_training
         from transformers import AutoModelForCausalLM
 
         self._lg.info(f"loading base model: {self.base_model}")
@@ -121,21 +142,7 @@ class DpoTrainer:
         if self.quantize:
             self.model = prepare_model_for_kbit_training(self.model)
 
-        if self.based_on is not None:
-            # Load existing adapter and make it trainable
-            self._lg.info(f"loading existing adapter: {self.based_on}")
-            self.model = PeftModel.from_pretrained(
-                self.model, str(self.based_on), is_trainable=True
-            )
-        else:
-            # Create new LoRA adapter
-            peft_config = self.lora_config.to_peft_config()
-            self.model = get_peft_model(self.model, peft_config)
-
-        trainable, total = self.model.get_nb_trainable_parameters()
-        self._lg.info(
-            f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
-        )
+        self._apply_lora_adapter()
 
     def _load_reference_model(self):
         """Load reference model for DPO (unless reference-free mode).
