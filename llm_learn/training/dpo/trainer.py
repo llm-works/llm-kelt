@@ -53,6 +53,7 @@ class DpoTrainer:
         beta: float = 0.1,
         quantize: bool = True,
         reference_free: bool = False,
+        based_on: Path | None = None,
     ):
         self._lg = lg
         self.data_path = Path(data_path)
@@ -63,6 +64,7 @@ class DpoTrainer:
         self.beta = beta
         self.quantize = quantize
         self.reference_free = reference_free
+        self.based_on = based_on
 
         self.model = None
         self.ref_model = None
@@ -99,7 +101,7 @@ class DpoTrainer:
     def _load_model(self):
         """Load base model with optional quantization and apply LoRA."""
         import torch
-        from peft import get_peft_model, prepare_model_for_kbit_training
+        from peft import PeftModel, get_peft_model, prepare_model_for_kbit_training
         from transformers import AutoModelForCausalLM
 
         self._lg.info(f"loading base model: {self.base_model}")
@@ -119,8 +121,17 @@ class DpoTrainer:
         if self.quantize:
             self.model = prepare_model_for_kbit_training(self.model)
 
-        peft_config = self.lora_config.to_peft_config()
-        self.model = get_peft_model(self.model, peft_config)
+        if self.based_on is not None:
+            # Load existing adapter and make it trainable
+            self._lg.info(f"loading existing adapter: {self.based_on}")
+            self.model = PeftModel.from_pretrained(
+                self.model, str(self.based_on), is_trainable=True
+            )
+        else:
+            # Create new LoRA adapter
+            peft_config = self.lora_config.to_peft_config()
+            self.model = get_peft_model(self.model, peft_config)
+
         trainable, total = self.model.get_nb_trainable_parameters()
         self._lg.info(
             f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
@@ -274,6 +285,7 @@ class DpoTrainer:
             started_at=started_at,
             completed_at=utc_now(),
             samples_trained=len(self.train_dataset) * self.training_config.num_epochs,  # type: ignore[arg-type]
+            based_on=self.based_on,
         )
 
     def train(self) -> TrainingResult:
@@ -306,6 +318,7 @@ def train_dpo(
     beta: float = 0.1,
     quantize: bool = True,
     reference_free: bool = False,
+    based_on: Path | None = None,
 ) -> TrainingResult:
     """Train a LoRA adapter using Direct Preference Optimization.
 
@@ -319,6 +332,7 @@ def train_dpo(
         beta: DPO beta parameter (higher = more conservative).
         quantize: Use 4-bit quantization (QLoRA). Reduces VRAM ~4x.
         reference_free: Skip reference model to save VRAM (may reduce quality).
+        based_on: Path to existing adapter to train on top of (for lineage).
 
     Returns:
         TrainingResult with adapter path, metrics, and training metadata.
@@ -333,5 +347,6 @@ def train_dpo(
         beta=beta,
         quantize=quantize,
         reference_free=reference_free,
+        based_on=based_on,
     )
     return trainer.train()

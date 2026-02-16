@@ -163,6 +163,7 @@ class TrainingResult:
         started_at: When training started.
         completed_at: When training completed.
         samples_trained: Total number of samples seen during training.
+        based_on: Parent adapter this was trained from (for lineage tracking).
     """
 
     adapter_path: Path
@@ -173,6 +174,7 @@ class TrainingResult:
     started_at: datetime
     completed_at: datetime
     samples_trained: int
+    based_on: Path | None = None
 
     @property
     def duration_seconds(self) -> float:

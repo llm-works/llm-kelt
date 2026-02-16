@@ -71,17 +71,40 @@ class AdapterRegistry:
         enabled: bool,
     ) -> None:
         """Write config.yaml for the adapter."""
-        config = {
+        config: dict = {
             "enabled": enabled,
             "description": description,
             "base_model": training_result.base_model,
             "method": training_result.method,
             "training_config": training_result.config,
         }
+        if training_result.based_on is not None:
+            config["based_on"] = str(training_result.based_on)
         config_path = adapter_path / "config.yaml"
         with config_path.open("w") as f:
             yaml.safe_dump(config, f)
         self._lg.info(f"wrote config: {config_path}")
+
+    def resolve(self, ref: str | Path) -> Path:
+        """Resolve adapter reference (path or ID) to a path.
+
+        Args:
+            ref: Either a filesystem path or a registered adapter ID.
+
+        Returns:
+            Path to the adapter directory.
+
+        Raises:
+            ValueError: If the adapter is not found.
+        """
+        path = Path(ref)
+        if path.exists():
+            return path
+        if isinstance(ref, str):
+            info = self.get(ref)
+            if info:
+                return info.path
+        raise ValueError(f"Adapter not found: {ref}")
 
     def register(
         self,

@@ -190,6 +190,7 @@ class DpoTool(ModelResolutionMixin, Tool):
         parser.add_argument("--batch-size", type=int, help="Training batch size")
         parser.add_argument("--lr", type=float, help="Learning rate")
         parser.add_argument("--profile", help="Use named training profile from config")
+        parser.add_argument("--based-on", "-b", help="Train on top of existing adapter (path)")
 
     def _get_training_config(self) -> DotDict | None:
         """Get training config section."""
@@ -288,6 +289,8 @@ class DpoTool(ModelResolutionMixin, Tool):
         from ...training.dpo import train_dpo
 
         beta, quantize, training_config = self._build_configs()
+        based_on_arg = getattr(self.args, "based_on", None)
+        based_on = Path(based_on_arg) if based_on_arg else None
 
         self.lg.info(
             "starting DPO training",
@@ -298,6 +301,7 @@ class DpoTool(ModelResolutionMixin, Tool):
                 "beta": beta,
                 "quantize": quantize,
                 "epochs": training_config.num_epochs,
+                "based_on": str(based_on) if based_on else None,
             },
         )
 
@@ -310,6 +314,7 @@ class DpoTool(ModelResolutionMixin, Tool):
             training_config=training_config,
             beta=beta,
             quantize=quantize,
+            based_on=based_on,
         )
 
         self._print_result(result)
@@ -443,6 +448,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
         parser.add_argument("--epochs", type=int, help="Number of epochs")
         parser.add_argument("--batch-size", type=int, help="Training batch size")
         parser.add_argument("--lr", type=float, help="Learning rate")
+        parser.add_argument("--based-on", "-b", help="Train on top of existing adapter (path or ID)")
 
         # Register args
         parser.add_argument("--description", help="Adapter description")
@@ -589,6 +595,25 @@ class PipelineTool(ModelResolutionMixin, Tool):
         beta, quantize, params = self._apply_cli_overrides(beta, quantize, params)
         return beta, quantize, TrainingConfig(**params) if params else TrainingConfig()
 
+    def _resolve_based_on(self) -> Path | None:
+        """Resolve --based-on argument to adapter path."""
+        based_on_arg = getattr(self.args, "based_on", None)
+        if not based_on_arg:
+            return None
+
+        from ...training.lora import AdapterRegistry
+
+        base_path = self._get_adapter_base_path()
+        if base_path is None:
+            # No registry configured, try as raw path
+            path = Path(based_on_arg)
+            if not path.exists():
+                raise ValueError(f"Adapter not found: {based_on_arg}")
+            return path
+
+        registry = AdapterRegistry(self.lg, base_path)
+        return registry.resolve(based_on_arg)
+
     def _run_train(
         self, data_path: Path, adapter_path: Path, model_path: Path
     ) -> TrainingResult | None:
@@ -596,10 +621,15 @@ class PipelineTool(ModelResolutionMixin, Tool):
         from ...training.dpo import train_dpo
 
         beta, quantize, training_config = self._build_training_params()
+        based_on = self._resolve_based_on()
 
         self.lg.info(
             "step 2/3: training DPO adapter",
-            extra={"model": str(model_path), "epochs": training_config.num_epochs},
+            extra={
+                "model": str(model_path),
+                "epochs": training_config.num_epochs,
+                "based_on": str(based_on) if based_on else None,
+            },
         )
 
         try:
@@ -612,6 +642,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
                 training_config=training_config,
                 beta=beta,
                 quantize=quantize,
+                based_on=based_on,
             )
             print(f"[2/3] Training complete ({result.duration_seconds:.1f}s)")
             _print_adapter_metadata(result.adapter_path, label="Trained adapter")
