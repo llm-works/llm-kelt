@@ -14,8 +14,9 @@ from sqlalchemy import delete, func, or_, select
 from ...core.database import Database
 from ...core.utils import utc_now
 from ...training.config import RunConfig, RunResult
-from ...training.dpo import Client as DpoClient, PendingPair, Run, export_preferences
-from ...training.lora import AdapterRegistry, Config as LoraConfig
+from ...training.dpo import PendingPair, Run, export_preferences
+from ...training.lora import AdapterRegistry
+from ...training.lora import Config as LoraConfig
 
 
 def _print_adapter_metadata(adapter_path: Path, label: str = "Adapter") -> None:
@@ -161,9 +162,7 @@ class ExportTool(Tool):
 
         self.lg.info("exporting preferences", extra={"output": str(output_path), **filters})
 
-        result = export_preferences(
-            session_factory=db.session, output_path=output_path, **filters
-        )
+        result = export_preferences(session_factory=db.session, output_path=output_path, **filters)
 
         self.lg.info("export complete", extra={"count": result.count, "path": str(result.path)})
         print(f"Exported {result.count} preference pairs to {result.path}")
@@ -916,9 +915,7 @@ class ResetTool(Tool):
         context_filter = self._context_filter(Run.context_key, context_key)
 
         # Get runs for this context (excluding already soft-deleted)
-        runs_stmt = select(Run).where(
-            context_filter, Run.method == "dpo", _not_deleted_filter(Run)
-        )
+        runs_stmt = select(Run).where(context_filter, Run.method == "dpo", _not_deleted_filter(Run))
         runs = list(session.scalars(runs_stmt).all())
 
         if not runs:
@@ -966,11 +963,7 @@ class ResetTool(Tool):
 
         # Get all non-deleted runs
         runs = list(
-            session.scalars(
-                select(Run).where(
-                    Run.method == "dpo", _not_deleted_filter(Run)
-                )
-            ).all()
+            session.scalars(select(Run).where(Run.method == "dpo", _not_deleted_filter(Run))).all()
         )
 
         if not runs:
@@ -979,9 +972,7 @@ class ResetTool(Tool):
         run_ids = [r.id for r in runs]
 
         # Delete pending pairs (hard delete)
-        pairs_result = session.execute(
-            delete(PendingPair).where(PendingPair.run_id.in_(run_ids))
-        )
+        pairs_result = session.execute(delete(PendingPair).where(PendingPair.run_id.in_(run_ids)))
         pairs_deleted = pairs_result.rowcount
 
         # Soft-delete runs via system_status

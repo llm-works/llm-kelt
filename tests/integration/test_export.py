@@ -54,9 +54,15 @@ class TestExportPreferencesDPO:
 
     def test_export_filter_by_category(self, learn_client, database, clean_tables):
         """Test export filtering by category."""
-        learn_client.atomic.preferences.record(context="A", chosen="G", rejected="B", category="synthesis")
-        learn_client.atomic.preferences.record(context="B", chosen="G", rejected="B", category="analysis")
-        learn_client.atomic.preferences.record(context="C", chosen="G", rejected="B", category="synthesis")
+        learn_client.atomic.preferences.record(
+            context="A", chosen="G", rejected="B", category="synthesis"
+        )
+        learn_client.atomic.preferences.record(
+            context="B", chosen="G", rejected="B", category="analysis"
+        )
+        learn_client.atomic.preferences.record(
+            context="C", chosen="G", rejected="B", category="synthesis"
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "dpo.jsonl"

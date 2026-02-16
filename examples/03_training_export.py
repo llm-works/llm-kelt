@@ -133,20 +133,20 @@ def record_sample_data(learn: LearnClient):
 
     # Positive feedback for good responses
     for cid in content_ids[:4]:
-        learn.feedback.record(
+        learn.atomic.feedback.record(
             signal="positive", content_id=cid, strength=0.9, tags=["clear", "concise"]
         )
 
     # Negative feedback for bad response
-    learn.feedback.record(
+    learn.atomic.feedback.record(
         signal="negative", content_id=content_ids[4], strength=0.8, tags=["verbose", "unclear"]
     )
 
-    print(f"  {OK}✓ Recorded {learn.feedback.count()} feedback entries{RESET}")
+    print(f"  {OK}✓ Recorded {learn.atomic.feedback.count()} feedback entries{RESET}")
 
     # Record preference pairs
     for context, chosen, rejected in _PREFERENCE_PAIRS:
-        learn.preferences.record(
+        learn.atomic.preferences.record(
             context=context,
             chosen=chosen,
             rejected=rejected,
@@ -154,7 +154,7 @@ def record_sample_data(learn: LearnClient):
             margin=0.8,
         )
 
-    print(f"  {OK}✓ Recorded {learn.preferences.count()} preference pairs{RESET}")
+    print(f"  {OK}✓ Recorded {learn.atomic.preferences.count()} preference pairs{RESET}")
 
     print(
         f'\n  {CMD}▸ Verify feedback:{RESET} {psql_cmd(learn)} -c "SELECT f.id, d.signal, d.strength '

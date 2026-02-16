@@ -33,6 +33,8 @@ from llm_learn.core.base import Base, utc_now
 from llm_learn.core.exceptions import NotFoundError, ValidationError
 from llm_learn.memory.isolation import build_context_filter
 
+from .export import PairTuple
+
 
 def _not_deleted_filter(model):
     """Build filter for non-deleted runs (system_status is NULL or deleted != true)."""
@@ -472,9 +474,7 @@ class Client:
         anchor = select(Run.id, Run.based_on).where(Run.id == run_id)
         lineage_cte = anchor.cte(name="lineage", recursive=True)
 
-        recursive = select(Run.id, Run.based_on).where(
-            Run.id == lineage_cte.c.based_on
-        )
+        recursive = select(Run.id, Run.based_on).where(Run.id == lineage_cte.c.based_on)
         lineage_cte = lineage_cte.union_all(recursive)
 
         # Get trained pairs from all runs in lineage

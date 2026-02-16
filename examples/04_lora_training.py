@@ -176,7 +176,7 @@ def create_training_data(learn: LearnClient):
     # Create training examples with positive feedback
     for title, response in _TRAINING_DATA:
         cid = learn.content.create(content_text=response, source="example", title=title)
-        learn.feedback.record(
+        learn.atomic.feedback.record(
             signal="positive", content_id=cid, strength=0.95, tags=["concise", "structured"]
         )
 

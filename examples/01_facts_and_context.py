@@ -47,27 +47,27 @@ def setup_facts(learn: LearnClient):
     print(f"\n{H2}▶ Adding Facts{RESET}")
 
     # Clear any existing facts for a clean demo
-    existing = learn.facts.list_active()
+    existing = learn.atomic.assertions.list_active()
     if existing:
         for fact in existing:
-            learn.facts.deactivate(fact.id)
+            learn.atomic.assertions.deactivate(fact.id)
         print(f"  {MUTED}Cleared {len(existing)} existing facts{RESET}")
 
     # Add facts with specific internal conventions
-    learn.facts.add(
+    learn.atomic.assertions.add(
         "Error responses must use format: {error_code: 'ERR-XXX', message: str, request_id: str}",
         category="api",
     )
-    learn.facts.add(
+    learn.atomic.assertions.add(
         "All error codes start with ERR- followed by 3 digits (e.g., ERR-401, ERR-500)",
         category="api",
     )
-    learn.facts.add(
+    learn.atomic.assertions.add(
         "Every response must include the X-Request-ID header for tracing", category="api"
     )
 
     print(f"  {OK}✓ Added 3 facts:{RESET}")
-    for fact in learn.facts.list_active():
+    for fact in learn.atomic.assertions.list_active():
         print(f"    {MUTED}id={fact.id}{RESET} {INFO}[{fact.category}]{RESET} {fact.content}")
 
     print(
@@ -80,7 +80,7 @@ def demo_context_builder(learn: LearnClient):
     """Demonstrate building system prompts with injected facts."""
     print(f"\n{H2}▶ Building System Prompts{RESET}")
 
-    context_builder = ContextBuilder(learn.facts)
+    context_builder = ContextBuilder(learn.atomic.assertions)
 
     base_prompt = "You are a coding assistant."
     system_prompt = context_builder.build_system_prompt(base_prompt)
@@ -165,7 +165,7 @@ def demo_fact_management(learn: LearnClient):
     """Demonstrate fact management operations."""
     print(f"\n{H2}▶ Fact Management{RESET}")
 
-    facts = learn.facts.list_active()
+    facts = learn.atomic.assertions.list_active()
     if not facts:
         print(f"  {MUTED}No facts to manage{RESET}")
         return
@@ -174,17 +174,17 @@ def demo_fact_management(learn: LearnClient):
     fact = facts[0]
     old_content = fact.content
     new_content = "Error codes use format ERR-XXX where XXX is a 3-digit number"
-    learn.facts.update(fact.id, content=new_content)
+    learn.atomic.assertions.update(fact.id, content=new_content)
     print(f"  {OK}✓ Updated{RESET} fact {MUTED}id={fact.id}{RESET}")
     print(f'    {MUTED}before:{RESET} "{old_content[:50]}{"..." if len(old_content) > 50 else ""}"')
     print(f'    {MUTED}after:{RESET}  "{new_content}"')
 
     # Get facts by category
-    api_facts = learn.facts.list_active(category="api")
+    api_facts = learn.atomic.assertions.list_active(category="api")
     print(f"  {INFO}ℹ{RESET} Facts in {INFO}'api'{RESET} category: {len(api_facts)}")
 
     # Deactivate a fact (soft delete)
-    learn.facts.deactivate(fact.id)
+    learn.atomic.assertions.deactivate(fact.id)
     print(
         f"  {WARN}⚠ Deactivated{RESET} fact {MUTED}id={fact.id}{RESET} (soft-delete, still in DB)"
     )

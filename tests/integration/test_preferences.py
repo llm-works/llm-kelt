@@ -90,9 +90,15 @@ class TestPreferencesClient:
 
     def test_list_by_category(self, learn_client, clean_tables):
         """Test listing pairs by category."""
-        learn_client.atomic.preferences.record(context="A", chosen="G", rejected="B", category="synthesis")
-        learn_client.atomic.preferences.record(context="B", chosen="G", rejected="B", category="analysis")
-        learn_client.atomic.preferences.record(context="C", chosen="G", rejected="B", category="synthesis")
+        learn_client.atomic.preferences.record(
+            context="A", chosen="G", rejected="B", category="synthesis"
+        )
+        learn_client.atomic.preferences.record(
+            context="B", chosen="G", rejected="B", category="analysis"
+        )
+        learn_client.atomic.preferences.record(
+            context="C", chosen="G", rejected="B", category="synthesis"
+        )
 
         synthesis = learn_client.atomic.preferences.list_by_category("synthesis")
         assert len(synthesis) == 2
@@ -102,9 +108,15 @@ class TestPreferencesClient:
 
     def test_get_categories(self, learn_client, clean_tables):
         """Test getting unique categories."""
-        learn_client.atomic.preferences.record(context="A", chosen="G", rejected="B", category="synthesis")
-        learn_client.atomic.preferences.record(context="B", chosen="G", rejected="B", category="analysis")
-        learn_client.atomic.preferences.record(context="C", chosen="G", rejected="B", category="synthesis")
+        learn_client.atomic.preferences.record(
+            context="A", chosen="G", rejected="B", category="synthesis"
+        )
+        learn_client.atomic.preferences.record(
+            context="B", chosen="G", rejected="B", category="analysis"
+        )
+        learn_client.atomic.preferences.record(
+            context="C", chosen="G", rejected="B", category="synthesis"
+        )
 
         categories = learn_client.atomic.preferences.get_categories()
         assert set(categories) == {"analysis", "synthesis"}

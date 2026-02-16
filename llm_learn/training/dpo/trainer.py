@@ -265,9 +265,7 @@ class Trainer:
 
         return final_path, self._collect_metrics()
 
-    def _build_result(
-        self, adapter_path: Path, metrics: dict, started_at: datetime
-    ) -> RunResult:
+    def _build_result(self, adapter_path: Path, metrics: dict, started_at: datetime) -> RunResult:
         """Build the training result."""
         return RunResult(
             adapter_path=adapter_path,
