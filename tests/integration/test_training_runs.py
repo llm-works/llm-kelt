@@ -21,7 +21,7 @@ def sample_preferences(learn_client, clean_tables):
     """Create sample preference pairs for testing."""
     ids = []
     for i in range(5):
-        fact_id = learn_client.preferences.record(
+        fact_id = learn_client.atomic.preferences.record(
             context=f"Context {i}",
             chosen=f"Good response {i}",
             rejected=f"Bad response {i}",

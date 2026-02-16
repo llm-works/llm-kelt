@@ -4,9 +4,9 @@ Provides tools for storing facts, feedback, preferences, solutions, and other
 signals that can be injected into LLM prompts or used for training.
 
 Architecture:
-    - core: Content storage with flexible isolation via context_key
-    - memory.atomic: Fact-based storage with type-specific detail tables
-    - memory.isolation: Context-based data partitioning with glob pattern support
+    - learn.atomic.* - Fact-based memory storage (assertions, solutions, feedback, etc.)
+    - learn.train.* - Training methods (DPO, SFT, etc.)
+    - learn.query - Context-aware LLM queries
 
 Usage:
     from llm_learn import LearnClientFactory, IsolationContext
@@ -39,9 +39,9 @@ Usage:
         rejected="Verbose version",
     )
 
-    # Convenience shorthand (equivalent to learn.atomic.*)
-    learn.assertions.add(...)
-    learn.solutions.record(...)
+    # Access training methods via learn.train.*
+    learn.train.dpo.create(adapter_name="my-adapter")
+    learn.train.dpo.list_runs(status="pending")
 """
 
 from .client import LearnClient

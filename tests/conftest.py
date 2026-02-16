@@ -252,7 +252,7 @@ def sample_feedback(learn_client, clean_tables):
         content_text="Sample content for feedback",
         source="test",
     )
-    feedback_id = learn_client.feedback.record(
+    feedback_id = learn_client.atomic.feedback.record(
         signal="positive",
         content_id=content_id,
         strength=0.9,

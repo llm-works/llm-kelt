@@ -51,17 +51,17 @@ class TestFactsEndToEnd:
         ).content
 
         # Step 2: Add facts about preferences
-        facts_learn_client.facts.add(
+        facts_learn_client.atomic.assertions.add(
             "Preferred programming language: Python",
             category="preferences",
         )
-        facts_learn_client.facts.add(
+        facts_learn_client.atomic.assertions.add(
             "Prefers Python frameworks like FastAPI and Django",
             category="preferences",
         )
 
         # Step 3: Build system prompt WITH facts
-        context_builder = ContextBuilder(facts_learn_client.facts)
+        context_builder = ContextBuilder(facts_learn_client.atomic.assertions)
         prompt_with_facts = context_builder.build_system_prompt(base_prompt)
 
         # Verify facts are in the prompt
@@ -113,21 +113,21 @@ class TestFactsEndToEnd:
         question = "How should I approach learning a new technology?"
 
         # Add facts in different categories
-        facts_learn_client.facts.add(
+        facts_learn_client.atomic.assertions.add(
             "Learning style: hands-on projects",
             category="preferences",
         )
-        facts_learn_client.facts.add(
+        facts_learn_client.atomic.assertions.add(
             "Prefers short focused learning sessions",
             category="context",
         )
-        facts_learn_client.facts.add(
+        facts_learn_client.atomic.assertions.add(
             "Always suggest practical examples over theory",
             category="rules",
         )
 
         # Build prompt with only preferences
-        context_builder = ContextBuilder(facts_learn_client.facts)
+        context_builder = ContextBuilder(facts_learn_client.atomic.assertions)
         prompt_prefs_only = context_builder.build_system_prompt(
             base_prompt,
             categories=["preferences"],
@@ -171,20 +171,20 @@ class TestFactsEndToEnd:
     async def test_deactivated_fact_not_used(self, facts_learn_client, llm_client, clean_tables):
         """Test that deactivated facts are not included in prompts."""
         # Add and then deactivate a fact
-        fact_id = facts_learn_client.facts.add(
+        fact_id = facts_learn_client.atomic.assertions.add(
             "Output format: XML only",
             category="preferences",
         )
-        facts_learn_client.facts.deactivate(fact_id)
+        facts_learn_client.atomic.assertions.deactivate(fact_id)
 
         # Add an active fact
-        facts_learn_client.facts.add(
+        facts_learn_client.atomic.assertions.add(
             "Output format: JSON preferred",
             category="preferences",
         )
 
         # Build prompt
-        context_builder = ContextBuilder(facts_learn_client.facts)
+        context_builder = ContextBuilder(facts_learn_client.atomic.assertions)
         prompt = context_builder.build_system_prompt("You are a helpful assistant.")
 
         # Deactivated fact should not be in prompt

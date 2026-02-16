@@ -431,7 +431,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
         )
         super().__init__(parent, config)
         self._db: Database | None = None
-        self._dpo_client = None
+        self._learn_client = None
         self._run_id: int | None = None
 
     def add_args(self, parser) -> None:
@@ -485,15 +485,24 @@ class PipelineTool(ModelResolutionMixin, Tool):
             self._db = Database(self.lg, PG(self.lg, dbs.main))
         return self._db
 
-    def _get_dpo_client(self):
-        """Get or create DpoClient for run tracking."""
-        if self._dpo_client is None:
-            self._dpo_client = DpoClient(
+    def _get_learn_client(self):
+        """Get or create LearnClient instance."""
+        if self._learn_client is None:
+            from llm_learn import LearnClient
+            from llm_learn.memory import IsolationContext
+
+            context = IsolationContext(context_key=self.args.context)
+            self._learn_client = LearnClient(
                 lg=self.lg,
-                session_factory=self._get_database().session,
-                context_key=self.args.context,
+                database=self._get_database(),
+                context=context,
+                ensure_schema=False,
             )
-        return self._dpo_client
+        return self._learn_client
+
+    def _get_dpo_client(self):
+        """Get DpoClient via LearnClient."""
+        return self._get_learn_client().train.dpo
 
     def _get_or_create_run(self) -> int:
         """Get existing run or create new one."""
