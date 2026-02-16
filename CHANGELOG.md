@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Similarity search with category filtering (SQL-level)
 
 #### Training
-- Export to DPO format (`export_preferences_dpo`) for TRL DPOTrainer
+- Export to DPO format (`dpo.export_preferences`) for TRL DPOTrainer
 - Export to SFT format (`export_feedback_sft`) for supervised fine-tuning
 - Export to classifier format (`export_feedback_classifier`) for binary classification
 - LoRA training with QLoRA support (`train_lora`)

@@ -9,33 +9,16 @@ Contains utilities for training data preparation and model fine-tuning:
 Install training dependencies with: pip install llm-learn[training]
 """
 
-from .config import RunConfig, RunResult
-from .dpo import (
-    PairTuple,
-    TrainingRun,
-    TrainingRunInfo,
-)
-from .export import (
-    ExportResult,
-    export_feedback_classifier,
-    export_feedback_sft,
-    export_preferences_dpo,
-    generate_dpo_pairs,
-)
-from .lora import AdapterInfo, AdapterRegistry
 from .client import Client as TrainClient
+from .config import RunConfig, RunResult
+from .export import ExportResult, export_feedback_classifier, export_feedback_sft
+from .lora import AdapterInfo, AdapterRegistry
 
 __all__ = [
-    # DPO training - models (access via training.dpo.*)
-    "TrainingRun",
-    "TrainingRunInfo",
-    "PairTuple",
     # Export functions
     "ExportResult",
-    "export_preferences_dpo",
     "export_feedback_sft",
     "export_feedback_classifier",
-    "generate_dpo_pairs",
     # Config dataclasses
     "RunConfig",
     "RunResult",

@@ -108,17 +108,18 @@ await embedder.close_async()
 ### Training Data Export
 
 ```python
-from llm_learn.training import export_preferences_dpo, export_feedback_sft
+from llm_learn.training import export_feedback_sft
+from llm_learn.training.dpo import export_preferences
 
 # Record preference pairs
-learn.preferences.record(
+learn.atomic.preferences.record(
     context="Explain gradient descent",
     chosen="Concise, accurate explanation",
     rejected="Verbose, rambling explanation",
 )
 
 # Export to DPO format for TRL
-result = export_preferences_dpo(
+result = export_preferences(
     session_factory=learn.database.session,
     context_key=learn.context_key,
     output_path="preferences.jsonl",
@@ -231,7 +232,7 @@ See the [`examples/`](examples/) directory for complete working examples:
 
 | Class/Function | Description |
 |----------------|-------------|
-| `export_preferences_dpo` | Export preference pairs for DPO |
+| `dpo.export_preferences` | Export preference pairs for DPO |
 | `export_feedback_sft` | Export feedback for SFT |
 | `export_feedback_classifier` | Export for binary classification |
 | `train_lora` | Train LoRA adapter with SFT |

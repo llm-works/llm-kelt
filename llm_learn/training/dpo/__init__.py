@@ -4,27 +4,31 @@ Provides:
 - Client: Training run management with pair assignment
 - Trainer: Actual DPO training using TRL
 - train_dpo: Convenience function for training
+- export_preferences: Export to TRL DPO format
+- generate_pairs: Generate pairs for Client.assign_pairs()
 """
 
 from .client import (
     Client,
-    PairTuple,
     PendingPair,
+    Run,
+    RunInfo,
     TrainedPair,
-    TrainingRun,
-    TrainingRunInfo,
 )
+from .export import PairTuple, export_preferences, generate_pairs
 
 __all__ = [
     # Core client
     "Client",
     # Models
-    "TrainingRun",
-    "TrainingRunInfo",
+    "Run",
+    "RunInfo",
     "PendingPair",
     "TrainedPair",
-    # Type aliases
+    # Export
     "PairTuple",
+    "export_preferences",
+    "generate_pairs",
     # Training functions (lazy-loaded, require 'training' extras)
     "Trainer",
     "train_dpo",

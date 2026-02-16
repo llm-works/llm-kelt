@@ -42,16 +42,12 @@ def _not_deleted_filter(model):
     )
 
 
-# Type alias for pairs: (chosen_fact_id, rejected_fact_id, prompt)
-PairTuple = tuple[int, int, str]
-
-
 # =============================================================================
 # ORM Models
 # =============================================================================
 
 
-class TrainingRun(Base):
+class Run(Base):
     """Generic training run metadata.
 
     Supports multiple training methods (DPO, SFT, RLHF).
@@ -112,7 +108,7 @@ class TrainingRun(Base):
         return bool(self.system_status.get("deleted", False))
 
     def __repr__(self) -> str:
-        return f"<TrainingRun(id={self.id}, method={self.method!r}, status={self.status!r})>"
+        return f"<Run(id={self.id}, method={self.method!r}, status={self.status!r})>"
 
 
 class PendingPair(Base):
@@ -179,7 +175,7 @@ class TrainedPair(Base):
 
 
 @dataclass
-class TrainingRunInfo:
+class RunInfo:
     """Training run information, detached from database session."""
 
     id: int
@@ -211,7 +207,7 @@ class TrainingRunInfo:
         return bool(self.system_status.get("deleted", False))
 
     @classmethod
-    def from_model(cls, run: TrainingRun) -> TrainingRunInfo:
+    def from_model(cls, run: Run) -> RunInfo:
         """Create from ORM model."""
         return cls(
             id=run.id,
@@ -282,7 +278,7 @@ class Client:
         with self._session_factory() as session:
             engine = session.get_bind()
             tables = [
-                cast(Table, TrainingRun.__table__),
+                cast(Table, Run.__table__),
                 cast(Table, PendingPair.__table__),
                 cast(Table, TrainedPair.__table__),
             ]
@@ -293,17 +289,17 @@ class Client:
         """Build context filter condition with pattern matching support."""
         return build_context_filter(self.context_key, column)
 
-    def _get_run(self, session, run_id: int) -> TrainingRun | None:
+    def _get_run(self, session, run_id: int) -> Run | None:
         """Get run by ID, verifying context ownership and method."""
-        stmt = select(TrainingRun).where(
-            TrainingRun.id == run_id,
-            TrainingRun.method == self.method,
-            _not_deleted_filter(TrainingRun),
+        stmt = select(Run).where(
+            Run.id == run_id,
+            Run.method == self.method,
+            _not_deleted_filter(Run),
         )
-        context_filter = self._build_context_filter(TrainingRun.context_key)
+        context_filter = self._build_context_filter(Run.context_key)
         if context_filter is not None:
             stmt = stmt.where(context_filter)
-        return cast(TrainingRun | None, session.scalar(stmt))
+        return cast(Run | None, session.scalar(stmt))
 
     # -------------------------------------------------------------------------
     # CRUD operations
@@ -314,7 +310,7 @@ class Client:
         adapter_name: str | None = None,
         config: dict | None = None,
         based_on: int | None = None,
-    ) -> TrainingRunInfo:
+    ) -> RunInfo:
         """Create a new DPO training run.
 
         Args:
@@ -323,7 +319,7 @@ class Client:
             based_on: Optional run ID to base this run on (for lineage).
 
         Returns:
-            TrainingRunInfo with the new run's details.
+            RunInfo with the new run's details.
 
         Raises:
             ValidationError: If client was created with a glob-pattern context_key.
@@ -335,7 +331,7 @@ class Client:
             )
 
         adapter = {"name": adapter_name} if adapter_name else None
-        run = TrainingRun(
+        run = Run(
             method=self.method,
             context_key=self.context_key,
             adapter=adapter,
@@ -352,20 +348,20 @@ class Client:
 
             session.add(run)
             session.flush()
-            info = TrainingRunInfo.from_model(run)
+            info = RunInfo.from_model(run)
             self._lg.debug(
                 "created training run",
                 extra={"run_id": info.id, "method": self.method, "adapter_name": adapter_name},
             )
             return info
 
-    def get(self, run_id: int) -> TrainingRunInfo | None:
+    def get(self, run_id: int) -> RunInfo | None:
         """Get a training run by ID."""
         with self._session_factory() as session:
             run = self._get_run(session, run_id)
             if run is None:
                 return None
-            return TrainingRunInfo.from_model(run)
+            return RunInfo.from_model(run)
 
     def list_runs(
         self,
@@ -373,7 +369,7 @@ class Client:
         limit: int = 100,
         descending: bool = True,
         include_deleted: bool = False,
-    ) -> list[TrainingRunInfo]:
+    ) -> list[RunInfo]:
         """List DPO training runs.
 
         Args:
@@ -383,25 +379,25 @@ class Client:
             include_deleted: Include soft-deleted runs (default False).
 
         Returns:
-            List of TrainingRunInfo.
+            List of RunInfo.
         """
         if status is not None and status not in VALID_STATUSES:
             raise ValidationError(f"status must be one of {VALID_STATUSES}")
 
         with self._session_factory() as session:
-            stmt = select(TrainingRun).where(TrainingRun.method == self.method)
-            context_filter = self._build_context_filter(TrainingRun.context_key)
+            stmt = select(Run).where(Run.method == self.method)
+            context_filter = self._build_context_filter(Run.context_key)
             if context_filter is not None:
                 stmt = stmt.where(context_filter)
             if status is not None:
-                stmt = stmt.where(TrainingRun.status == status)
+                stmt = stmt.where(Run.status == status)
             if not include_deleted:
-                stmt = stmt.where(_not_deleted_filter(TrainingRun))
-            order = TrainingRun.created_at.desc() if descending else TrainingRun.created_at.asc()
+                stmt = stmt.where(_not_deleted_filter(Run))
+            order = Run.created_at.desc() if descending else Run.created_at.asc()
             stmt = stmt.order_by(order).limit(limit)
 
             runs = list(session.scalars(stmt).all())
-            return [TrainingRunInfo.from_model(r) for r in runs]
+            return [RunInfo.from_model(r) for r in runs]
 
     def delete(self, run_id: int) -> bool:
         """Soft-delete a training run (frees pending pairs for reuse)."""
@@ -473,11 +469,11 @@ class Client:
         # Walk the lineage chain using recursive CTE
 
         # Build recursive CTE manually
-        anchor = select(TrainingRun.id, TrainingRun.based_on).where(TrainingRun.id == run_id)
+        anchor = select(Run.id, Run.based_on).where(Run.id == run_id)
         lineage_cte = anchor.cte(name="lineage", recursive=True)
 
-        recursive = select(TrainingRun.id, TrainingRun.based_on).where(
-            TrainingRun.id == lineage_cte.c.based_on
+        recursive = select(Run.id, Run.based_on).where(
+            Run.id == lineage_cte.c.based_on
         )
         lineage_cte = lineage_cte.union_all(recursive)
 
@@ -610,11 +606,11 @@ class Client:
                 stmt = stmt.where(PendingPair.run_id == run_id)
             else:
                 # Count for all runs in context
-                subq = select(TrainingRun.id).where(
-                    TrainingRun.method == self.method,
-                    _not_deleted_filter(TrainingRun),
+                subq = select(Run.id).where(
+                    Run.method == self.method,
+                    _not_deleted_filter(Run),
                 )
-                context_filter = self._build_context_filter(TrainingRun.context_key)
+                context_filter = self._build_context_filter(Run.context_key)
                 if context_filter is not None:
                     subq = subq.where(context_filter)
                 stmt = stmt.where(PendingPair.run_id.in_(subq))
@@ -732,11 +728,11 @@ class Client:
     def reset_all(self) -> int:
         """Soft-delete all training runs for this context (clears pending pairs)."""
         with self._session_factory() as session:
-            stmt = select(TrainingRun).where(
-                TrainingRun.method == self.method,
-                _not_deleted_filter(TrainingRun),
+            stmt = select(Run).where(
+                Run.method == self.method,
+                _not_deleted_filter(Run),
             )
-            context_filter = self._build_context_filter(TrainingRun.context_key)
+            context_filter = self._build_context_filter(Run.context_key)
             if context_filter is not None:
                 stmt = stmt.where(context_filter)
 
@@ -757,11 +753,11 @@ class Client:
             from sqlalchemy import delete
 
             # Get run IDs for this context
-            run_stmt = select(TrainingRun.id).where(
-                TrainingRun.method == self.method,
-                _not_deleted_filter(TrainingRun),
+            run_stmt = select(Run.id).where(
+                Run.method == self.method,
+                _not_deleted_filter(Run),
             )
-            context_filter = self._build_context_filter(TrainingRun.context_key)
+            context_filter = self._build_context_filter(Run.context_key)
             if context_filter is not None:
                 run_stmt = run_stmt.where(context_filter)
 

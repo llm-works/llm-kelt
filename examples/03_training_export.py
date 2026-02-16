@@ -27,12 +27,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from _helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, psql_cmd
 
 from llm_learn import IsolationContext, LearnClient, LearnClientFactory
-from llm_learn.training import (
-    ExportResult,
-    export_feedback_classifier,
-    export_feedback_sft,
-    export_preferences_dpo,
-)
+from llm_learn.training import ExportResult, export_feedback_classifier, export_feedback_sft
+from llm_learn.training.dpo import export_preferences
 
 # Sample content: (text, title)
 _SAMPLE_CONTENT = [
@@ -178,7 +174,7 @@ def demo_dpo_export(output_dir: Path, learn: LearnClient):
     print(f"  {MUTED}Format: {{prompt, chosen, rejected}}{RESET}")
     print(f"  {MUTED}Use case: TRL DPOTrainer for preference alignment{RESET}")
 
-    result = export_preferences_dpo(
+    result = export_preferences(
         session_factory=learn.database.session,
         context_key=learn.context_key,
         output_path=output_dir / "preferences_dpo.jsonl",
@@ -235,7 +231,7 @@ def demo_filtered_export(output_dir: Path, learn: LearnClient):
     print(f"  {MUTED}Filter exports by time range{RESET}")
 
     since = datetime.now(UTC) - timedelta(hours=1)
-    result = export_preferences_dpo(
+    result = export_preferences(
         session_factory=learn.database.session,
         context_key=learn.context_key,
         output_path=output_dir / "recent_preferences.jsonl",
@@ -249,7 +245,7 @@ def print_summary():
     """Print export function summary."""
     print(f"\n{H2}▶ Export Functions Summary{RESET}")
     print(f"""
-  {INFO}export_preferences_dpo(){RESET}
+  {INFO}export_preferences(){RESET}
     Output: {{prompt, chosen, rejected}}
     Filters: domain, since, until, min_margin
 

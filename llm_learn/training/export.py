@@ -1,9 +1,10 @@
 """Export functions for training data.
 
 Exports collected data to formats suitable for training:
-- DPO format for preference pairs (TRL DPOTrainer)
 - SFT format for feedback (supervised fine-tuning)
-- Pair tuples for DpoClient.assign_pairs()
+- Classifier format for binary classification
+
+DPO exports are in training.dpo.export.
 """
 
 import json
@@ -18,11 +19,8 @@ from sqlalchemy.orm import Session
 
 from ..core.models import Content
 from ..core.utils import utc_now
-from ..memory.atomic.models import Fact, FeedbackDetails, PreferenceDetails
+from ..memory.atomic.models import Fact, FeedbackDetails
 from ..memory.isolation import build_context_filter
-
-# Type alias for DPO pairs: (chosen_fact_id, rejected_fact_id, prompt)
-PairTuple = tuple[int, int, str]
 
 
 @dataclass
@@ -82,12 +80,6 @@ def _write_jsonl(f, records_iter, record_builder) -> int:
     return count
 
 
-def _dpo_record_from_row(row: tuple[Fact, PreferenceDetails]) -> dict[str, str]:
-    """Convert preference pair to DPO training record."""
-    fact, details = row
-    return {"prompt": details.context, "chosen": details.chosen, "rejected": details.rejected}
-
-
 def _classifier_record_from_row(
     row: tuple[Fact, FeedbackDetails, Content],
 ) -> dict[str, str | int] | None:
@@ -135,57 +127,6 @@ def _build_feedback_query(
     if until is not None:
         stmt = stmt.where(Fact.created_at <= until)
     return stmt.order_by(Fact.created_at)
-
-
-def _build_preferences_query(
-    context_key: str | None,
-    category: str | None,
-    since: datetime | None,
-    until: datetime | None,
-    min_margin: float | None,
-):
-    """Build SQLAlchemy query for preference pairs."""
-    stmt = (
-        select(Fact, PreferenceDetails)
-        .join(PreferenceDetails, Fact.id == PreferenceDetails.fact_id)
-        .where(Fact.type == "preference")
-    )
-    context_filter = build_context_filter(context_key, Fact.context_key)
-    if context_filter is not None:
-        stmt = stmt.where(context_filter)
-    if category is not None:
-        stmt = stmt.where(Fact.category == category)
-    if since is not None:
-        stmt = stmt.where(Fact.created_at >= since)
-    if until is not None:
-        stmt = stmt.where(Fact.created_at <= until)
-    if min_margin is not None:
-        stmt = stmt.where(PreferenceDetails.margin >= min_margin)
-    return stmt.order_by(Fact.created_at)
-
-
-def export_preferences_dpo(
-    session_factory: Callable[[], AbstractContextManager[Session]],
-    context_key: str | None,
-    output_path: str | Path,
-    *,
-    category: str | None = None,
-    since: datetime | None = None,
-    until: datetime | None = None,
-    min_margin: float | None = None,
-) -> ExportResult:
-    """Export preference pairs in TRL DPO format: {prompt, chosen, rejected}."""
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with session_factory() as session:
-        stmt = _build_preferences_query(context_key, category, since, until, min_margin)
-        with output_path.open("w", encoding="utf-8") as f:
-            count = _write_jsonl(f, session.execute(stmt), _dpo_record_from_row)
-
-    return ExportResult(
-        path=output_path, count=count, context_key=context_key, format="dpo", exported_at=utc_now()
-    )
 
 
 def export_feedback_sft(
@@ -294,47 +235,3 @@ def export_feedback_classifier(
         format="classifier",
         exported_at=utc_now(),
     )
-
-
-def generate_dpo_pairs(
-    session_factory: Callable[[], AbstractContextManager[Session]],
-    context_key: str | None,
-    *,
-    category: str | None = None,
-    since: datetime | None = None,
-    until: datetime | None = None,
-    min_margin: float | None = None,
-    exclude_pairs: set[tuple[int, int]] | None = None,
-) -> list[PairTuple]:
-    """Generate DPO pair tuples for run assignment.
-
-    Returns pairs as (fact_id, fact_id, prompt) tuples suitable for
-    DpoClient.assign_pairs(). Currently uses the preference fact ID
-    for both chosen and rejected (since the preference contains both
-    text fields in a single fact).
-
-    Args:
-        session_factory: Database session factory.
-        context_key: Context key to scope query (None = all contexts).
-        category: Filter by category.
-        since: Only include preferences created after this time.
-        until: Only include preferences created before this time.
-        min_margin: Minimum margin threshold.
-        exclude_pairs: Set of (chosen_id, rejected_id) pairs to exclude.
-
-    Returns:
-        List of (chosen_fact_id, rejected_fact_id, prompt) tuples.
-    """
-    with session_factory() as session:
-        stmt = _build_preferences_query(context_key, category, since, until, min_margin)
-        results = []
-
-        for row in session.execute(stmt):
-            fact, details = row
-            # Use fact ID for both chosen/rejected (same preference fact)
-            pair_key = (fact.id, fact.id)
-            if exclude_pairs and pair_key in exclude_pairs:
-                continue
-            results.append((fact.id, fact.id, details.context))
-
-        return results

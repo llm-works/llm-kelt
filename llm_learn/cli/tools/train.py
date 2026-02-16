@@ -14,8 +14,7 @@ from sqlalchemy import delete, func, or_, select
 from ...core.database import Database
 from ...core.utils import utc_now
 from ...training.config import RunConfig, RunResult
-from ...training.dpo import Client as DpoClient, PendingPair, TrainingRun
-from ...training.export import export_preferences_dpo
+from ...training.dpo import Client as DpoClient, PendingPair, Run, export_preferences
 from ...training.lora import AdapterRegistry, Config as LoraConfig
 
 
@@ -162,7 +161,7 @@ class ExportTool(Tool):
 
         self.lg.info("exporting preferences", extra={"output": str(output_path), **filters})
 
-        result = export_preferences_dpo(
+        result = export_preferences(
             session_factory=db.session, output_path=output_path, **filters
         )
 
@@ -538,7 +537,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
 
         self.lg.info("step 1/3: exporting preferences", extra={"context": context_key})
 
-        result = export_preferences_dpo(
+        result = export_preferences(
             session_factory=self._get_database().session,
             context_key=context_key,
             output_path=output_path,
@@ -861,11 +860,11 @@ class ResetTool(Tool):
         stmt = (
             select(func.count())
             .select_from(PendingPair)
-            .join(TrainingRun, PendingPair.run_id == TrainingRun.id)
+            .join(Run, PendingPair.run_id == Run.id)
             .where(
-                self._context_filter(TrainingRun.context_key, context_key),
-                TrainingRun.method == "dpo",
-                _not_deleted_filter(TrainingRun),
+                self._context_filter(Run.context_key, context_key),
+                Run.method == "dpo",
+                _not_deleted_filter(Run),
             )
         )
         return session.scalar(stmt) or 0
@@ -874,10 +873,10 @@ class ResetTool(Tool):
         """List all contexts with run and pending pair counts."""
 
         stmt = (
-            select(TrainingRun.context_key, func.count(TrainingRun.id).label("run_count"))
-            .where(TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun))
-            .group_by(TrainingRun.context_key)
-            .order_by(TrainingRun.context_key)
+            select(Run.context_key, func.count(Run.id).label("run_count"))
+            .where(Run.method == "dpo", _not_deleted_filter(Run))
+            .group_by(Run.context_key)
+            .order_by(Run.context_key)
         )
         results = []
         for row in session.execute(stmt):
@@ -890,13 +889,13 @@ class ResetTool(Tool):
     def _count_data(self, session, context_key: str | None) -> tuple[int, int]:
         """Count runs and pending pairs for the context."""
 
-        context_filter = self._context_filter(TrainingRun.context_key, context_key)
+        context_filter = self._context_filter(Run.context_key, context_key)
 
         # Count runs (excluding soft-deleted)
         run_count_stmt = (
             select(func.count())
-            .select_from(TrainingRun)
-            .where(context_filter, TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun))
+            .select_from(Run)
+            .where(context_filter, Run.method == "dpo", _not_deleted_filter(Run))
         )
         run_count = session.scalar(run_count_stmt) or 0
 
@@ -904,8 +903,8 @@ class ResetTool(Tool):
         pair_count_stmt = (
             select(func.count())
             .select_from(PendingPair)
-            .join(TrainingRun, PendingPair.run_id == TrainingRun.id)
-            .where(context_filter, TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun))
+            .join(Run, PendingPair.run_id == Run.id)
+            .where(context_filter, Run.method == "dpo", _not_deleted_filter(Run))
         )
         pair_count = session.scalar(pair_count_stmt) or 0
 
@@ -914,11 +913,11 @@ class ResetTool(Tool):
     def _delete_data(self, session, context_key: str | None) -> tuple[int, int]:
         """Soft-delete runs and clear pending pairs. Returns (runs_deleted, pairs_freed)."""
 
-        context_filter = self._context_filter(TrainingRun.context_key, context_key)
+        context_filter = self._context_filter(Run.context_key, context_key)
 
         # Get runs for this context (excluding already soft-deleted)
-        runs_stmt = select(TrainingRun).where(
-            context_filter, TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun)
+        runs_stmt = select(Run).where(
+            context_filter, Run.method == "dpo", _not_deleted_filter(Run)
         )
         runs = list(session.scalars(runs_stmt).all())
 
@@ -945,8 +944,8 @@ class ResetTool(Tool):
         run_count = (
             session.scalar(
                 select(func.count())
-                .select_from(TrainingRun)
-                .where(TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun))
+                .select_from(Run)
+                .where(Run.method == "dpo", _not_deleted_filter(Run))
             )
             or 0
         )
@@ -955,8 +954,8 @@ class ResetTool(Tool):
             session.scalar(
                 select(func.count())
                 .select_from(PendingPair)
-                .join(TrainingRun, PendingPair.run_id == TrainingRun.id)
-                .where(TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun))
+                .join(Run, PendingPair.run_id == Run.id)
+                .where(Run.method == "dpo", _not_deleted_filter(Run))
             )
             or 0
         )
@@ -968,8 +967,8 @@ class ResetTool(Tool):
         # Get all non-deleted runs
         runs = list(
             session.scalars(
-                select(TrainingRun).where(
-                    TrainingRun.method == "dpo", _not_deleted_filter(TrainingRun)
+                select(Run).where(
+                    Run.method == "dpo", _not_deleted_filter(Run)
                 )
             ).all()
         )

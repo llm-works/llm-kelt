@@ -41,7 +41,7 @@ def make_pairs(fact_ids: list[int]) -> list[PairTuple]:
     return [(fid, fid, f"Context {i}") for i, fid in enumerate(fact_ids)]
 
 
-class TestTrainingRunCRUD:
+class TestRunCRUD:
     """Test basic CRUD operations for training runs."""
 
     def test_create_run(self, dpo_client, clean_tables):

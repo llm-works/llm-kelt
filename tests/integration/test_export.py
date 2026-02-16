@@ -4,15 +4,12 @@ import json
 import tempfile
 from pathlib import Path
 
-from llm_learn.training import (
-    export_feedback_classifier,
-    export_feedback_sft,
-    export_preferences_dpo,
-)
+from llm_learn.training import export_feedback_classifier, export_feedback_sft
+from llm_learn.training.dpo import export_preferences
 
 
 class TestExportPreferencesDPO:
-    """Test export_preferences_dpo function."""
+    """Test export_preferences function."""
 
     def test_export_basic(self, learn_client, database, clean_tables):
         """Test basic DPO export."""
@@ -32,7 +29,7 @@ class TestExportPreferencesDPO:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "dpo.jsonl"
-            result = export_preferences_dpo(
+            result = export_preferences(
                 database.session,
                 learn_client.context.context_key,
                 output_path,
@@ -63,7 +60,7 @@ class TestExportPreferencesDPO:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "dpo.jsonl"
-            result = export_preferences_dpo(
+            result = export_preferences(
                 database.session,
                 learn_client.context.context_key,
                 output_path,
@@ -80,7 +77,7 @@ class TestExportPreferencesDPO:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "dpo.jsonl"
-            result = export_preferences_dpo(
+            result = export_preferences(
                 database.session,
                 learn_client.context.context_key,
                 output_path,
@@ -93,7 +90,7 @@ class TestExportPreferencesDPO:
         """Test export with no data."""
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "dpo.jsonl"
-            result = export_preferences_dpo(
+            result = export_preferences(
                 database.session,
                 learn_client.context.context_key,
                 output_path,
@@ -109,7 +106,7 @@ class TestExportPreferencesDPO:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "nested" / "dir" / "dpo.jsonl"
-            result = export_preferences_dpo(
+            result = export_preferences(
                 database.session,
                 learn_client.context.context_key,
                 output_path,
