@@ -232,13 +232,14 @@ class RunInfo:
 # Client
 # =============================================================================
 
-# Valid status values and allowed transitions (deleted handled via system_status)
-VALID_STATUSES = {"pending", "running", "completed", "failed"}
+# Valid status values and allowed transitions
+VALID_STATUSES = {"pending", "running", "completed", "failed", "cancelled"}
 STATUS_TRANSITIONS = {
-    "pending": {"running", "failed"},
+    "pending": {"running", "failed", "cancelled"},
     "running": {"pending", "completed", "failed"},
-    "completed": set(),  # Terminal - use soft-delete
-    "failed": set(),  # Terminal - use soft-delete
+    "completed": set(),  # Terminal - use soft-delete to hide
+    "failed": set(),  # Terminal - use soft-delete to hide
+    "cancelled": set(),  # Terminal - user cancelled before execution
 }
 
 
@@ -451,7 +452,13 @@ class Client:
             return [RunInfo.from_model(r) for r in runs]
 
     def delete(self, run_id: int) -> bool:
-        """Soft-delete a training run (frees pending pairs for reuse)."""
+        """Delete a training run.
+
+        For pending runs: transitions to 'cancelled' status (proper state change).
+        For other runs: soft-deletes via system_status (hides without changing history).
+
+        In both cases, pending pairs are cleared and become available for reuse.
+        """
         with self._session_factory() as session:
             run = self._get_run(session, run_id)
             if run is None:
@@ -460,9 +467,14 @@ class Client:
             # Clear pending pairs (they become available for other runs)
             self._clear_pending_pairs(session, run_id)
 
-            # Soft-delete via system_status
-            run.system_status = {"deleted": True, "deleted_at": utc_now().isoformat()}
-            self._lg.debug("soft-deleted training run", extra={"run_id": run_id})
+            if run.status == "pending":
+                # Pending runs can be properly cancelled
+                run.status = "cancelled"
+                self._lg.debug("cancelled pending run", extra={"run_id": run_id})
+            else:
+                # Running/completed/failed runs are soft-deleted (preserve history)
+                run.system_status = {"deleted": True, "deleted_at": utc_now().isoformat()}
+                self._lg.debug("soft-deleted training run", extra={"run_id": run_id})
             return True
 
     # -------------------------------------------------------------------------

@@ -37,11 +37,12 @@ def _build_preferences_query(
     until: datetime | None,
     min_margin: float | None,
 ):
-    """Build SQLAlchemy query for preference pairs."""
+    """Build SQLAlchemy query for preference pairs (active only)."""
     stmt = (
         select(Fact, PreferenceDetails)
         .join(PreferenceDetails, Fact.id == PreferenceDetails.fact_id)
         .where(Fact.type == "preference")
+        .where(Fact.active == True)  # noqa: E712
     )
     context_filter = build_context_filter(context_key, Fact.context_key)
     if context_filter is not None:

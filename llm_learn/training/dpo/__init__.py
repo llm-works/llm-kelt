@@ -15,12 +15,14 @@ from .client import (
     Run,
     RunInfo,
     TrainedPair,
+    _not_deleted_filter,
 )
 from .export import PairTuple, export_preferences, export_run_pairs, generate_pairs
 
 __all__ = [
     # Core client
     "Client",
+    "_not_deleted_filter",
     # Models
     "Run",
     "RunInfo",

@@ -9,12 +9,18 @@ from appinfra.db.pg import PG
 from appinfra.dot_dict import DotDict
 from llm_infer import compute_adapter_metadata
 from llm_infer.models import ModelResolver
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, select
 
 from ...core.database import Database
 from ...core.utils import utc_now
 from ...training.config import RunConfig, RunResult
-from ...training.dpo import PendingPair, Run, export_preferences, export_run_pairs
+from ...training.dpo import (
+    PendingPair,
+    Run,
+    _not_deleted_filter,
+    export_preferences,
+    export_run_pairs,
+)
 from ...training.lora import AdapterRegistry
 from ...training.lora import Config as LoraConfig
 
@@ -854,15 +860,6 @@ class PipelineTool(ModelResolutionMixin, Tool):
         adapter_meta = compute_adapter_metadata(result.adapter_path)
         adapter_info = {"mtime": adapter_meta.mtime, "md5": adapter_meta.md5}
         return metrics, adapter_info
-
-
-def _not_deleted_filter(model):
-    """Build filter for non-deleted runs (system_status is NULL or deleted != true)."""
-
-    return or_(
-        model.system_status.is_(None),
-        model.system_status["deleted"].astext != "true",
-    )
 
 
 class ResetTool(Tool):

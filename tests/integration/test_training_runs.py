@@ -202,9 +202,25 @@ class TestRunCRUD:
         runs = dpo_client.list_runs(descending=True)
         assert runs[0].adapter_name == "third"  # Most recent first
 
-    def test_delete_run(self, dpo_client, clean_tables):
-        """Test soft-deleting a run."""
-        run = dpo_client.create(adapter_name="to-delete")
+    def test_delete_pending_run_cancels(self, dpo_client, clean_tables):
+        """Test deleting a pending run transitions to cancelled status."""
+        run = dpo_client.create(adapter_name="to-cancel")
+        assert run.status == "pending"
+
+        result = dpo_client.delete(run.id)
+        assert result is True
+
+        # Cancelled runs are still visible (not soft-deleted)
+        cancelled = dpo_client.get(run.id)
+        assert cancelled is not None
+        assert cancelled.status == "cancelled"
+        assert cancelled.is_deleted is False
+
+    def test_delete_completed_run_soft_deletes(self, dpo_client, clean_tables):
+        """Test deleting a completed run soft-deletes it."""
+        run = dpo_client.create(adapter_name="to-soft-delete")
+        dpo_client.start(run.id)
+        dpo_client.complete(run.id, metrics={"loss": 0.1})
 
         result = dpo_client.delete(run.id)
         assert result is True
@@ -216,8 +232,8 @@ class TestRunCRUD:
         all_runs = dpo_client.list_runs(include_deleted=True)
         deleted_run = next((r for r in all_runs if r.id == run.id), None)
         assert deleted_run is not None
+        assert deleted_run.status == "completed"  # Status unchanged
         assert deleted_run.is_deleted is True
-        assert deleted_run.system_status is not None
         assert deleted_run.system_status.get("deleted") is True
 
     def test_delete_nonexistent_run(self, dpo_client, clean_tables):
