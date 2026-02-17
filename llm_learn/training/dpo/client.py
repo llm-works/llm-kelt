@@ -339,7 +339,7 @@ class Client:
             self._clear_pending_pairs(session, run_id)
 
             if run.status == "pending":
-                # Pending runs can be properly cancelled
+                # Pending runs can be properly cancelled (remain visible with cancelled status)
                 run.status = "cancelled"
                 self._lg.debug("cancelled pending run", extra={"run_id": run_id})
             else:

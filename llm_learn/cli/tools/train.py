@@ -228,6 +228,8 @@ class DpoTool(ModelResolutionMixin, Tool):
             ("epochs", "num_epochs"),
             ("batch_size", "batch_size"),
             ("learning_rate", "learning_rate"),
+            ("fp16", "fp16"),
+            ("bf16", "bf16"),
         ]:
             if key in profile:
                 params[param] = profile[key]
@@ -398,6 +400,8 @@ class SftTool(ModelResolutionMixin, Tool):
             ("epochs", "num_epochs"),
             ("batch_size", "batch_size"),
             ("learning_rate", "learning_rate"),
+            ("fp16", "fp16"),
+            ("bf16", "bf16"),
         ]:
             if key in profile:
                 params[param] = profile[key]
@@ -865,6 +869,8 @@ class PipelineTool(ModelResolutionMixin, Tool):
             ("epochs", "num_epochs"),
             ("batch_size", "batch_size"),
             ("learning_rate", "learning_rate"),
+            ("fp16", "fp16"),
+            ("bf16", "bf16"),
         ]:
             if key in profile_dict:
                 params[param] = profile_dict[key]

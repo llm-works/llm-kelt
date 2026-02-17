@@ -332,7 +332,7 @@ class Client:
             self._clear_pending_examples(session, run_id)
 
             if run.status == "pending":
-                # Pending runs can be properly cancelled
+                # Pending runs can be properly cancelled (remain visible with cancelled status)
                 run.status = "cancelled"
                 self._lg.debug("cancelled pending SFT run", extra={"run_id": run_id})
             else:

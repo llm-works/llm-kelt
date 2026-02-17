@@ -71,7 +71,11 @@ def _export_feedback(session: Session, run_id: int) -> list[dict[str, str]]:
 
 
 def _export_interactions(session: Session, run_id: int) -> list[dict[str, str]]:
-    """Export interaction facts: query -> instruction, response -> output."""
+    """Export interaction facts: context.query -> instruction, context.response -> output.
+
+    Interactions store query/response data in the context JSONB field.
+    Only interactions with both query and response in context are exported.
+    """
     from .client import PendingExample
 
     stmt = (
@@ -84,8 +88,12 @@ def _export_interactions(session: Session, run_id: int) -> list[dict[str, str]]:
     )
     records = []
     for (details,) in session.execute(stmt):
-        if details.response:
-            records.append({"instruction": details.query, "output": details.response})
+        # Query/response are stored in context JSONB field
+        ctx = details.context or {}
+        query = ctx.get("query")
+        response = ctx.get("response")
+        if query and response:
+            records.append({"instruction": query, "output": response})
     return records
 
 
