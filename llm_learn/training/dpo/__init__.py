@@ -8,14 +8,8 @@ Provides:
 - export_preferences: Export from atomic preferences (legacy)
 """
 
-from .client import (
-    Client,
-    PendingPair,
-    Run,
-    RunInfo,
-    TrainedPair,
-    _not_deleted_filter,
-)
+from ..models import Run, RunInfo, _not_deleted_filter
+from .client import Client, PendingPair, TrainedPair
 from .export import PairTuple, export_preferences, export_run_pairs
 
 __all__ = [

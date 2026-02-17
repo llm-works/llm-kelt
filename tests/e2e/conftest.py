@@ -9,18 +9,71 @@ import httpx
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def cleanup_gpu_memory():
-    """Clear GPU memory after each test to prevent OOM in subsequent tests."""
-    yield
-    # Cleanup after test
-    gc.collect()
+def _get_gpu_memory_mb() -> float:
+    """Get current GPU memory allocated in MB, or 0 if unavailable."""
     try:
         import torch
 
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            return torch.cuda.memory_allocated() / (1024 * 1024)
+    except ImportError:
+        pass
+    return 0.0
+
+
+@pytest.fixture(autouse=True)
+def cleanup_gpu_memory():
+    """Clear GPU memory after each test to prevent OOM in subsequent tests."""
+    # Record baseline before test (inference server memory is expected)
+    baseline_mb = _get_gpu_memory_mb()
+    yield
+    _force_gpu_cleanup(baseline_mb)
+
+
+def _wait_for_memory_release(baseline_mb: float, tolerance_mb: float = 500, max_wait: float = 10.0):
+    """Poll until GPU memory returns to near baseline, or warn if timeout."""
+    import time
+    import warnings
+
+    import torch
+
+    poll_interval = 0.2
+    waited = 0.0
+    current_mb = torch.cuda.memory_allocated() / (1024 * 1024)
+
+    while waited < max_wait:
+        gc.collect()
+        torch.cuda.empty_cache()
+        current_mb = torch.cuda.memory_allocated() / (1024 * 1024)
+        if current_mb <= baseline_mb + tolerance_mb:
+            return
+        time.sleep(poll_interval)
+        waited += poll_interval
+
+    # Warn but don't fail - PyTorch may legitimately hold cached memory
+    warnings.warn(
+        f"GPU memory not fully freed after {max_wait}s: "
+        f"{current_mb:.0f}MB allocated (baseline: {baseline_mb:.0f}MB)",
+        ResourceWarning,
+    )
+
+
+def _force_gpu_cleanup(baseline_mb: float):
+    """Aggressively clear GPU memory and wait until it returns to baseline."""
+    # Multiple gc passes to handle cyclic references
+    for _ in range(3):
+        gc.collect()
+
+    try:
+        import torch
+
+        if torch.cuda.is_available():
             torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            if hasattr(torch.cuda, "ipc_collect"):
+                torch.cuda.ipc_collect()
+            torch.cuda.reset_peak_memory_stats()
+            _wait_for_memory_release(baseline_mb)
     except ImportError:
         pass
 

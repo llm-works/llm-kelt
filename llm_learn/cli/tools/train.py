@@ -9,7 +9,7 @@ from appinfra.db.pg import PG
 from appinfra.dot_dict import DotDict
 from llm_infer import compute_adapter_metadata
 from llm_infer.models import ModelResolver
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, literal, select
 
 from ...core.database import Database
 from ...core.utils import utc_now
@@ -17,12 +17,14 @@ from ...training.config import RunConfig, RunResult
 from ...training.dpo import (
     PendingPair,
     Run,
+    TrainedPair,
     _not_deleted_filter,
     export_preferences,
     export_run_pairs,
 )
 from ...training.lora import AdapterRegistry
 from ...training.lora import Config as LoraConfig
+from ...training.sft import PendingExample, TrainedExample, export_run_examples
 
 
 def _print_adapter_metadata(adapter_path: Path, label: str = "Adapter") -> None:
@@ -226,6 +228,8 @@ class DpoTool(ModelResolutionMixin, Tool):
             ("epochs", "num_epochs"),
             ("batch_size", "batch_size"),
             ("learning_rate", "learning_rate"),
+            ("fp16", "fp16"),
+            ("bf16", "bf16"),
         ]:
             if key in profile:
                 params[param] = profile[key]
@@ -346,6 +350,186 @@ class DpoTool(ModelResolutionMixin, Tool):
                     print(f"    {key}: {value}")
 
 
+class SftTool(ModelResolutionMixin, Tool):
+    """Train SFT adapter from feedback data."""
+
+    def __init__(self, parent: Any = None) -> None:
+        config = ToolConfig(
+            name="sft",
+            aliases=["s"],
+            help_text="Train SFT adapter from feedback data",
+        )
+        super().__init__(parent, config)
+
+    def add_args(self, parser) -> None:
+        parser.add_argument("--data", "-d", help="Input JSONL path")
+        parser.add_argument("--output", "-o", help="Output adapter directory")
+        parser.add_argument("--model", "-m", help="Model name (from models.yaml)")
+        parser.add_argument("--list-models", action="store_true", help="List available models")
+        parser.add_argument("--no-quantize", action="store_true", help="Disable 4-bit quantization")
+        parser.add_argument("--epochs", type=int, help="Number of training epochs")
+        parser.add_argument("--batch-size", type=int, help="Training batch size")
+        parser.add_argument("--lr", type=float, help="Learning rate")
+        parser.add_argument("--profile", help="Use named training profile from config")
+        parser.add_argument("--based-on", "-b", help="Train on top of existing adapter (path)")
+
+    def _get_training_config(self) -> DotDict | None:
+        """Get training config section."""
+        if not self.app.config:
+            return None
+        return getattr(DotDict(**dict(self.app.config)), "training", None)
+
+    def _load_profile(self, profile_name: str) -> dict:
+        """Load named training profile from config."""
+        training_cfg = self._get_training_config()
+        if training_cfg is None:
+            raise ValueError("No training config section found")
+        profiles = getattr(training_cfg, "profiles", None)
+        if profiles is None:
+            raise ValueError("No training.profiles section found")
+        profile = getattr(profiles, profile_name, None)
+        if profile is None:
+            available = list(profiles.keys()) if hasattr(profiles, "keys") else []
+            raise ValueError(f"Profile '{profile_name}' not found. Available: {available}")
+        return dict(profile)
+
+    def _apply_profile(self, profile: dict) -> tuple[bool, dict[str, Any]]:
+        """Apply profile settings, returning (quantize, params)."""
+        params: dict[str, Any] = {}
+        for key, param in [
+            ("epochs", "num_epochs"),
+            ("batch_size", "batch_size"),
+            ("learning_rate", "learning_rate"),
+            ("fp16", "fp16"),
+            ("bf16", "bf16"),
+        ]:
+            if key in profile:
+                params[param] = profile[key]
+        return profile.get("quantize", True), params
+
+    def _apply_cli_overrides(self, quantize: bool, params: dict) -> tuple[bool, dict]:
+        """Apply CLI arg overrides to profile settings."""
+        if getattr(self.args, "no_quantize", False):
+            quantize = False
+        for arg, param in [
+            ("epochs", "num_epochs"),
+            ("batch_size", "batch_size"),
+            ("lr", "learning_rate"),
+        ]:
+            if getattr(self.args, arg, None) is not None:
+                params[param] = getattr(self.args, arg)
+        return quantize, params
+
+    def _build_configs(self) -> tuple[bool, RunConfig]:
+        """Build training configuration from args and profile."""
+        params: dict[str, Any] = {}
+        quantize = True
+
+        profile_name = getattr(self.args, "profile", None)
+        if profile_name:
+            quantize, params = self._apply_profile(self._load_profile(profile_name))
+
+        quantize, params = self._apply_cli_overrides(quantize, params)
+        return quantize, RunConfig(**params) if params else RunConfig()
+
+    def _validate_args(self) -> tuple[Path, Path] | None:
+        """Validate args and return (data_path, output_dir) or None on error."""
+        if not getattr(self.args, "data", None):
+            self.lg.error("--data is required")
+            return None
+        if not getattr(self.args, "output", None):
+            self.lg.error("--output is required")
+            return None
+
+        data_path = Path(self.args.data)
+        if not data_path.exists():
+            self.lg.error("data file not found", extra={"path": str(data_path)})
+            return None
+
+        return data_path, Path(self.args.output)
+
+    def run(self, **kwargs: Any) -> int:
+        if getattr(self.args, "list_models", False):
+            return self._list_models()
+
+        paths = self._validate_args()
+        if paths is None:
+            return 1
+        data_path, output_dir = paths
+
+        model_path = self._resolve_model(getattr(self.args, "model", None))
+        if model_path is None:
+            return 1
+
+        return self._execute_training(data_path, output_dir, model_path)
+
+    def _resolve_based_on(self) -> Path | None:
+        """Resolve --based-on argument to adapter path."""
+        based_on_arg = getattr(self.args, "based_on", None)
+        return Path(based_on_arg) if based_on_arg else None
+
+    def _execute_training(self, data_path: Path, output_dir: Path, model_path: Path) -> int:
+        """Execute the SFT training."""
+        from ...training.lora import train_lora
+
+        quantize, training_config = self._build_configs()
+        based_on = self._resolve_based_on()
+        self._log_training_start(
+            data_path, output_dir, model_path, quantize, training_config, based_on
+        )
+
+        result = train_lora(
+            lg=self.lg,
+            data_path=data_path,
+            output_dir=output_dir,
+            base_model=str(model_path),
+            lora_config=LoraConfig(),
+            training_config=training_config,
+            quantize=quantize,
+            resume_from=based_on,
+        )
+        self._print_result(result)
+        return 0
+
+    def _log_training_start(
+        self,
+        data_path: Path,
+        output_dir: Path,
+        model_path: Path,
+        quantize: bool,
+        training_config: RunConfig,
+        based_on: Path | None,
+    ) -> None:
+        """Log training start with parameters."""
+        self.lg.info(
+            "starting SFT training",
+            extra={
+                "data": str(data_path),
+                "output": str(output_dir),
+                "model": str(model_path),
+                "quantize": quantize,
+                "epochs": training_config.num_epochs,
+                "based_on": str(based_on) if based_on else None,
+            },
+        )
+
+    def _print_result(self, result: RunResult) -> None:
+        """Print training result summary."""
+        print("\nTraining complete!")
+        print(f"  Adapter: {result.adapter_path}")
+        print(f"  Base model: {result.base_model}")
+        print(f"  Duration: {result.duration_seconds:.1f}s")
+        print(f"  Samples trained: {result.samples_trained}")
+        _print_adapter_metadata(result.adapter_path)
+        if result.metrics:
+            print("  Metrics:")
+            for key, value in result.metrics.items():
+                if isinstance(value, float):
+                    print(f"    {key}: {value:.4f}")
+                else:
+                    print(f"    {key}: {value}")
+
+
 class RegisterTool(Tool):
     """Copy adapter weights to llm-infer adapter directory."""
 
@@ -425,13 +609,17 @@ class RegisterTool(Tool):
 
 
 class PipelineTool(ModelResolutionMixin, Tool):
-    """Run full DPO workflow: export -> train -> register."""
+    """Run full training workflow: export -> train -> register.
+
+    Supports both DPO and SFT training methods. The method is determined by the
+    queued run's `method` field in training_runs.
+    """
 
     def __init__(self, parent: Any = None) -> None:
         config = ToolConfig(
             name="pipeline",
             aliases=["p"],
-            help_text="Run full DPO workflow: export -> train -> register",
+            help_text="Run training workflow: export -> train -> register (DPO or SFT)",
         )
         super().__init__(parent, config)
         self._db: Database | None = None
@@ -440,14 +628,21 @@ class PipelineTool(ModelResolutionMixin, Tool):
         # Resolved from queue when --context/--id not provided
         self._resolved_context: str | None = None
         self._resolved_adapter_id: str | None = None
+        self._run_method: str = "dpo"  # Default, updated from queue
 
     def add_args(self, parser) -> None:
-        # Export args
+        self._add_export_args(parser)
+        self._add_training_args(parser)
+        self._add_register_args(parser)
+
+    def _add_export_args(self, parser) -> None:
+        """Add export-related arguments."""
         parser.add_argument("--context", help="Context key for export")
         parser.add_argument("--category", help="Category filter for export")
         parser.add_argument("--min-margin", type=float, help="Minimum margin threshold")
 
-        # Training args
+    def _add_training_args(self, parser) -> None:
+        """Add training-related arguments."""
         parser.add_argument("--id", help="Adapter ID for registration")
         parser.add_argument("--output-dir", help="Base output directory")
         parser.add_argument("--profile", help="Training profile name")
@@ -461,14 +656,16 @@ class PipelineTool(ModelResolutionMixin, Tool):
         parser.add_argument(
             "--based-on", "-b", help="Train on top of existing adapter (path or ID)"
         )
+        parser.add_argument("--run-id", type=int, help="Use existing run ID")
+        parser.add_argument(
+            "--retry", action="store_true", help="With --run-id, retry a completed run"
+        )
 
-        # Register args
+    def _add_register_args(self, parser) -> None:
+        """Add registration-related arguments."""
         parser.add_argument("--description", help="Adapter description")
         parser.add_argument("--overwrite", action="store_true", help="Overwrite existing adapter")
         parser.add_argument("--skip-register", action="store_true", help="Skip registration step")
-
-        # Run tracking
-        parser.add_argument("--run-id", type=int, help="Use existing DPO run ID")
 
     def _get_output_dir(self) -> Path:
         """Get output directory from args or config."""
@@ -512,6 +709,16 @@ class PipelineTool(ModelResolutionMixin, Tool):
         """Get DpoClient via LearnClient."""
         return self._get_learn_client().train.dpo
 
+    def _get_sft_client(self):
+        """Get SftClient via LearnClient."""
+        return self._get_learn_client().train.sft
+
+    def _get_training_client(self):
+        """Get appropriate training client based on run method."""
+        if self._run_method == "sft":
+            return self._get_sft_client()
+        return self._get_dpo_client()
+
     @property
     def _adapter_id(self) -> str:
         """Get resolved adapter ID."""
@@ -519,16 +726,19 @@ class PipelineTool(ModelResolutionMixin, Tool):
 
     def _find_pending_run(
         self, context_arg: str | None
-    ) -> tuple[int, str | None, str | None] | None:
-        """Find earliest pending DPO run. Returns (id, context_key, adapter_name) or None."""
+    ) -> tuple[int, str | None, str | None, str] | None:
+        """Find earliest pending training run (DPO or SFT).
+
+        Returns (id, context_key, adapter_name, method) or None.
+        """
         from sqlalchemy import select
 
-        from llm_learn.training.dpo.client import Run
+        from llm_learn.training.models import Run
 
         with self._get_database().session() as session:
             stmt = (
                 select(Run)
-                .where(Run.method == "dpo")
+                .where(Run.method.in_(["dpo", "sft"]))
                 .where(Run.status == "pending")
                 .where(_not_deleted_filter(Run))
                 .order_by(Run.created_at.asc())
@@ -540,14 +750,14 @@ class PipelineTool(ModelResolutionMixin, Tool):
                 return None
             # Extract values while still in session
             adapter_name = run.adapter.get("name") if run.adapter else None
-            return (run.id, run.context_key, adapter_name)
+            return (run.id, run.context_key, adapter_name, run.method)
 
     def _resolve_from_queue(self) -> None:
-        """Resolve context and adapter_id from pending queue if not provided."""
+        """Resolve context, adapter_id, and method from pending queue if not provided."""
         context_arg = getattr(self.args, "context", None)
         id_arg = getattr(self.args, "id", None)
 
-        # If both provided, nothing to resolve
+        # If both provided, nothing to resolve (default to dpo method for backward compat)
         if context_arg and id_arg:
             self._resolved_context = context_arg
             self._resolved_adapter_id = id_arg
@@ -556,15 +766,19 @@ class PipelineTool(ModelResolutionMixin, Tool):
         result = self._find_pending_run(context_arg)
         if result is None:
             if context_arg:
-                raise ValueError(f"No pending DPO runs found for context '{context_arg}'")
-            raise ValueError("No pending DPO runs in queue")
+                raise ValueError(f"No pending training runs found for context '{context_arg}'")
+            raise ValueError("No pending training runs in queue")
 
-        self._run_id, self._resolved_context, self._resolved_adapter_id = result
+        self._run_id, self._resolved_context, self._resolved_adapter_id, self._run_method = result
         if self._resolved_adapter_id is None:
             raise ValueError(f"Pending run {self._run_id} has no adapter name; use --id")
         self.lg.info(
             "resolved run from queue",
-            extra={"run_id": self._run_id, "context": self._resolved_context},
+            extra={
+                "run_id": self._run_id,
+                "context": self._resolved_context,
+                "method": self._run_method,
+            },
         )
 
     def _get_or_create_run(self) -> int:
@@ -573,15 +787,16 @@ class PipelineTool(ModelResolutionMixin, Tool):
         if self._run_id is not None:
             return self._run_id
 
-        client = self._get_dpo_client()
+        client = self._get_training_client()
 
         # Use existing run if specified via --run-id
         if run_id := getattr(self.args, "run_id", None):
             run = client.get(run_id)
             if run is None:
-                raise ValueError(f"DPO run {run_id} not found")
+                raise ValueError(f"Training run {run_id} not found")
             if run.status != "pending":
-                raise ValueError(f"DPO run {run_id} is {run.status}, expected pending")
+                raise ValueError(f"Training run {run_id} is {run.status}, expected pending")
+            self._run_method = run.method
             return int(run_id)
 
         # Look for existing pending run with same adapter name
@@ -593,25 +808,45 @@ class PipelineTool(ModelResolutionMixin, Tool):
 
         # Create new run
         run = client.create(adapter_name=self._adapter_id)
-        self.lg.info("created new DPO run", extra={"run_id": run.id})
+        self.lg.info(f"created new {self._run_method.upper()} run", extra={"run_id": run.id})
         return int(run.id)
 
     def _run_export(self, output_path: Path) -> int:
-        """Run export step - exports pending pairs for this run."""
+        """Run export step - exports pending data for this run (pairs for DPO, examples for SFT)."""
         assert self._run_id is not None, "_run_id must be set before export"
-        self.lg.info("step 1/3: exporting pairs", extra={"run_id": self._run_id})
 
+        if self._run_method == "sft":
+            return self._run_export_sft(output_path)
+        return self._run_export_dpo(output_path)
+
+    def _run_export_dpo(self, output_path: Path) -> int:
+        """Export pending DPO pairs."""
+        assert self._run_id is not None
+        self.lg.info("step 1/3: exporting pairs", extra={"run_id": self._run_id})
         result = export_run_pairs(
             session_factory=self._get_database().session,
             run_id=self._run_id,
             output_path=output_path,
         )
-
         if result.count == 0:
             self.lg.error("no pairs found for run")
             return 1
-
         print(f"[1/3] Exported {result.count} pairs")
+        return 0
+
+    def _run_export_sft(self, output_path: Path) -> int:
+        """Export pending SFT examples."""
+        assert self._run_id is not None
+        self.lg.info("step 1/3: exporting examples", extra={"run_id": self._run_id})
+        result = export_run_examples(
+            session_factory=self._get_database().session,
+            run_id=self._run_id,
+            output_path=output_path,
+        )
+        if result.count == 0:
+            self.lg.error("no examples found for run")
+            return 1
+        print(f"[1/3] Exported {result.count} examples")
         return 0
 
     def _load_profile(self, profile_name: str) -> tuple[float, bool, dict[str, Any]]:
@@ -634,6 +869,8 @@ class PipelineTool(ModelResolutionMixin, Tool):
             ("epochs", "num_epochs"),
             ("batch_size", "batch_size"),
             ("learning_rate", "learning_rate"),
+            ("fp16", "fp16"),
+            ("bf16", "bf16"),
         ]:
             if key in profile_dict:
                 params[param] = profile_dict[key]
@@ -665,42 +902,83 @@ class PipelineTool(ModelResolutionMixin, Tool):
             beta, quantize, params = self._load_profile(profile_name)
 
         beta, quantize, params = self._apply_cli_overrides(beta, quantize, params)
+
+        # When quantizing, use bf16 (matches bnb_4bit_compute_dtype=torch.bfloat16)
+        if quantize and "fp16" not in params and "bf16" not in params:
+            params["fp16"] = False
+            params["bf16"] = True
+
         return beta, quantize, RunConfig(**params) if params else RunConfig()
 
     def _resolve_based_on(self) -> Path | None:
-        """Resolve --based-on argument to adapter path."""
-        based_on_arg = getattr(self.args, "based_on", None)
-        if not based_on_arg:
-            return None
+        """Resolve adapter to train on top of.
 
+        Priority:
+        1. CLI --based-on argument (explicit override)
+        2. DB run's based_on field (cross-method lineage from parent run)
+        """
+        # 1. Check CLI argument first (explicit override)
+        based_on_arg = getattr(self.args, "based_on", None)
+        if based_on_arg:
+            return self._resolve_adapter_path(based_on_arg)
+
+        # 2. Check DB run's based_on field (lineage from parent run)
+        if self._run_id is not None:
+            adapter_name = self._get_parent_adapter_name()
+            if adapter_name:
+                self.lg.debug(
+                    "resolved based_on from DB lineage",
+                    extra={"parent_adapter": adapter_name},
+                )
+                return self._resolve_adapter_path(adapter_name)
+
+        return None
+
+    def _get_parent_adapter_name(self) -> str | None:
+        """Get parent run's adapter name from DB lineage."""
+        from ...training.models import Run
+
+        with self._get_database().session() as session:
+            # Get current run's based_on
+            current = session.get(Run, self._run_id)
+            if current is None or current.based_on is None:
+                return None
+
+            # Get parent run's adapter name
+            parent = session.get(Run, current.based_on)
+            if parent is None or parent.adapter is None:
+                return None
+
+            return parent.adapter.get("name")
+
+    def _resolve_adapter_path(self, adapter_ref: str) -> Path:
+        """Resolve adapter reference (name or path) to actual path."""
         base_path = self._get_adapter_base_path()
         if base_path is None:
             # No registry configured, try as raw path
-            path = Path(based_on_arg)
+            path = Path(adapter_ref)
             if not path.exists():
-                raise ValueError(f"Adapter not found: {based_on_arg}")
+                raise ValueError(f"Adapter not found: {adapter_ref}")
             return path
 
         registry = AdapterRegistry(self.lg, base_path)
-        return registry.resolve(based_on_arg)
+        return registry.resolve(adapter_ref)
 
-    def _run_train(  # cq: exempt=32
+    def _run_train(self, data_path: Path, adapter_path: Path, model_path: Path) -> RunResult | None:
+        """Run training step - dispatches to DPO or SFT trainer based on method."""
+        if self._run_method == "sft":
+            return self._run_train_sft(data_path, adapter_path, model_path)
+        return self._run_train_dpo(data_path, adapter_path, model_path)
+
+    def _run_train_dpo(
         self, data_path: Path, adapter_path: Path, model_path: Path
     ) -> RunResult | None:
-        """Run training step."""
+        """Run DPO training."""
         from ...training.dpo import train_dpo
 
         beta, quantize, training_config = self._build_training_params()
         based_on = self._resolve_based_on()
-
-        self.lg.info(
-            "step 2/3: training DPO adapter",
-            extra={
-                "model": str(model_path),
-                "epochs": training_config.num_epochs,
-                "based_on": str(based_on) if based_on else None,
-            },
-        )
+        self._log_train_step("DPO", model_path, training_config, based_on)
 
         try:
             result: RunResult = train_dpo(
@@ -714,12 +992,55 @@ class PipelineTool(ModelResolutionMixin, Tool):
                 quantize=quantize,
                 based_on=based_on,
             )
-            print(f"[2/3] Training complete ({result.duration_seconds:.1f}s)")
-            _print_adapter_metadata(result.adapter_path, label="Trained adapter")
-            return result
+            return self._handle_train_success(result)
         except Exception as e:
-            self.lg.error("training failed", extra={"exception": e})
+            self.lg.error("DPO training failed", extra={"exception": e})
             return None
+
+    def _run_train_sft(
+        self, data_path: Path, adapter_path: Path, model_path: Path
+    ) -> RunResult | None:
+        """Run SFT training."""
+        from ...training.lora import train_lora
+
+        _, quantize, training_config = self._build_training_params()
+        based_on = self._resolve_based_on()
+        self._log_train_step("SFT", model_path, training_config, based_on)
+
+        try:
+            result: RunResult = train_lora(
+                lg=self.lg,
+                data_path=data_path,
+                output_dir=adapter_path,
+                base_model=str(model_path),
+                lora_config=LoraConfig(),
+                training_config=training_config,
+                quantize=quantize,
+                resume_from=based_on,
+            )
+            return self._handle_train_success(result)
+        except Exception as e:
+            self.lg.error("SFT training failed", extra={"exception": e})
+            return None
+
+    def _log_train_step(
+        self, method: str, model_path: Path, config: RunConfig, based_on: Path | None
+    ) -> None:
+        """Log training step start."""
+        self.lg.info(
+            f"step 2/3: training {method} adapter",
+            extra={
+                "model": str(model_path),
+                "epochs": config.num_epochs,
+                "based_on": str(based_on) if based_on else None,
+            },
+        )
+
+    def _handle_train_success(self, result: RunResult) -> RunResult:
+        """Handle successful training - print summary and return result."""
+        print(f"[2/3] Training complete ({result.duration_seconds:.1f}s)")
+        _print_adapter_metadata(result.adapter_path, label="Trained adapter")
+        return result
 
     def _get_adapter_base_path(self) -> str | None:
         """Get adapter base path from config."""
@@ -797,8 +1118,14 @@ class PipelineTool(ModelResolutionMixin, Tool):
             return 1
 
         try:
-            self._resolve_from_queue()
-            self._run_id = self._get_or_create_run()
+            # Check for --run with --retry (creates new run from completed one)
+            run_id = getattr(self.args, "run_id", None)
+            is_retry = getattr(self.args, "retry", False)
+            if run_id and is_retry:
+                self._setup_retry_run(run_id)
+            else:
+                self._resolve_from_queue()
+                self._run_id = self._get_or_create_run()
         except ValueError as e:
             self.lg.error(str(e))
             return 1
@@ -807,19 +1134,127 @@ class PipelineTool(ModelResolutionMixin, Tool):
         self._print_pipeline_header(model_path, work_dir)
         return self._execute_pipeline(data_path, adapter_path, model_path)
 
+    def _setup_retry_run(self, original_run_id: int) -> None:
+        """Set up a new run by copying pairs from a completed run.
+
+        Used with --run ID --retry to retrain with different hyperparameters
+        without re-creating pairs on the agent side.
+        """
+        from ...training.models import Run
+
+        with self._get_database().session() as session:
+            original = self._validate_retry_source(session, original_run_id, Run)
+            new_run_id, copied = self._create_retry_run(session, original, Run)
+
+            self.lg.info(
+                f"created retry run from #{original_run_id}",
+                extra={"new_run_id": new_run_id, "copied": copied, "method": original.method},
+            )
+            self._run_id = new_run_id
+
+    def _validate_retry_source(self, session, run_id: int, run_cls):
+        """Validate and return the source run for retry."""
+        original = session.get(run_cls, run_id)
+        if original is None:
+            raise ValueError(f"Run {run_id} not found")
+        if original.status != "completed":
+            raise ValueError(f"Run {run_id} is {original.status}, expected completed")
+        if original.method not in ("dpo", "sft"):
+            raise ValueError(f"Unsupported method: {original.method}")
+
+        adapter_name = original.adapter.get("name") if original.adapter else None
+        if not adapter_name:
+            raise ValueError(f"Run {run_id} has no adapter name")
+
+        self._run_method = original.method
+        self._resolved_context = original.context_key
+        self._resolved_adapter_id = adapter_name
+        return original
+
+    def _create_retry_run(self, session, original, run_cls) -> tuple[int, int]:
+        """Create new run and copy pairs/examples from original."""
+        new_run = run_cls(
+            method=original.method,
+            context_key=original.context_key,
+            adapter={"name": self._resolved_adapter_id},
+            based_on=original.based_on,
+            status="pending",
+        )
+        session.add(new_run)
+        session.flush()
+
+        if original.method == "dpo":
+            copied = self._copy_dpo_pairs(session, original.id, new_run.id)
+        else:
+            copied = self._copy_sft_examples(session, original.id, new_run.id)
+
+        return new_run.id, copied
+
+    def _copy_dpo_pairs(self, session, source_run_id: int, target_run_id: int) -> int:
+        """Copy trained DPO pairs to pending for new run."""
+        from sqlalchemy import insert, select
+
+        from ...training.dpo.client import PendingPair, TrainedPair
+
+        # Get trained pairs from source
+        stmt = select(TrainedPair).where(TrainedPair.run_id == source_run_id)
+        trained = session.execute(stmt).scalars().all()
+
+        if not trained:
+            raise ValueError(f"Run {source_run_id} has no trained pairs")
+
+        # Insert as pending for target
+        for pair in trained:
+            session.execute(
+                insert(PendingPair).values(
+                    run_id=target_run_id,
+                    chosen_fact_id=pair.chosen_fact_id,
+                    rejected_fact_id=pair.rejected_fact_id,
+                    prompt=pair.prompt,
+                )
+            )
+
+        return len(trained)
+
+    def _copy_sft_examples(self, session, source_run_id: int, target_run_id: int) -> int:
+        """Copy trained SFT examples to pending for new run."""
+        from sqlalchemy import insert, select
+
+        from ...training.sft.client import PendingExample, TrainedExample
+
+        # Get trained examples from source
+        stmt = select(TrainedExample).where(TrainedExample.run_id == source_run_id)
+        trained = session.execute(stmt).scalars().all()
+
+        if not trained:
+            raise ValueError(f"Run {source_run_id} has no trained examples")
+
+        # Insert as pending for target
+        for ex in trained:
+            session.execute(
+                insert(PendingExample).values(
+                    run_id=target_run_id,
+                    fact_id=ex.fact_id,
+                )
+            )
+
+        return len(trained)
+
     def _print_pipeline_header(self, model_path: Path, work_dir: Path) -> None:
         """Print pipeline startup info."""
-        print(f"\nDPO Pipeline: {self._resolved_context} -> {self._adapter_id}")
+        method_label = self._run_method.upper()
+        print(f"\n{method_label} Pipeline: {self._resolved_context} -> {self._adapter_id}")
         print(f"Model: {model_path.name}")
         print(f"Output directory: {work_dir}")
         print(f"Run ID: {self._run_id}\n")
 
     def _execute_pipeline(self, data_path: Path, adapter_path: Path, model_path: Path) -> int:
         """Execute the three pipeline steps with run tracking."""
-        client = self._get_dpo_client()
+        client = self._get_training_client()
 
+        data_type = "examples" if self._run_method == "sft" else "preferences"
         if self._run_export(data_path) != 0:
-            client.fail(self._run_id, "Export failed: no preferences found")
+            client.fail(self._run_id, f"Export failed: no {data_type} found")
             return self._pipeline_fail("step 1 (export)")
 
         client.start(self._run_id)
@@ -866,19 +1301,22 @@ class PipelineTool(ModelResolutionMixin, Tool):
 
 
 class ResetTool(Tool):
-    """Reset DPO training data for a context.
+    """Reset training data (DPO and SFT) for a context.
 
-    Clears pending pairs only - completed runs and their trained pairs remain intact.
-    Uses soft-delete via system_status JSONB.
+    Soft-deletes runs and clears all associated data (pending and trained).
+    This frees examples/pairs for reuse in future training runs.
     """
 
     # Display name for NULL context_key (used in list output)
     _NULL_CONTEXT_DISPLAY = "(no context)"
 
+    # Sentinel for "all contexts" in reset --all
+    _ALL_CONTEXTS: object = object()
+
     def __init__(self, parent: Any = None) -> None:
         config = ToolConfig(
             name="reset",
-            help_text="Reset DPO training runs for a context",
+            help_text="Reset training runs for a context (DPO and SFT)",
         )
         super().__init__(parent, config)
 
@@ -903,138 +1341,93 @@ class ResetTool(Tool):
         """Convert display name back to database value (handles NULL context)."""
         return None if context_key == self._NULL_CONTEXT_DISPLAY else context_key
 
-    def _context_filter(self, column, context_key: str | None):
-        """Build SQLAlchemy filter for context_key (handles NULL correctly)."""
+    def _context_filter(self, column, context_key: str | None | object):
+        """Build SQLAlchemy filter for context_key (handles NULL and all-contexts)."""
+        if context_key is self._ALL_CONTEXTS:
+            return literal(True)  # Match all rows
         return column.is_(None) if context_key is None else column == context_key
 
-    def _count_pending_pairs(self, session, context_key: str | None) -> int:
-        """Count pending pairs for a context."""
-
-        stmt = (
-            select(func.count())
-            .select_from(PendingPair)
-            .join(Run, PendingPair.run_id == Run.id)
-            .where(
-                self._context_filter(Run.context_key, context_key),
-                Run.method == "dpo",
-                _not_deleted_filter(Run),
+    def _count_items(self, session, table, method: str, context_filter) -> int:
+        """Count items in a training data table for a given method and context."""
+        return (
+            session.scalar(
+                select(func.count())
+                .select_from(table)
+                .join(Run, table.run_id == Run.id)
+                .where(context_filter, Run.method == method, _not_deleted_filter(Run))
             )
+            or 0
         )
-        return session.scalar(stmt) or 0
+
+    def _count_data(self, session, context_key: str | None | object) -> dict[str, int]:
+        """Count all training data for a context."""
+        ctx = self._context_filter(Run.context_key, context_key)
+        run_count = (
+            session.scalar(
+                select(func.count())
+                .select_from(Run)
+                .where(ctx, Run.method.in_(["dpo", "sft"]), _not_deleted_filter(Run))
+            )
+            or 0
+        )
+        return {
+            "runs": run_count,
+            "dpo_pending": self._count_items(session, PendingPair, "dpo", ctx),
+            "sft_pending": self._count_items(session, PendingExample, "sft", ctx),
+            "dpo_trained": self._count_items(session, TrainedPair, "dpo", ctx),
+            "sft_trained": self._count_items(session, TrainedExample, "sft", ctx),
+        }
 
     def _list_contexts(self, session) -> list[tuple[str, int, int]]:
-        """List all contexts with run and pending pair counts."""
-
+        """List all contexts with run counts and total data counts."""
         stmt = (
             select(Run.context_key, func.count(Run.id).label("run_count"))
-            .where(Run.method == "dpo", _not_deleted_filter(Run))
+            .where(Run.method.in_(["dpo", "sft"]), _not_deleted_filter(Run))
             .group_by(Run.context_key)
             .order_by(Run.context_key)
         )
         results = []
         for row in session.execute(stmt):
             display_key = row.context_key or self._NULL_CONTEXT_DISPLAY
-            pair_count = self._count_pending_pairs(session, row.context_key)
-            results.append((display_key, row.run_count, pair_count))
-
+            counts = self._count_data(session, row.context_key)
+            total = (
+                counts["dpo_pending"]
+                + counts["sft_pending"]
+                + counts["dpo_trained"]
+                + counts["sft_trained"]
+            )
+            results.append((display_key, row.run_count, total))
         return results
 
-    def _count_data(self, session, context_key: str | None) -> tuple[int, int]:
-        """Count runs and pending pairs for the context."""
+    def _empty_result(self) -> dict[str, int]:
+        """Return empty result dict for when there's nothing to delete."""
+        return {"runs": 0, "dpo_pending": 0, "sft_pending": 0, "dpo_trained": 0, "sft_trained": 0}
 
-        context_filter = self._context_filter(Run.context_key, context_key)
+    def _delete_items(self, session, table, run_ids: list[int]) -> int:
+        """Delete items from a training data table for given run IDs."""
+        return int(session.execute(delete(table).where(table.run_id.in_(run_ids))).rowcount)
 
-        # Count runs (excluding soft-deleted)
-        run_count_stmt = (
-            select(func.count())
-            .select_from(Run)
-            .where(context_filter, Run.method == "dpo", _not_deleted_filter(Run))
-        )
-        run_count = session.scalar(run_count_stmt) or 0
-
-        # Count pending pairs linked to those runs
-        pair_count_stmt = (
-            select(func.count())
-            .select_from(PendingPair)
-            .join(Run, PendingPair.run_id == Run.id)
-            .where(context_filter, Run.method == "dpo", _not_deleted_filter(Run))
-        )
-        pair_count = session.scalar(pair_count_stmt) or 0
-
-        return run_count, pair_count
-
-    def _delete_data(self, session, context_key: str | None) -> tuple[int, int]:
-        """Soft-delete runs and clear pending pairs. Returns (runs_deleted, pairs_freed)."""
-
-        context_filter = self._context_filter(Run.context_key, context_key)
-
-        # Get runs for this context (excluding already soft-deleted)
-        runs_stmt = select(Run).where(context_filter, Run.method == "dpo", _not_deleted_filter(Run))
+    def _delete_data(self, session, context_key: str | None | object) -> dict[str, int]:
+        """Delete runs and all associated data. Returns counts of deleted items."""
+        ctx = self._context_filter(Run.context_key, context_key)
+        runs_stmt = select(Run).where(ctx, Run.method.in_(["dpo", "sft"]), _not_deleted_filter(Run))
         runs = list(session.scalars(runs_stmt).all())
 
         if not runs:
-            return 0, 0
+            return self._empty_result()
 
         run_ids = [r.id for r in runs]
-
-        # Delete pending pairs (hard delete - they become available for other runs)
-        pairs_stmt = delete(PendingPair).where(PendingPair.run_id.in_(run_ids))
-        pairs_result = session.execute(pairs_stmt)
-        pairs_deleted = pairs_result.rowcount
-
-        # Soft-delete runs via system_status
+        result = {
+            "dpo_pending": self._delete_items(session, PendingPair, run_ids),
+            "sft_pending": self._delete_items(session, PendingExample, run_ids),
+            "dpo_trained": self._delete_items(session, TrainedPair, run_ids),
+            "sft_trained": self._delete_items(session, TrainedExample, run_ids),
+            "runs": len(runs),
+        }
         now = utc_now().isoformat()
         for run in runs:
             run.system_status = {"deleted": True, "deleted_at": now}
-
-        return len(runs), pairs_deleted
-
-    def _count_all_data(self, session) -> tuple[int, int]:
-        """Count all runs and pending pairs across all contexts."""
-
-        run_count = (
-            session.scalar(
-                select(func.count())
-                .select_from(Run)
-                .where(Run.method == "dpo", _not_deleted_filter(Run))
-            )
-            or 0
-        )
-        # Only count pending pairs for active runs
-        pair_count = (
-            session.scalar(
-                select(func.count())
-                .select_from(PendingPair)
-                .join(Run, PendingPair.run_id == Run.id)
-                .where(Run.method == "dpo", _not_deleted_filter(Run))
-            )
-            or 0
-        )
-        return run_count, pair_count
-
-    def _delete_all_data(self, session) -> tuple[int, int]:
-        """Soft-delete all runs and clear pending pairs. Returns (runs_deleted, pairs_freed)."""
-
-        # Get all non-deleted runs
-        runs = list(
-            session.scalars(select(Run).where(Run.method == "dpo", _not_deleted_filter(Run))).all()
-        )
-
-        if not runs:
-            return 0, 0
-
-        run_ids = [r.id for r in runs]
-
-        # Delete pending pairs (hard delete)
-        pairs_result = session.execute(delete(PendingPair).where(PendingPair.run_id.in_(run_ids)))
-        pairs_deleted = pairs_result.rowcount
-
-        # Soft-delete runs via system_status
-        now = utc_now().isoformat()
-        for run in runs:
-            run.system_status = {"deleted": True, "deleted_at": now}
-
-        return len(runs), pairs_deleted
+        return result
 
     def run(self, **kwargs: Any) -> int:
         context_key = getattr(self.args, "context", None)
@@ -1044,15 +1437,10 @@ class ResetTool(Tool):
         db = self._get_database()
 
         with db.session() as session:
-            # Handle --all: reset everything
             if reset_all:
                 return self._run_reset_all(session, confirm)
-
-            # List contexts if none specified
             if not context_key:
                 return self._run_list_contexts(session)
-
-            # Reset specific context
             return self._run_reset_context(session, context_key, confirm)
 
     def _run_list_contexts(self, session) -> int:
@@ -1063,27 +1451,43 @@ class ResetTool(Tool):
             return 0
 
         print("\nAvailable contexts:\n")
-        print(f"  {'Context':<30} {'Runs':>8} {'Pending':>10}")
-        print(f"  {'-' * 30} {'-' * 8} {'-' * 10}")
-        for ctx, runs, pairs in contexts:
-            print(f"  {ctx:<30} {runs:>8} {pairs:>10}")
+        print(f"  {'Context':<30} {'Runs':>8} {'Data':>8}")
+        print(f"  {'-' * 30} {'-' * 8} {'-' * 8}")
+        for ctx, runs, total_data in contexts:
+            print(f"  {ctx:<30} {runs:>8} {total_data:>8}")
         print("\nUse --context <name> to reset a specific context.")
         return 0
 
+    def _print_counts(self, counts: dict[str, int]) -> None:
+        """Print data counts for confirmation."""
+        print(f"  Training runs:     {counts['runs']} (soft-delete)")
+        print(f"  DPO pending pairs: {counts['dpo_pending']}")
+        print(f"  DPO trained pairs: {counts['dpo_trained']}")
+        print(f"  SFT pending:       {counts['sft_pending']}")
+        print(f"  SFT trained:       {counts['sft_trained']}")
+
+    def _print_results(self, result: dict[str, int]) -> None:
+        """Print deletion results."""
+        parts = [f"soft-deleted {result['runs']} runs"]
+        pending = result["dpo_pending"] + result["sft_pending"]
+        trained = result["dpo_trained"] + result["sft_trained"]
+        if pending:
+            parts.append(f"cleared {pending} pending")
+        if trained:
+            parts.append(f"deleted {trained} trained")
+        print(", ".join(parts))
+
     def _run_reset_context(self, session, context_key: str, confirm: bool) -> int:
         """Reset a specific context."""
-        # Convert display name to database value (handles "(no context)" -> None)
         db_context_key = self._normalize_context_key(context_key)
-        run_count, pair_count = self._count_data(session, db_context_key)
+        counts = self._count_data(session, db_context_key)
 
-        if run_count == 0:
+        if counts["runs"] == 0:
             print(f"No training data found for context '{context_key}'")
             return 0
 
         print(f"\nThis will reset for context '{context_key}':")
-        print(f"  Training runs:    {run_count} (soft-delete)")
-        print(f"  Pending pairs:    {pair_count} (cleared)")
-        print("  Note: Completed runs and trained pairs are preserved.")
+        self._print_counts(counts)
         print()
 
         if not confirm:
@@ -1092,24 +1496,22 @@ class ResetTool(Tool):
                 print("Aborted.")
                 return 1
 
-        runs_deleted, pairs_deleted = self._delete_data(session, db_context_key)
+        result = self._delete_data(session, db_context_key)
         session.commit()
 
-        print(f"Soft-deleted {runs_deleted} runs, cleared {pairs_deleted} pending pairs")
+        self._print_results(result)
         return 0
 
     def _run_reset_all(self, session, confirm: bool) -> int:
         """Reset all contexts."""
-        run_count, pair_count = self._count_all_data(session)
+        counts = self._count_data(session, self._ALL_CONTEXTS)
 
-        if run_count == 0:
+        if counts["runs"] == 0:
             print("No training data found.")
             return 0
 
         print("\nThis will reset ALL training data:")
-        print(f"  Training runs:    {run_count} (soft-delete)")
-        print(f"  Pending pairs:    {pair_count} (cleared)")
-        print("  Note: Completed runs and trained pairs are preserved.")
+        self._print_counts(counts)
         print()
 
         if not confirm:
@@ -1118,25 +1520,26 @@ class ResetTool(Tool):
                 print("Aborted.")
                 return 1
 
-        runs_deleted, pairs_deleted = self._delete_all_data(session)
+        result = self._delete_data(session, self._ALL_CONTEXTS)
         session.commit()
 
-        print(f"Soft-deleted {runs_deleted} runs, cleared {pairs_deleted} pending pairs")
+        self._print_results(result)
         return 0
 
 
 class TrainTool(Tool):
-    """Training commands for DPO workflow."""
+    """Training commands for DPO and SFT workflows."""
 
     def __init__(self, parent: Any = None) -> None:
         config = ToolConfig(
             name="train",
             aliases=["t"],
-            help_text="Training commands (export, dpo, register, pipeline)",
+            help_text="Training commands (export, dpo, sft, register, pipeline)",
         )
         super().__init__(parent, config)
         self.add_tool(ExportTool(self))
         self.add_tool(DpoTool(self))
+        self.add_tool(SftTool(self))
         self.add_tool(RegisterTool(self))
         self.add_tool(PipelineTool(self))
         self.add_tool(ResetTool(self))

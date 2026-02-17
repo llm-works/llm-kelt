@@ -4,10 +4,12 @@ Revision ID: 002
 Revises: 001
 Create Date: 2025-02-14
 
-This migration adds tables for tracking training runs and pairs:
+This migration adds tables for tracking training runs and data:
 - training_runs: Generic training run metadata (supports DPO, SFT, RLHF)
 - dpo_pending_pairs: Pairs assigned to pending/running DPO runs
 - dpo_trained_pairs: Pairs used in completed DPO training (permanent history)
+- sft_pending_examples: Examples assigned to pending/running SFT runs
+- sft_trained_examples: Examples used in completed SFT training (permanent history)
 """
 
 from collections.abc import Sequence
@@ -98,9 +100,39 @@ def upgrade() -> None:  # cq: exempt
     )
     op.create_index("idx_dpo_trained_pairs_run", "dpo_trained_pairs", ["run_id"])
 
+    # sft_pending_examples - temporary examples for pending/running SFT runs
+    op.create_table(
+        "sft_pending_examples",
+        sa.Column("run_id", sa.BigInteger(), nullable=False),
+        sa.Column("fact_id", sa.BigInteger(), nullable=False),
+        sa.Column(
+            "assigned_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.ForeignKeyConstraint(["run_id"], ["training_runs.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["fact_id"], ["atomic_facts.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("run_id", "fact_id"),
+    )
+    op.create_index("idx_sft_pending_examples_run", "sft_pending_examples", ["run_id"])
+
+    # sft_trained_examples - permanent history of trained examples
+    op.create_table(
+        "sft_trained_examples",
+        sa.Column("run_id", sa.BigInteger(), nullable=False),
+        sa.Column("fact_id", sa.BigInteger(), nullable=False),
+        sa.Column(
+            "trained_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.ForeignKeyConstraint(["run_id"], ["training_runs.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["fact_id"], ["atomic_facts.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("run_id", "fact_id"),
+    )
+    op.create_index("idx_sft_trained_examples_run", "sft_trained_examples", ["run_id"])
+
 
 def downgrade() -> None:
     """Remove training tables."""
+    op.drop_table("sft_trained_examples")
+    op.drop_table("sft_pending_examples")
     op.drop_table("dpo_trained_pairs")
     op.drop_table("dpo_pending_pairs")
     op.drop_table("training_runs")
