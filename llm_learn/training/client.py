@@ -9,6 +9,7 @@ from appinfra.log import Logger
 
 if TYPE_CHECKING:
     from .dpo import Client as DpoClient
+    from .sft import Client as SftClient
 
 
 class Client:
@@ -24,7 +25,8 @@ class Client:
         learn.train.dpo.create(adapter_name="my-adapter")
         learn.train.dpo.list_runs(status="pending")
 
-        # Future: learn.train.sft.create(...)
+        # SFT training
+        learn.train.sft.create(adapter_name="my-sft-adapter")
     """
 
     def __init__(
@@ -47,6 +49,7 @@ class Client:
 
         # Lazy-initialized clients
         self._dpo: DpoClient | None = None
+        self._sft: SftClient | None = None
 
     @property
     def dpo(self) -> DpoClient:
@@ -57,4 +60,11 @@ class Client:
             self._dpo = DpoClient(self._lg, self._session_factory, self._context_key)
         return self._dpo
 
-    # Future: @property def sft(self) -> SftClient: ...
+    @property
+    def sft(self) -> SftClient:
+        """Access SFT training client."""
+        if self._sft is None:
+            from .sft import Client as SftClient
+
+            self._sft = SftClient(self._lg, self._session_factory, self._context_key)
+        return self._sft

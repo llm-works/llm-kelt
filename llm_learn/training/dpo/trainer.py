@@ -152,6 +152,10 @@ class Trainer:
         Loading a separate reference model uses more VRAM but produces correct
         gradients. The reference_free option skips this to save memory at the
         cost of training quality.
+
+        IMPORTANT: When training on top of an existing adapter (based_on),
+        the reference model MUST also have that adapter applied (frozen).
+        Otherwise DPO compares against the wrong baseline.
         """
         if self.reference_free:
             self._lg.info("reference-free mode: skipping reference model")
@@ -168,6 +172,15 @@ class Trainer:
             torch_dtype=torch.bfloat16 if self._quant_config is None else None,
             trust_remote_code=True,
         )
+
+        # Apply the same adapter to reference model (frozen) if training on top of one
+        if self.based_on is not None:
+            from peft import PeftModel
+
+            self._lg.info(f"applying adapter to reference model (frozen): {self.based_on}")
+            self.ref_model = PeftModel.from_pretrained(
+                self.ref_model, str(self.based_on), is_trainable=False
+            )
 
     def _load_data(self):
         """Load training and eval datasets."""

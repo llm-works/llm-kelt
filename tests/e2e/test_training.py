@@ -141,6 +141,7 @@ class TestDpoTraining:
             lora_config=fast_lora_config,
             training_config=fast_training_config,
             quantize=False,
+            reference_free=True,  # Skip reference model to save GPU memory when vLLM is running
         )
 
         # Verify result structure

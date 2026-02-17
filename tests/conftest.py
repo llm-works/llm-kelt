@@ -18,6 +18,7 @@ from llm_learn.memory.atomic import models as atomic_models  # noqa: F401
 
 # Import training models so they're registered with Base for migrations
 from llm_learn.training import dpo as training_dpo  # noqa: F401
+from llm_learn.training import sft as training_sft  # noqa: F401
 
 # Enable appinfra's schema isolation fixtures for parallel test execution
 pytest_plugins = ["appinfra.db.pg.testing"]
@@ -203,13 +204,18 @@ def database(logger, pg_with_tables):
     return Database(logger, pg_with_tables)
 
 
-@pytest.fixture(scope="session")
-def test_context(database):
-    """Return a test context key for all tests."""
-    # Simple hash-based context key for testing
+@pytest.fixture
+def test_context(request):
+    """Return a unique test context key per test.
+
+    Uses the test node ID to ensure isolation between parallel tests.
+    This prevents flakiness when tests run concurrently with xdist.
+    """
     from hashlib import md5
 
-    return md5(b"test:default").hexdigest()
+    # Include test name for uniqueness across parallel workers
+    test_id = request.node.nodeid.encode()
+    return md5(test_id).hexdigest()
 
 
 @pytest.fixture

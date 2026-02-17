@@ -1,8 +1,9 @@
 """Training modules for Learn framework.
 
 Contains utilities for training data preparation and model fine-tuning:
-- dpo: DPO training with pair management
-- lora: LoRA/SFT training and adapter registry
+- dpo: DPO training with preference pair management
+- sft: SFT training with example management
+- lora: LoRA training and adapter registry
 - export: Data export to training formats
 - config: Training configuration dataclasses
 

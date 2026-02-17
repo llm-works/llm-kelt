@@ -1,10 +1,12 @@
-"""DPO training client with pair management.
+"""SFT training client with example management.
 
-Manages DPO training runs:
+Manages SFT training runs:
 - Creating training runs (with lineage via based_on)
-- Assigning preference pairs to runs (lineage-aware - pairs excluded from ancestor runs)
+- Assigning feedback examples to runs (lineage-aware - examples excluded from ancestor runs)
 - Tracking run lifecycle (pending → running → completed/failed)
-- Moving pairs from pending to trained on completion
+- Moving examples from pending to trained on completion
+
+SFT is simpler than DPO: trains on individual positive feedback examples, not preference pairs.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from datetime import datetime
 from typing import Any, cast
 
 from appinfra.log import Logger
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Table, Text, select
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Table, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from llm_learn.core.base import Base, utc_now
@@ -30,69 +32,60 @@ from ..models import (
     _not_deleted_filter,
     get_parent_run,
 )
-from .export import PairTuple
 
 # =============================================================================
-# DPO-Specific ORM Models
+# ORM Models for SFT
 # =============================================================================
 
 
-class PendingPair(Base):
-    """Temporary table for pairs assigned to pending/running DPO runs.
+class PendingExample(Base):
+    """Temporary table for examples assigned to pending/running SFT runs.
 
-    Pairs reference solution facts via chosen/rejected fact IDs.
+    Examples reference feedback facts via fact_id.
     Deleted when run completes (moved to trained) or fails (freed for retry).
     """
 
-    __tablename__ = "dpo_pending_pairs"
+    __tablename__ = "sft_pending_examples"
 
     run_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("training_runs.id", ondelete="CASCADE"), primary_key=True
     )
-    chosen_fact_id: Mapped[int] = mapped_column(
+    fact_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), primary_key=True
     )
-    rejected_fact_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), primary_key=True
-    )
-    prompt: Mapped[str] = mapped_column(Text, nullable=False)
     assigned_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
 
-    __table_args__ = (Index("idx_dpo_pending_pairs_run", "run_id"),)
+    __table_args__ = (Index("idx_sft_pending_examples_run", "run_id"),)
 
     def __repr__(self) -> str:
-        return f"<PendingPair(run={self.run_id}, chosen={self.chosen_fact_id}, rejected={self.rejected_fact_id})>"
+        return f"<PendingExample(run={self.run_id}, fact={self.fact_id})>"
 
 
-class TrainedPair(Base):
-    """Permanent history of pairs used in completed DPO training.
+class TrainedExample(Base):
+    """Permanent history of examples used in completed SFT training.
 
-    Pairs are moved here when a run completes successfully.
+    Examples are moved here when a run completes successfully.
     Used for lineage-based exclusion in future runs.
     """
 
-    __tablename__ = "dpo_trained_pairs"
+    __tablename__ = "sft_trained_examples"
 
     run_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("training_runs.id", ondelete="CASCADE"), primary_key=True
     )
-    chosen_fact_id: Mapped[int] = mapped_column(
+    fact_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), primary_key=True
     )
-    rejected_fact_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), primary_key=True
-    )
-    prompt: Mapped[str] = mapped_column(Text, nullable=False)
     trained_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
 
-    __table_args__ = (Index("idx_dpo_trained_pairs_run", "run_id"),)
+    __table_args__ = (Index("idx_sft_trained_examples_run", "run_id"),)
 
     def __repr__(self) -> str:
-        return f"<TrainedPair(run={self.run_id}, chosen={self.chosen_fact_id}, rejected={self.rejected_fact_id})>"
+        return f"<TrainedExample(run={self.run_id}, fact={self.fact_id})>"
 
 
 # =============================================================================
@@ -101,13 +94,13 @@ class TrainedPair(Base):
 
 
 class Client:
-    """Client for DPO training with pair management.
+    """Client for SFT training with example management.
 
     Manages:
-    - Creating/listing/deleting DPO training runs
-    - Assigning preference pairs to runs (lineage-aware)
+    - Creating/listing/deleting SFT training runs
+    - Assigning feedback examples to runs (lineage-aware)
     - Tracking run lifecycle (pending → running → completed/failed)
-    - Moving pairs from pending to trained on completion
+    - Moving examples from pending to trained on completion
     """
 
     def __init__(
@@ -117,7 +110,7 @@ class Client:
         context_key: str | None,
         ensure_schema: bool = False,
     ) -> None:
-        """Initialize DPO client.
+        """Initialize SFT client.
 
         Args:
             lg: Logger instance.
@@ -128,7 +121,7 @@ class Client:
         self._lg = lg
         self._session_factory = session_factory
         self.context_key = context_key
-        self.method = "dpo"
+        self.method = "sft"
 
         if ensure_schema:
             self._ensure_tables()
@@ -139,11 +132,11 @@ class Client:
             engine = session.get_bind()
             tables = [
                 cast(Table, Run.__table__),
-                cast(Table, PendingPair.__table__),
-                cast(Table, TrainedPair.__table__),
+                cast(Table, PendingExample.__table__),
+                cast(Table, TrainedExample.__table__),
             ]
             Base.metadata.create_all(engine, tables=tables)
-            self._lg.debug("ensured training tables exist")
+            self._lg.debug("ensured SFT training tables exist")
 
     def _build_context_filter(self, column):
         """Build context filter condition with pattern matching support."""
@@ -173,10 +166,10 @@ class Client:
         replace_stale: bool = True,
         on_replace: Callable[[RunInfo], bool] | None = None,
     ) -> RunInfo:
-        """Create a new DPO training run, or reset an existing pending run.
+        """Create a new SFT training run, or reset an existing pending run.
 
         If a pending run already exists for this context and `replace_stale=True`,
-        clears its pairs and returns it (no new run created). This allows callers
+        clears its examples and returns it (no new run created). This allows callers
         to safely retry run creation without accumulating orphan runs.
 
         Args:
@@ -184,7 +177,7 @@ class Client:
             config: Optional training configuration dict.
             based_on: Optional run ID to base this run on (for lineage).
             replace_stale: If True (default), reuse any existing pending run for
-                this context by clearing its pairs. If False, always create new.
+                this context by clearing its examples. If False, always create new.
             on_replace: Optional callback invoked before resetting a pending run.
                 Receives the existing RunInfo. If it returns False, a new run is
                 created instead. Defaults to always True (reset without prompting).
@@ -237,7 +230,7 @@ class Client:
         session.flush()
         info = RunInfo.from_model(run)
         self._lg.debug(
-            "created training run",
+            "created SFT training run",
             extra={"run_id": info.id, "method": self.method, "adapter_name": adapter_name},
         )
         return info
@@ -262,8 +255,8 @@ class Client:
         adapter_name: str | None = None,
         config: dict | None = None,
     ) -> RunInfo:
-        """Clear pairs from pending run, update parameters, and return for reuse."""
-        self._clear_pending_pairs(session, run.id)
+        """Clear examples from pending run, update parameters, and return for reuse."""
+        self._clear_pending_examples(session, run.id)
 
         # Update run with caller's parameters
         if adapter_name is not None:
@@ -273,7 +266,7 @@ class Client:
         session.flush()
 
         self._lg.debug(
-            "reset pending run for reuse",
+            "reset pending SFT run for reuse",
             extra={"run_id": run.id, "context_key": run.context_key},
         )
         return RunInfo.from_model(run)
@@ -293,7 +286,7 @@ class Client:
         descending: bool = True,
         include_deleted: bool = False,
     ) -> list[RunInfo]:
-        """List DPO training runs.
+        """List SFT training runs.
 
         Args:
             status: Filter by status (pending, running, completed, failed).
@@ -328,28 +321,28 @@ class Client:
         For pending runs: transitions to 'cancelled' status (proper state change).
         For other runs: soft-deletes via system_status (hides without changing history).
 
-        In both cases, pending pairs are cleared and become available for reuse.
+        In both cases, pending examples are cleared and become available for reuse.
         """
         with self._session_factory() as session:
             run = self._get_run(session, run_id)
             if run is None:
                 return False
 
-            # Clear pending pairs (they become available for other runs)
-            self._clear_pending_pairs(session, run_id)
+            # Clear pending examples (they become available for other runs)
+            self._clear_pending_examples(session, run_id)
 
             if run.status == "pending":
                 # Pending runs can be properly cancelled
                 run.status = "cancelled"
-                self._lg.debug("cancelled pending run", extra={"run_id": run_id})
+                self._lg.debug("cancelled pending SFT run", extra={"run_id": run_id})
             else:
                 # Running/completed/failed runs are soft-deleted (preserve history)
                 run.system_status = {"deleted": True, "deleted_at": utc_now().isoformat()}
-                self._lg.debug("soft-deleted training run", extra={"run_id": run_id})
+                self._lg.debug("soft-deleted SFT training run", extra={"run_id": run_id})
             return True
 
     # -------------------------------------------------------------------------
-    # Pair assignment
+    # Example assignment
     # -------------------------------------------------------------------------
 
     def _validate_pending_status(self, run: Run) -> None:
@@ -357,42 +350,42 @@ class Client:
         if run.status != "pending":
             raise ValidationError(f"Cannot modify run in '{run.status}' status (must be 'pending')")
 
-    def _filter_and_assign_pairs(self, session, run_id: int, pairs: Sequence[PairTuple]) -> int:
-        """Filter pairs by lineage and insert. Returns count assigned."""
-        lineage_pairs = self._get_lineage_pairs(session, run_id)
-        new_pairs = [p for p in pairs if (p[0], p[1]) not in lineage_pairs]
+    def _filter_and_assign_examples(self, session, run_id: int, fact_ids: Sequence[int]) -> int:
+        """Filter examples by lineage and insert. Returns count assigned."""
+        lineage_examples = self._get_lineage_examples(session, run_id)
+        new_fact_ids = [fid for fid in fact_ids if fid not in lineage_examples]
 
-        if not new_pairs:
+        if not new_fact_ids:
             self._lg.debug(
-                "all pairs filtered by lineage",
-                extra={"run_id": run_id, "input_count": len(pairs)},
+                "all examples filtered by lineage",
+                extra={"run_id": run_id, "input_count": len(fact_ids)},
             )
             return 0
 
-        self._insert_pending_pairs(session, run_id, new_pairs)
+        self._insert_pending_examples(session, run_id, new_fact_ids)
         self._lg.debug(
-            "assigned pairs to run",
-            extra={"run_id": run_id, "assigned": len(new_pairs)},
+            "assigned examples to SFT run",
+            extra={"run_id": run_id, "assigned": len(new_fact_ids)},
         )
-        return len(new_pairs)
+        return len(new_fact_ids)
 
-    def assign_pairs(self, run_id: int, pairs: Sequence[PairTuple]) -> int:
-        """Assign preference pairs to a DPO run.
+    def assign_examples(self, run_id: int, fact_ids: Sequence[int]) -> int:
+        """Assign feedback examples to an SFT run.
 
-        Pairs that have been used in this run's lineage are automatically filtered out.
+        Examples that have been used in this run's lineage are automatically filtered out.
 
         Args:
-            run_id: The run ID to assign pairs to.
-            pairs: List of (chosen_fact_id, rejected_fact_id, prompt) tuples.
+            run_id: The run ID to assign examples to.
+            fact_ids: List of fact IDs (from atomic_facts) to assign.
 
         Returns:
-            Number of pairs assigned (may be less than input if some filtered by lineage).
+            Number of examples assigned (may be less than input if some filtered by lineage).
 
         Raises:
             NotFoundError: If run_id doesn't exist or isn't accessible.
             ValidationError: If run is not in 'pending' status.
         """
-        if not pairs:
+        if not fact_ids:
             return 0
 
         with self._session_factory() as session:
@@ -400,52 +393,43 @@ class Client:
             if run is None:
                 raise NotFoundError(f"Training run {run_id} not found")
             self._validate_pending_status(run)
-            return self._filter_and_assign_pairs(session, run_id, pairs)
+            return self._filter_and_assign_examples(session, run_id, fact_ids)
 
-    def _get_lineage_pairs(self, session, run_id: int) -> set[tuple[int, int]]:
-        """Get all pairs used in ancestor runs (for lineage-based exclusion)."""
+    def _get_lineage_examples(self, session, run_id: int) -> set[int]:
+        """Get all examples used in ancestor runs (for lineage-based exclusion)."""
         # Walk the lineage chain using recursive CTE
-
-        # Build recursive CTE manually
         anchor = select(Run.id, Run.based_on).where(Run.id == run_id)
         lineage_cte = anchor.cte(name="lineage", recursive=True)
 
         recursive = select(Run.id, Run.based_on).where(Run.id == lineage_cte.c.based_on)
         lineage_cte = lineage_cte.union_all(recursive)
 
-        # Get trained pairs from all runs in lineage
-        stmt = select(TrainedPair.chosen_fact_id, TrainedPair.rejected_fact_id).where(
-            TrainedPair.run_id.in_(select(lineage_cte.c.id))
+        # Get trained examples from all runs in lineage
+        stmt = select(TrainedExample.fact_id).where(
+            TrainedExample.run_id.in_(select(lineage_cte.c.id))
         )
 
         results = session.execute(stmt).all()
-        return {(row[0], row[1]) for row in results}
+        return {row[0] for row in results}
 
-    def _insert_pending_pairs(self, session, run_id: int, pairs: Sequence[PairTuple]) -> None:
-        """Insert pairs into pending table."""
-        for chosen_id, rejected_id, prompt in pairs:
-            session.add(
-                PendingPair(
-                    run_id=run_id,
-                    chosen_fact_id=chosen_id,
-                    rejected_fact_id=rejected_id,
-                    prompt=prompt,
-                )
-            )
+    def _insert_pending_examples(self, session, run_id: int, fact_ids: Sequence[int]) -> None:
+        """Insert examples into pending table."""
+        for fact_id in fact_ids:
+            session.add(PendingExample(run_id=run_id, fact_id=fact_id))
         session.flush()
 
-    def _clear_pending_pairs(self, session, run_id: int) -> int:
-        """Delete all pending pairs for a run."""
+    def _clear_pending_examples(self, session, run_id: int) -> int:
+        """Delete all pending examples for a run."""
         from sqlalchemy import delete
 
-        stmt = delete(PendingPair).where(PendingPair.run_id == run_id)
+        stmt = delete(PendingExample).where(PendingExample.run_id == run_id)
         result = session.execute(stmt)
         return int(result.rowcount)
 
-    def _move_pairs_to_trained(self, session, run_id: int) -> int:
-        """Move pairs from pending to trained (on completion)."""
-        # Get pending pairs
-        stmt = select(PendingPair).where(PendingPair.run_id == run_id)
+    def _move_examples_to_trained(self, session, run_id: int) -> int:
+        """Move examples from pending to trained (on completion)."""
+        # Get pending examples
+        stmt = select(PendingExample).where(PendingExample.run_id == run_id)
         pending = list(session.scalars(stmt).all())
 
         if not pending:
@@ -453,13 +437,11 @@ class Client:
 
         # Insert into trained
         now = utc_now()
-        for pair in pending:
+        for example in pending:
             session.add(
-                TrainedPair(
+                TrainedExample(
                     run_id=run_id,
-                    chosen_fact_id=pair.chosen_fact_id,
-                    rejected_fact_id=pair.rejected_fact_id,
-                    prompt=pair.prompt,
+                    fact_id=example.fact_id,
                     trained_at=now,
                 )
             )
@@ -467,18 +449,18 @@ class Client:
         # Delete from pending
         from sqlalchemy import delete
 
-        session.execute(delete(PendingPair).where(PendingPair.run_id == run_id))
+        session.execute(delete(PendingExample).where(PendingExample.run_id == run_id))
 
         return len(pending)
 
-    def get_pairs(self, run_id: int) -> list[PairTuple]:
-        """Get all pending pairs assigned to a run.
+    def get_examples(self, run_id: int) -> list[int]:
+        """Get all pending examples assigned to a run.
 
         Args:
             run_id: The run ID.
 
         Returns:
-            List of (chosen_fact_id, rejected_fact_id, prompt) tuples.
+            List of fact IDs.
 
         Raises:
             NotFoundError: If run_id doesn't exist or isn't accessible.
@@ -489,26 +471,22 @@ class Client:
                 raise NotFoundError(f"Training run {run_id} not found")
 
             stmt = (
-                select(
-                    PendingPair.chosen_fact_id,
-                    PendingPair.rejected_fact_id,
-                    PendingPair.prompt,
-                )
-                .where(PendingPair.run_id == run_id)
-                .order_by(PendingPair.assigned_at)
+                select(PendingExample.fact_id)
+                .where(PendingExample.run_id == run_id)
+                .order_by(PendingExample.assigned_at)
             )
 
             results = session.execute(stmt).all()
-            return [(r[0], r[1], r[2]) for r in results]
+            return [r[0] for r in results]
 
-    def get_trained_pairs(self, run_id: int) -> list[PairTuple]:
-        """Get all trained pairs for a completed run.
+    def get_trained_examples(self, run_id: int) -> list[int]:
+        """Get all trained examples for a completed run.
 
         Args:
             run_id: The run ID.
 
         Returns:
-            List of (chosen_fact_id, rejected_fact_id, prompt) tuples.
+            List of fact IDs.
 
         Raises:
             NotFoundError: If run_id doesn't exist or isn't accessible.
@@ -519,27 +497,23 @@ class Client:
                 raise NotFoundError(f"Training run {run_id} not found")
 
             stmt = (
-                select(
-                    TrainedPair.chosen_fact_id,
-                    TrainedPair.rejected_fact_id,
-                    TrainedPair.prompt,
-                )
-                .where(TrainedPair.run_id == run_id)
-                .order_by(TrainedPair.trained_at)
+                select(TrainedExample.fact_id)
+                .where(TrainedExample.run_id == run_id)
+                .order_by(TrainedExample.trained_at)
             )
 
             results = session.execute(stmt).all()
-            return [(r[0], r[1], r[2]) for r in results]
+            return [r[0] for r in results]
 
-    def count_pending_pairs(self, run_id: int | None = None) -> int:
-        """Count pending pairs for a run or all runs in context."""
+    def count_pending_examples(self, run_id: int | None = None) -> int:
+        """Count pending examples for a run or all runs in context."""
         with self._session_factory() as session:
             from sqlalchemy import func
 
-            stmt = select(func.count()).select_from(PendingPair)
+            stmt = select(func.count()).select_from(PendingExample)
 
             if run_id is not None:
-                stmt = stmt.where(PendingPair.run_id == run_id)
+                stmt = stmt.where(PendingExample.run_id == run_id)
             else:
                 # Count for all runs in context
                 subq = select(Run.id).where(
@@ -549,7 +523,7 @@ class Client:
                 context_filter = self._build_context_filter(Run.context_key)
                 if context_filter is not None:
                     subq = subq.where(context_filter)
-                stmt = stmt.where(PendingPair.run_id.in_(subq))
+                stmt = stmt.where(PendingExample.run_id.in_(subq))
 
             return session.scalar(stmt) or 0
 
@@ -567,7 +541,7 @@ class Client:
         metrics: dict | None = None,
         adapter_info: dict | None = None,
     ) -> None:
-        """Mark a training run as completed and move pairs to trained.
+        """Mark a training run as completed and move examples to trained.
 
         Args:
             run_id: The run to complete.
@@ -586,8 +560,8 @@ class Client:
                     f"Allowed transitions: {allowed or 'none (terminal state)'}"
                 )
 
-            # Move pairs to trained table
-            pairs_moved = self._move_pairs_to_trained(session, run_id)
+            # Move examples to trained table
+            examples_moved = self._move_examples_to_trained(session, run_id)
 
             # Update run
             run.status = "completed"
@@ -599,12 +573,12 @@ class Client:
                 run.adapter = {**(run.adapter or {}), **adapter_info}
 
             self._lg.debug(
-                "completed training run",
-                extra={"run_id": run_id, "pairs_trained": pairs_moved},
+                "completed SFT training run",
+                extra={"run_id": run_id, "examples_trained": examples_moved},
             )
 
     def fail(self, run_id: int, error: str) -> None:
-        """Mark a training run as failed (clears pending pairs for reuse)."""
+        """Mark a training run as failed (clears pending examples for reuse)."""
         with self._session_factory() as session:
             run = self._get_run(session, run_id)
             if run is None:
@@ -617,14 +591,14 @@ class Client:
                     f"Allowed transitions: {allowed or 'none (terminal state)'}"
                 )
 
-            # Clear pending pairs (they become available for other runs)
-            self._clear_pending_pairs(session, run_id)
+            # Clear pending examples (they become available for other runs)
+            self._clear_pending_examples(session, run_id)
 
             run.status = "failed"
             run.completed_at = utc_now()
             run.error_message = error
 
-            self._lg.debug("failed training run", extra={"run_id": run_id, "error": error})
+            self._lg.debug("failed SFT training run", extra={"run_id": run_id, "error": error})
 
     def reset(self, run_id: int) -> None:
         """Reset a running training run back to pending (for retry after transient failure)."""
@@ -653,7 +627,8 @@ class Client:
 
             self._apply_transition(run, new_status, metrics, error_message, clear_started)
             self._lg.debug(
-                "training run status changed", extra={"run_id": run_id, "new_status": new_status}
+                "SFT training run status changed",
+                extra={"run_id": run_id, "new_status": new_status},
             )
 
     def _apply_transition(self, run, new_status, metrics, error_message, clear_started):
@@ -676,7 +651,7 @@ class Client:
     # -------------------------------------------------------------------------
 
     def reset_all(self) -> int:
-        """Soft-delete all training runs for this context (clears pending pairs)."""
+        """Soft-delete all training runs for this context (clears pending examples)."""
         with self._session_factory() as session:
             stmt = select(Run).where(
                 Run.method == self.method,
@@ -691,14 +666,14 @@ class Client:
 
             now = utc_now().isoformat()
             for run in runs:
-                self._clear_pending_pairs(session, run.id)
+                self._clear_pending_examples(session, run.id)
                 run.system_status = {"deleted": True, "deleted_at": now}
 
-            self._lg.info("reset all training runs", extra={"count": count})
+            self._lg.info("reset all SFT training runs", extra={"count": count})
             return count
 
-    def clear_pending_pairs_for_context(self) -> int:
-        """Clear all pending pairs for this context (without deleting runs)."""
+    def clear_pending_examples_for_context(self) -> int:
+        """Clear all pending examples for this context (without deleting runs)."""
         with self._session_factory() as session:
             from sqlalchemy import delete
 
@@ -715,9 +690,9 @@ class Client:
             if not run_ids:
                 return 0
 
-            stmt = delete(PendingPair).where(PendingPair.run_id.in_(run_ids))
+            stmt = delete(PendingExample).where(PendingExample.run_id.in_(run_ids))
             result = session.execute(stmt)
             count = int(result.rowcount)
 
-            self._lg.info("cleared pending pairs", extra={"count": count})
+            self._lg.info("cleared pending SFT examples", extra={"count": count})
             return count

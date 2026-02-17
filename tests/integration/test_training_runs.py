@@ -5,6 +5,7 @@ import pytest
 from llm_learn import NotFoundError, ValidationError
 from llm_learn.training.dpo import Client as DpoClient
 from llm_learn.training.dpo import PairTuple
+from llm_learn.training.sft import Client as SftClient
 
 
 @pytest.fixture
@@ -598,3 +599,63 @@ class TestResetAll:
         assert dpo_client.get(run.id) is not None
         # But pairs are gone
         assert dpo_client.count_pending_pairs() == 0
+
+
+class TestCrossMethodLineage:
+    """Test cross-method lineage (e.g., SFT→DPO)."""
+
+    def test_dpo_based_on_sft_run(self, logger, database, test_context, clean_tables):
+        """Test DPO run can be based on SFT run (cross-method lineage)."""
+        sft_client = SftClient(
+            lg=logger, session_factory=database.session, context_key=test_context
+        )
+        dpo_client = DpoClient(
+            lg=logger, session_factory=database.session, context_key=test_context
+        )
+
+        # Create and complete an SFT run
+        sft_run = sft_client.create(adapter_name="base-sft")
+        sft_client.start(sft_run.id)
+        sft_client.complete(sft_run.id)
+
+        # Create DPO run based on SFT run
+        dpo_run = dpo_client.create(adapter_name="dpo-on-sft", based_on=sft_run.id)
+
+        # Verify lineage is recorded
+        assert dpo_run.based_on == sft_run.id
+        assert dpo_run.method == "dpo"
+
+    def test_sft_based_on_sft_run(self, logger, database, test_context, clean_tables):
+        """Test SFT run can be based on another SFT run (same-method lineage)."""
+        sft_client = SftClient(
+            lg=logger, session_factory=database.session, context_key=test_context
+        )
+
+        # Create and complete first SFT run
+        parent = sft_client.create(adapter_name="parent-sft")
+        sft_client.start(parent.id)
+        sft_client.complete(parent.id)
+
+        # Create child SFT run based on parent
+        child = sft_client.create(adapter_name="child-sft", based_on=parent.id)
+
+        assert child.based_on == parent.id
+        assert child.method == "sft"
+
+    def test_cross_method_context_isolation(self, logger, database, clean_tables):
+        """Test cross-method lineage respects context isolation."""
+        sft_client_a = SftClient(
+            lg=logger, session_factory=database.session, context_key="context-a"
+        )
+        dpo_client_b = DpoClient(
+            lg=logger, session_factory=database.session, context_key="context-b"
+        )
+
+        # Create SFT run in context-a
+        sft_run = sft_client_a.create(adapter_name="sft-in-a")
+        sft_client_a.start(sft_run.id)
+        sft_client_a.complete(sft_run.id)
+
+        # DPO in context-b should NOT be able to base on SFT in context-a
+        with pytest.raises(NotFoundError, match="Parent run .* not found"):
+            dpo_client_b.create(adapter_name="dpo-in-b", based_on=sft_run.id)
