@@ -6,7 +6,6 @@ Provides:
 - train_dpo: Convenience function for training
 - export_run_pairs: Export pending pairs for a run to TRL DPO format
 - export_preferences: Export from atomic preferences (legacy)
-- generate_pairs: Generate pairs for Client.assign_pairs()
 """
 
 from .client import (
@@ -17,7 +16,7 @@ from .client import (
     TrainedPair,
     _not_deleted_filter,
 )
-from .export import PairTuple, export_preferences, export_run_pairs, generate_pairs
+from .export import PairTuple, export_preferences, export_run_pairs
 
 __all__ = [
     # Core client
@@ -32,7 +31,6 @@ __all__ = [
     "PairTuple",
     "export_preferences",
     "export_run_pairs",
-    "generate_pairs",
     # Training functions (lazy-loaded, require 'training' extras)
     "Trainer",
     "train_dpo",

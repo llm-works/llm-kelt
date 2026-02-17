@@ -265,6 +265,17 @@ class TestPairAssignment:
         with pytest.raises(NotFoundError, match="not found"):
             dpo_client.assign_pairs(99999, pairs)
 
+    def test_assign_to_non_pending_run(self, dpo_client, sample_preferences):
+        """Test assigning to non-pending run raises ValidationError."""
+        run = dpo_client.create(adapter_name="status-test")
+        pairs = make_pairs(sample_preferences[:1])
+
+        # Start the run (status becomes 'running')
+        dpo_client.start(run.id)
+
+        with pytest.raises(ValidationError, match="must be 'pending'"):
+            dpo_client.assign_pairs(run.id, pairs)
+
     def test_get_pairs(self, dpo_client, sample_preferences):
         """Test getting pending pairs assigned to a run."""
         run = dpo_client.create(adapter_name="get-pairs-test")

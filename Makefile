@@ -44,7 +44,8 @@ type::
 	@if [ -d "examples" ]; then $(PYTHON) -m mypy examples/ --follow-imports=skip --ignore-missing-imports; fi
 
 # Custom e2e tests: run sequentially (-n 0) because GPU tests can't share GPU memory
-test.e2e::
+# Note: single colon overrides the infra target (double colon would append)
+test.e2e:
 	@echo "* running end-to-end tests (sequential for GPU)..."
 	@$(PYTHON) -m pytest tests/ -m e2e -n 0 -qq --tb=short || { ec=$$?; [ $$ec -eq 5 ] && exit 0 || exit $$ec; }
 	@echo "* end-to-end tests done"

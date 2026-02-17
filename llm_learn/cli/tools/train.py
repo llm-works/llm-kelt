@@ -530,6 +530,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
                 select(Run)
                 .where(Run.method == "dpo")
                 .where(Run.status == "pending")
+                .where(_not_deleted_filter(Run))
                 .order_by(Run.created_at.asc())
             )
             if context_arg:

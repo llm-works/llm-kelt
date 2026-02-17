@@ -351,7 +351,7 @@ class Client:
                 if existing is not None:
                     # Check callback - if False, fall through to create new
                     if on_replace is None or on_replace(RunInfo.from_model(existing)):
-                        return self._reset_pending_run(session, existing)
+                        return self._reset_pending_run(session, existing, adapter_name, config)
 
             return self._create_new_run(session, adapter_name, config, based_on)
 
@@ -398,9 +398,23 @@ class Client:
         )
         return cast(Run | None, session.scalar(stmt))
 
-    def _reset_pending_run(self, session, run: Run) -> RunInfo:
-        """Clear pairs from pending run and return it for reuse."""
+    def _reset_pending_run(
+        self,
+        session,
+        run: Run,
+        adapter_name: str | None = None,
+        config: dict | None = None,
+    ) -> RunInfo:
+        """Clear pairs from pending run, update parameters, and return for reuse."""
         self._clear_pending_pairs(session, run.id)
+
+        # Update run with caller's parameters
+        if adapter_name is not None:
+            run.adapter = {"name": adapter_name}
+        if config is not None:
+            run.config = config
+        session.flush()
+
         self._lg.debug(
             "reset pending run for reuse",
             extra={"run_id": run.id, "context_key": run.context_key},
@@ -481,6 +495,30 @@ class Client:
     # Pair assignment
     # -------------------------------------------------------------------------
 
+    def _validate_pending_status(self, run: Run) -> None:
+        """Validate run is in pending status for modification."""
+        if run.status != "pending":
+            raise ValidationError(f"Cannot modify run in '{run.status}' status (must be 'pending')")
+
+    def _filter_and_assign_pairs(self, session, run_id: int, pairs: Sequence[PairTuple]) -> int:
+        """Filter pairs by lineage and insert. Returns count assigned."""
+        lineage_pairs = self._get_lineage_pairs(session, run_id)
+        new_pairs = [p for p in pairs if (p[0], p[1]) not in lineage_pairs]
+
+        if not new_pairs:
+            self._lg.debug(
+                "all pairs filtered by lineage",
+                extra={"run_id": run_id, "input_count": len(pairs)},
+            )
+            return 0
+
+        self._insert_pending_pairs(session, run_id, new_pairs)
+        self._lg.debug(
+            "assigned pairs to run",
+            extra={"run_id": run_id, "assigned": len(new_pairs)},
+        )
+        return len(new_pairs)
+
     def assign_pairs(self, run_id: int, pairs: Sequence[PairTuple]) -> int:
         """Assign preference pairs to a DPO run.
 
@@ -495,6 +533,7 @@ class Client:
 
         Raises:
             NotFoundError: If run_id doesn't exist or isn't accessible.
+            ValidationError: If run is not in 'pending' status.
         """
         if not pairs:
             return 0
@@ -503,29 +542,8 @@ class Client:
             run = self._get_run(session, run_id)
             if run is None:
                 raise NotFoundError(f"Training run {run_id} not found")
-
-            # Filter out pairs already used in lineage
-            lineage_pairs = self._get_lineage_pairs(session, run_id)
-            new_pairs = [p for p in pairs if (p[0], p[1]) not in lineage_pairs]
-
-            if not new_pairs:
-                self._lg.debug(
-                    "all pairs filtered by lineage",
-                    extra={"run_id": run_id, "input_count": len(pairs)},
-                )
-                return 0
-
-            self._insert_pending_pairs(session, run_id, new_pairs)
-
-            self._lg.debug(
-                "assigned pairs to run",
-                extra={
-                    "run_id": run_id,
-                    "assigned": len(new_pairs),
-                    "filtered": len(pairs) - len(new_pairs),
-                },
-            )
-            return len(new_pairs)
+            self._validate_pending_status(run)
+            return self._filter_and_assign_pairs(session, run_id, pairs)
 
     def _get_lineage_pairs(self, session, run_id: int) -> set[tuple[int, int]]:
         """Get all pairs used in ancestor runs (for lineage-based exclusion)."""
