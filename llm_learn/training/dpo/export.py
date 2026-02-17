@@ -107,14 +107,14 @@ def export_run_pairs(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Alias Fact for chosen and rejected joins
-    ChosenFact = aliased(Fact)
-    RejectedFact = aliased(Fact)
+    chosen_fact = aliased(Fact)
+    rejected_fact = aliased(Fact)
 
     with session_factory() as session:
         stmt = (
-            select(PendingPair.prompt, ChosenFact.content, RejectedFact.content)
-            .join(ChosenFact, PendingPair.chosen_fact_id == ChosenFact.id)
-            .join(RejectedFact, PendingPair.rejected_fact_id == RejectedFact.id)
+            select(PendingPair.prompt, chosen_fact.content, rejected_fact.content)
+            .join(chosen_fact, PendingPair.chosen_fact_id == chosen_fact.id)
+            .join(rejected_fact, PendingPair.rejected_fact_id == rejected_fact.id)
             .where(PendingPair.run_id == run_id)
         )
 

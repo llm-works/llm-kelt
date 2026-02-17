@@ -14,7 +14,7 @@ from sqlalchemy import delete, func, or_, select
 from ...core.database import Database
 from ...core.utils import utc_now
 from ...training.config import RunConfig, RunResult
-from ...training.dpo import PendingPair, Run, export_run_pairs
+from ...training.dpo import PendingPair, Run, export_preferences, export_run_pairs
 from ...training.lora import AdapterRegistry
 from ...training.lora import Config as LoraConfig
 
@@ -511,7 +511,9 @@ class PipelineTool(ModelResolutionMixin, Tool):
         """Get resolved adapter ID."""
         return self._resolved_adapter_id or self.args.id
 
-    def _find_pending_run(self, context_arg: str | None) -> tuple[int, str, str | None] | None:
+    def _find_pending_run(
+        self, context_arg: str | None
+    ) -> tuple[int, str | None, str | None] | None:
         """Find earliest pending DPO run. Returns (id, context_key, adapter_name) or None."""
         from sqlalchemy import select
 
@@ -587,6 +589,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
 
     def _run_export(self, output_path: Path) -> int:
         """Run export step - exports pending pairs for this run."""
+        assert self._run_id is not None, "_run_id must be set before export"
         self.lg.info("step 1/3: exporting pairs", extra={"run_id": self._run_id})
 
         result = export_run_pairs(
