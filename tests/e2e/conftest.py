@@ -39,6 +39,7 @@ def _wait_for_memory_release(baseline_mb: float, tolerance_mb: float = 500, max_
 
     poll_interval = 0.2
     waited = 0.0
+    current_mb = torch.cuda.memory_allocated() / (1024 * 1024)
 
     while waited < max_wait:
         gc.collect()

@@ -160,30 +160,22 @@ class TestFactsEndToEnd:
         print("=" * 60)
         print(response)
 
-        # Response should reflect learning preferences (expanded terms for small models)
-        # Note: 0.5B models have limited vocabulary; accept any practice-oriented language
+        # Response should reflect learning preferences
+        # Note: 0.5B models need some vocabulary flexibility, but avoid ultra-generic terms
         response_lower = response.lower()
         practice_terms = [
-            # Original terms
+            # Core practice-oriented terms
             "hands-on",
             "practical",
             "project",
             "example",
             "build",
-            # Broader vocabulary for small models
             "practice",
-            "try",
-            "do",
-            "make",
-            "create",
-            "work",
-            "learn",
             "tutorial",
             "exercise",
             "apply",
             "code",
-            "start",
-            "begin",
+            "experiment",
         ]
         assert any(term in response_lower for term in practice_terms), (
             f"Response should reflect learning preferences. Got: {response[:200]}..."
