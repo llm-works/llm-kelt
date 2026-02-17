@@ -37,6 +37,9 @@ def make_pairs(fact_ids: list[int]) -> list[PairTuple]:
     """Convert fact IDs to pair tuples for testing.
 
     Uses fact_id for both chosen and rejected (same preference fact).
+    This is intentional for CRUD/lifecycle tests that don't need distinct
+    chosen/rejected content. Tests validating export content quality should
+    use distinct IDs.
     """
     return [(fid, fid, f"Context {i}") for i, fid in enumerate(fact_ids)]
 
@@ -362,7 +365,9 @@ class TestLineageFiltering:
         dpo_client.assign_pairs(run1.id, pairs[:3])
 
         # Run2 has no lineage relationship to run1
-        run2 = dpo_client.create(adapter_name="run2")
+        # Use replace_stale=False to create independent run (not reset run1)
+        run2 = dpo_client.create(adapter_name="run2", replace_stale=False)
+        assert run2.id != run1.id  # Verify independent runs
         # All pairs available since no lineage
         assigned = dpo_client.assign_pairs(run2.id, pairs)
         assert assigned == 5

@@ -3,7 +3,6 @@
 Exports preference data for DPO training:
 - export_run_pairs: Export pending pairs for a run to TRL DPO format
 - export_preferences: Export from atomic preferences (legacy)
-- generate_pairs: Generate pairs for Client.assign_pairs()
 """
 
 import json

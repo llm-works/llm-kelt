@@ -560,6 +560,8 @@ class PipelineTool(ModelResolutionMixin, Tool):
             raise ValueError("No pending DPO runs in queue")
 
         self._run_id, self._resolved_context, self._resolved_adapter_id = result
+        if self._resolved_adapter_id is None:
+            raise ValueError(f"Pending run {self._run_id} has no adapter name; use --id")
         self.lg.info(
             "resolved run from queue",
             extra={"run_id": self._run_id, "context": self._resolved_context},
