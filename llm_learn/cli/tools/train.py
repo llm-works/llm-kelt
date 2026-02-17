@@ -9,7 +9,7 @@ from appinfra.db.pg import PG
 from appinfra.dot_dict import DotDict
 from llm_infer import compute_adapter_metadata
 from llm_infer.models import ModelResolver
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, literal, select
 
 from ...core.database import Database
 from ...core.utils import utc_now
@@ -482,7 +482,7 @@ class SftTool(ModelResolutionMixin, Tool):
             lora_config=LoraConfig(),
             training_config=training_config,
             quantize=quantize,
-            based_on=based_on,
+            resume_from=based_on,
         )
         self._print_result(result)
         return 0
@@ -1304,6 +1304,9 @@ class ResetTool(Tool):
     # Display name for NULL context_key (used in list output)
     _NULL_CONTEXT_DISPLAY = "(no context)"
 
+    # Sentinel for "all contexts" in reset --all
+    _ALL_CONTEXTS: object = object()
+
     def __init__(self, parent: Any = None) -> None:
         config = ToolConfig(
             name="reset",
@@ -1332,8 +1335,10 @@ class ResetTool(Tool):
         """Convert display name back to database value (handles NULL context)."""
         return None if context_key == self._NULL_CONTEXT_DISPLAY else context_key
 
-    def _context_filter(self, column, context_key: str | None):
-        """Build SQLAlchemy filter for context_key (handles NULL correctly)."""
+    def _context_filter(self, column, context_key: str | None | object):
+        """Build SQLAlchemy filter for context_key (handles NULL and all-contexts)."""
+        if context_key is self._ALL_CONTEXTS:
+            return literal(True)  # Match all rows
         return column.is_(None) if context_key is None else column == context_key
 
     def _count_items(self, session, table, method: str, context_filter) -> int:
@@ -1348,7 +1353,7 @@ class ResetTool(Tool):
             or 0
         )
 
-    def _count_data(self, session, context_key: str | None) -> dict[str, int]:
+    def _count_data(self, session, context_key: str | None | object) -> dict[str, int]:
         """Count all training data for a context."""
         ctx = self._context_filter(Run.context_key, context_key)
         run_count = (
@@ -1396,7 +1401,7 @@ class ResetTool(Tool):
         """Delete items from a training data table for given run IDs."""
         return int(session.execute(delete(table).where(table.run_id.in_(run_ids))).rowcount)
 
-    def _delete_data(self, session, context_key: str | None) -> dict[str, int]:
+    def _delete_data(self, session, context_key: str | None | object) -> dict[str, int]:
         """Delete runs and all associated data. Returns counts of deleted items."""
         ctx = self._context_filter(Run.context_key, context_key)
         runs_stmt = select(Run).where(ctx, Run.method.in_(["dpo", "sft"]), _not_deleted_filter(Run))
@@ -1493,7 +1498,7 @@ class ResetTool(Tool):
 
     def _run_reset_all(self, session, confirm: bool) -> int:
         """Reset all contexts."""
-        counts = self._count_data(session, None)
+        counts = self._count_data(session, self._ALL_CONTEXTS)
 
         if counts["runs"] == 0:
             print("No training data found.")
@@ -1509,7 +1514,7 @@ class ResetTool(Tool):
                 print("Aborted.")
                 return 1
 
-        result = self._delete_data(session, None)
+        result = self._delete_data(session, self._ALL_CONTEXTS)
         session.commit()
 
         self._print_results(result)
