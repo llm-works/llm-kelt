@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from llm_learn.training import LoraConfig, TrainingConfig, TrainingResult
+from llm_learn.training import RunConfig, RunResult
+from llm_learn.training.lora import Config as LoraConfig
 
 
 class TestLoraConfig:
@@ -88,12 +89,12 @@ class TestLoraConfig:
             assert config.bias == bias
 
 
-class TestTrainingConfig:
-    """Test TrainingConfig validation and defaults."""
+class TestRunConfig:
+    """Test RunConfig validation and defaults."""
 
     def test_default_values(self):
         """Test that default values are sensible."""
-        config = TrainingConfig()
+        config = RunConfig()
 
         assert config.num_epochs == 3
         assert config.batch_size == 4
@@ -108,86 +109,86 @@ class TestTrainingConfig:
 
     def test_effective_batch_size(self):
         """Test effective batch size calculation."""
-        config = TrainingConfig(batch_size=4, gradient_accumulation_steps=8)
+        config = RunConfig(batch_size=4, gradient_accumulation_steps=8)
         assert config.effective_batch_size == 32
 
     def test_invalid_num_epochs(self):
         """Test that invalid num_epochs raises ValueError."""
         with pytest.raises(ValueError, match="num_epochs must be positive"):
-            TrainingConfig(num_epochs=0)
+            RunConfig(num_epochs=0)
 
     def test_invalid_batch_size(self):
         """Test that invalid batch_size raises ValueError."""
         with pytest.raises(ValueError, match="batch_size must be positive"):
-            TrainingConfig(batch_size=0)
+            RunConfig(batch_size=0)
 
     def test_invalid_gradient_accumulation_steps(self):
         """Test that invalid gradient_accumulation_steps raises ValueError."""
         with pytest.raises(ValueError, match="gradient_accumulation_steps must be positive"):
-            TrainingConfig(gradient_accumulation_steps=0)
+            RunConfig(gradient_accumulation_steps=0)
 
     def test_invalid_learning_rate(self):
         """Test that invalid learning_rate raises ValueError."""
         with pytest.raises(ValueError, match="learning_rate must be positive"):
-            TrainingConfig(learning_rate=0)
+            RunConfig(learning_rate=0)
 
         with pytest.raises(ValueError, match="learning_rate must be positive"):
-            TrainingConfig(learning_rate=-1e-4)
+            RunConfig(learning_rate=-1e-4)
 
     def test_invalid_warmup_ratio(self):
         """Test that invalid warmup_ratio raises ValueError."""
         with pytest.raises(ValueError, match="warmup_ratio must be in"):
-            TrainingConfig(warmup_ratio=-0.1)
+            RunConfig(warmup_ratio=-0.1)
 
         with pytest.raises(ValueError, match="warmup_ratio must be in"):
-            TrainingConfig(warmup_ratio=1.0)
+            RunConfig(warmup_ratio=1.0)
 
     def test_invalid_max_seq_length(self):
         """Test that invalid max_seq_length raises ValueError."""
         with pytest.raises(ValueError, match="max_seq_length must be positive"):
-            TrainingConfig(max_seq_length=0)
+            RunConfig(max_seq_length=0)
 
     def test_invalid_eval_split(self):
         """Test that invalid eval_split raises ValueError."""
         with pytest.raises(ValueError, match="eval_split must be in"):
-            TrainingConfig(eval_split=-0.1)
+            RunConfig(eval_split=-0.1)
 
         with pytest.raises(ValueError, match="eval_split must be in"):
-            TrainingConfig(eval_split=1.0)
+            RunConfig(eval_split=1.0)
 
     def test_both_fp16_and_bf16_raises(self):
         """Test that enabling both fp16 and bf16 raises ValueError."""
         with pytest.raises(ValueError, match="Cannot enable both fp16 and bf16"):
-            TrainingConfig(fp16=True, bf16=True)
+            RunConfig(fp16=True, bf16=True)
 
     def test_fp16_only(self):
         """Test fp16 only configuration."""
-        config = TrainingConfig(fp16=True, bf16=False)
+        config = RunConfig(fp16=True, bf16=False)
         assert config.fp16 is True
         assert config.bf16 is False
 
     def test_bf16_only(self):
         """Test bf16 only configuration."""
-        config = TrainingConfig(fp16=False, bf16=True)
+        config = RunConfig(fp16=False, bf16=True)
         assert config.fp16 is False
         assert config.bf16 is True
 
     def test_no_mixed_precision(self):
         """Test configuration without mixed precision."""
-        config = TrainingConfig(fp16=False, bf16=False)
+        config = RunConfig(fp16=False, bf16=False)
         assert config.fp16 is False
         assert config.bf16 is False
 
 
-class TestTrainingResult:
-    """Test TrainingResult dataclass."""
+class TestRunResult:
+    """Test RunResult dataclass."""
 
     def test_basic_creation(self):
-        """Test creating a TrainingResult."""
+        """Test creating a RunResult."""
         started = datetime(2024, 1, 1, 10, 0, 0)
         completed = datetime(2024, 1, 1, 11, 30, 0)
 
-        result = TrainingResult(
+        result = RunResult(
             adapter_path=Path("/path/to/adapter"),
             base_model="Qwen/Qwen2.5-7B-Instruct",
             method="lora",
@@ -209,7 +210,7 @@ class TestTrainingResult:
         started = datetime(2024, 1, 1, 10, 0, 0)
         completed = datetime(2024, 1, 1, 11, 30, 0)
 
-        result = TrainingResult(
+        result = RunResult(
             adapter_path=Path("/path/to/adapter"),
             base_model="model",
             method="lora",
@@ -224,8 +225,8 @@ class TestTrainingResult:
         assert result.duration_seconds == 5400.0
 
     def test_dpo_method(self):
-        """Test TrainingResult with DPO method."""
-        result = TrainingResult(
+        """Test RunResult with DPO method."""
+        result = RunResult(
             adapter_path=Path("/path/to/adapter"),
             base_model="model",
             method="dpo",

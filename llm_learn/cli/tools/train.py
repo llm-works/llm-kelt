@@ -9,9 +9,20 @@ from appinfra.db.pg import PG
 from appinfra.dot_dict import DotDict
 from llm_infer import compute_adapter_metadata
 from llm_infer.models import ModelResolver
+from sqlalchemy import delete, func, select
 
 from ...core.database import Database
-from ...training.config import LoraConfig, TrainingConfig, TrainingResult
+from ...core.utils import utc_now
+from ...training.config import RunConfig, RunResult
+from ...training.dpo import (
+    PendingPair,
+    Run,
+    _not_deleted_filter,
+    export_preferences,
+    export_run_pairs,
+)
+from ...training.lora import AdapterRegistry
+from ...training.lora import Config as LoraConfig
 
 
 def _print_adapter_metadata(adapter_path: Path, label: str = "Adapter") -> None:
@@ -151,17 +162,13 @@ class ExportTool(Tool):
         }
 
     def run(self, **kwargs: Any) -> int:
-        from ...training.export import export_preferences_dpo
-
         db = self._get_database()
         output_path = Path(self.args.output)
         filters = self._get_export_filters()
 
         self.lg.info("exporting preferences", extra={"output": str(output_path), **filters})
 
-        result = export_preferences_dpo(
-            session_factory=db.session, output_path=output_path, **filters
-        )
+        result = export_preferences(session_factory=db.session, output_path=output_path, **filters)
 
         self.lg.info("export complete", extra={"count": result.count, "path": str(result.path)})
         print(f"Exported {result.count} preference pairs to {result.path}")
@@ -190,6 +197,7 @@ class DpoTool(ModelResolutionMixin, Tool):
         parser.add_argument("--batch-size", type=int, help="Training batch size")
         parser.add_argument("--lr", type=float, help="Learning rate")
         parser.add_argument("--profile", help="Use named training profile from config")
+        parser.add_argument("--based-on", "-b", help="Train on top of existing adapter (path)")
 
     def _get_training_config(self) -> DotDict | None:
         """Get training config section."""
@@ -240,7 +248,7 @@ class DpoTool(ModelResolutionMixin, Tool):
                 params[param] = getattr(self.args, arg)
         return beta, quantize, params
 
-    def _build_configs(self) -> tuple[float, bool, TrainingConfig]:
+    def _build_configs(self) -> tuple[float, bool, RunConfig]:
         """Build training configuration from args and profile."""
         params: dict[str, Any] = {}
         beta, quantize = 0.1, True
@@ -250,7 +258,7 @@ class DpoTool(ModelResolutionMixin, Tool):
             beta, quantize, params = self._apply_profile(self._load_profile(profile_name))
 
         beta, quantize, params = self._apply_cli_overrides(beta, quantize, params)
-        return beta, quantize, TrainingConfig(**params) if params else TrainingConfig()
+        return beta, quantize, RunConfig(**params) if params else RunConfig()
 
     def _validate_args(self) -> tuple[Path, Path] | None:
         """Validate args and return (data_path, output_dir) or None on error."""
@@ -283,11 +291,15 @@ class DpoTool(ModelResolutionMixin, Tool):
 
         return self._execute_training(data_path, output_dir, model_path)
 
-    def _execute_training(self, data_path: Path, output_dir: Path, model_path: Path) -> int:
+    def _execute_training(  # cq: exempt=33
+        self, data_path: Path, output_dir: Path, model_path: Path
+    ) -> int:
         """Execute the DPO training."""
         from ...training.dpo import train_dpo
 
         beta, quantize, training_config = self._build_configs()
+        based_on_arg = getattr(self.args, "based_on", None)
+        based_on = Path(based_on_arg) if based_on_arg else None
 
         self.lg.info(
             "starting DPO training",
@@ -298,6 +310,7 @@ class DpoTool(ModelResolutionMixin, Tool):
                 "beta": beta,
                 "quantize": quantize,
                 "epochs": training_config.num_epochs,
+                "based_on": str(based_on) if based_on else None,
             },
         )
 
@@ -310,12 +323,13 @@ class DpoTool(ModelResolutionMixin, Tool):
             training_config=training_config,
             beta=beta,
             quantize=quantize,
+            based_on=based_on,
         )
 
         self._print_result(result)
         return 0
 
-    def _print_result(self, result: TrainingResult) -> None:
+    def _print_result(self, result: RunResult) -> None:
         """Print training result summary."""
         print("\nTraining complete!")
         print(f"  Adapter: {result.adapter_path}")
@@ -360,11 +374,10 @@ class RegisterTool(Tool):
 
         return str(lora_cfg.base_path)
 
-    def _build_training_result(self, adapter_path: Path) -> TrainingResult:
-        """Build a minimal TrainingResult for registration."""
-        from ...core.utils import utc_now
+    def _build_training_result(self, adapter_path: Path) -> RunResult:
+        """Build a minimal RunResult for registration."""
 
-        return TrainingResult(
+        return RunResult(
             adapter_path=adapter_path,
             base_model="unknown",
             method="dpo",
@@ -375,28 +388,27 @@ class RegisterTool(Tool):
             samples_trained=0,
         )
 
-    def _do_register(self, adapter_path: Path, adapter_id: str, enabled: bool) -> int:
+    def _do_register(self, adapter_path: Path, adapter_id: str, deploy: bool) -> int:
         """Execute registration and print result."""
-        from ...training.lora import AdapterRegistry
 
         registry = AdapterRegistry(self.lg, self._get_base_path())
         training_result = self._build_training_result(adapter_path)
 
-        self.lg.info("registering adapter", extra={"adapter_id": adapter_id, "enabled": enabled})
+        self.lg.info("registering adapter", extra={"adapter_id": adapter_id, "deploy": deploy})
 
         try:
             info = registry.register(
                 training_result=training_result,
                 adapter_id=adapter_id,
                 description=getattr(self.args, "description", None),
-                enabled=enabled,
+                deploy=deploy,
                 overwrite=getattr(self.args, "overwrite", False),
             )
         except ValueError as e:
             self.lg.error("registration failed", extra={"error": str(e)})
             return 1
 
-        status = "enabled" if info.enabled else "disabled"
+        status = "deployed" if info.deployed else "not deployed"
         print(f"Registered adapter '{info.adapter_id}' to {info.path}")
         print(f"  Status: {status}")
         _print_adapter_metadata(info.path)
@@ -408,8 +420,8 @@ class RegisterTool(Tool):
             self.lg.error("adapter path not found", extra={"path": str(adapter_path)})
             return 1
 
-        enabled = not getattr(self.args, "disabled", False)
-        return self._do_register(adapter_path, self.args.id, enabled)
+        deploy = not getattr(self.args, "disabled", False)
+        return self._do_register(adapter_path, self.args.id, deploy)
 
 
 class PipelineTool(ModelResolutionMixin, Tool):
@@ -423,8 +435,11 @@ class PipelineTool(ModelResolutionMixin, Tool):
         )
         super().__init__(parent, config)
         self._db: Database | None = None
-        self._dpo_client = None
+        self._learn_client = None
         self._run_id: int | None = None
+        # Resolved from queue when --context/--id not provided
+        self._resolved_context: str | None = None
+        self._resolved_adapter_id: str | None = None
 
     def add_args(self, parser) -> None:
         # Export args
@@ -443,6 +458,9 @@ class PipelineTool(ModelResolutionMixin, Tool):
         parser.add_argument("--epochs", type=int, help="Number of epochs")
         parser.add_argument("--batch-size", type=int, help="Training batch size")
         parser.add_argument("--lr", type=float, help="Learning rate")
+        parser.add_argument(
+            "--based-on", "-b", help="Train on top of existing adapter (path or ID)"
+        )
 
         # Register args
         parser.add_argument("--description", help="Adapter description")
@@ -474,23 +492,90 @@ class PipelineTool(ModelResolutionMixin, Tool):
             self._db = Database(self.lg, PG(self.lg, dbs.main))
         return self._db
 
-    def _get_dpo_client(self):
-        """Get or create DpoClient for run tracking."""
-        if self._dpo_client is None:
-            from ...training.dpo import DpoClient
+    def _get_learn_client(self):
+        """Get or create LearnClient instance."""
+        if self._learn_client is None:
+            from llm_learn import LearnClient
+            from llm_learn.memory import IsolationContext
 
-            self._dpo_client = DpoClient(
+            context_key = self._resolved_context or self.args.context
+            context = IsolationContext(context_key=context_key)
+            self._learn_client = LearnClient(
                 lg=self.lg,
-                session_factory=self._get_database().session,
-                context_key=self.args.context,
+                database=self._get_database(),
+                context=context,
+                ensure_schema=False,
             )
-        return self._dpo_client
+        return self._learn_client
+
+    def _get_dpo_client(self):
+        """Get DpoClient via LearnClient."""
+        return self._get_learn_client().train.dpo
+
+    @property
+    def _adapter_id(self) -> str:
+        """Get resolved adapter ID."""
+        return self._resolved_adapter_id or self.args.id
+
+    def _find_pending_run(
+        self, context_arg: str | None
+    ) -> tuple[int, str | None, str | None] | None:
+        """Find earliest pending DPO run. Returns (id, context_key, adapter_name) or None."""
+        from sqlalchemy import select
+
+        from llm_learn.training.dpo.client import Run
+
+        with self._get_database().session() as session:
+            stmt = (
+                select(Run)
+                .where(Run.method == "dpo")
+                .where(Run.status == "pending")
+                .where(_not_deleted_filter(Run))
+                .order_by(Run.created_at.asc())
+            )
+            if context_arg:
+                stmt = stmt.where(Run.context_key == context_arg)
+            run = session.scalar(stmt)
+            if run is None:
+                return None
+            # Extract values while still in session
+            adapter_name = run.adapter.get("name") if run.adapter else None
+            return (run.id, run.context_key, adapter_name)
+
+    def _resolve_from_queue(self) -> None:
+        """Resolve context and adapter_id from pending queue if not provided."""
+        context_arg = getattr(self.args, "context", None)
+        id_arg = getattr(self.args, "id", None)
+
+        # If both provided, nothing to resolve
+        if context_arg and id_arg:
+            self._resolved_context = context_arg
+            self._resolved_adapter_id = id_arg
+            return
+
+        result = self._find_pending_run(context_arg)
+        if result is None:
+            if context_arg:
+                raise ValueError(f"No pending DPO runs found for context '{context_arg}'")
+            raise ValueError("No pending DPO runs in queue")
+
+        self._run_id, self._resolved_context, self._resolved_adapter_id = result
+        if self._resolved_adapter_id is None:
+            raise ValueError(f"Pending run {self._run_id} has no adapter name; use --id")
+        self.lg.info(
+            "resolved run from queue",
+            extra={"run_id": self._run_id, "context": self._resolved_context},
+        )
 
     def _get_or_create_run(self) -> int:
         """Get existing run or create new one."""
+        # If already resolved from queue, use that
+        if self._run_id is not None:
+            return self._run_id
+
         client = self._get_dpo_client()
 
-        # Use existing run if specified
+        # Use existing run if specified via --run-id
         if run_id := getattr(self.args, "run_id", None):
             run = client.get(run_id)
             if run is None:
@@ -500,40 +585,33 @@ class PipelineTool(ModelResolutionMixin, Tool):
             return int(run_id)
 
         # Look for existing pending run with same adapter name
-        pending = client.list(status="pending")
+        pending = client.list_runs(status="pending")
         for run in pending:
-            if run.adapter_name == self.args.id:
+            if run.adapter_name == self._adapter_id:
                 self.lg.info("using existing pending run", extra={"run_id": run.id})
                 return int(run.id)
 
         # Create new run
-        run = client.create(adapter_name=self.args.id)
+        run = client.create(adapter_name=self._adapter_id)
         self.lg.info("created new DPO run", extra={"run_id": run.id})
         return int(run.id)
 
     def _run_export(self, output_path: Path) -> int:
-        """Run export step."""
-        from ...training.export import export_preferences_dpo
+        """Run export step - exports pending pairs for this run."""
+        assert self._run_id is not None, "_run_id must be set before export"
+        self.lg.info("step 1/3: exporting pairs", extra={"run_id": self._run_id})
 
-        context_key = self.args.context
-        category = getattr(self.args, "category", None)
-        min_margin = getattr(self.args, "min_margin", None)
-
-        self.lg.info("step 1/3: exporting preferences", extra={"context": context_key})
-
-        result = export_preferences_dpo(
+        result = export_run_pairs(
             session_factory=self._get_database().session,
-            context_key=context_key,
+            run_id=self._run_id,
             output_path=output_path,
-            category=category,
-            min_margin=min_margin,
         )
 
         if result.count == 0:
-            self.lg.error("no preferences found to export")
+            self.lg.error("no pairs found for run")
             return 1
 
-        print(f"[1/3] Exported {result.count} preference pairs")
+        print(f"[1/3] Exported {result.count} pairs")
         return 0
 
     def _load_profile(self, profile_name: str) -> tuple[float, bool, dict[str, Any]]:
@@ -578,7 +656,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
                 params[param] = getattr(self.args, arg)
         return beta, quantize, params
 
-    def _build_training_params(self) -> tuple[float, bool, TrainingConfig]:
+    def _build_training_params(self) -> tuple[float, bool, RunConfig]:
         """Build training parameters from profile and CLI args."""
         params: dict[str, Any] = {}
         beta, quantize = 0.1, True
@@ -587,23 +665,45 @@ class PipelineTool(ModelResolutionMixin, Tool):
             beta, quantize, params = self._load_profile(profile_name)
 
         beta, quantize, params = self._apply_cli_overrides(beta, quantize, params)
-        return beta, quantize, TrainingConfig(**params) if params else TrainingConfig()
+        return beta, quantize, RunConfig(**params) if params else RunConfig()
 
-    def _run_train(
+    def _resolve_based_on(self) -> Path | None:
+        """Resolve --based-on argument to adapter path."""
+        based_on_arg = getattr(self.args, "based_on", None)
+        if not based_on_arg:
+            return None
+
+        base_path = self._get_adapter_base_path()
+        if base_path is None:
+            # No registry configured, try as raw path
+            path = Path(based_on_arg)
+            if not path.exists():
+                raise ValueError(f"Adapter not found: {based_on_arg}")
+            return path
+
+        registry = AdapterRegistry(self.lg, base_path)
+        return registry.resolve(based_on_arg)
+
+    def _run_train(  # cq: exempt=32
         self, data_path: Path, adapter_path: Path, model_path: Path
-    ) -> TrainingResult | None:
+    ) -> RunResult | None:
         """Run training step."""
         from ...training.dpo import train_dpo
 
         beta, quantize, training_config = self._build_training_params()
+        based_on = self._resolve_based_on()
 
         self.lg.info(
             "step 2/3: training DPO adapter",
-            extra={"model": str(model_path), "epochs": training_config.num_epochs},
+            extra={
+                "model": str(model_path),
+                "epochs": training_config.num_epochs,
+                "based_on": str(based_on) if based_on else None,
+            },
         )
 
         try:
-            result: TrainingResult = train_dpo(
+            result: RunResult = train_dpo(
                 lg=self.lg,
                 data_path=data_path,
                 output_dir=adapter_path,
@@ -612,6 +712,7 @@ class PipelineTool(ModelResolutionMixin, Tool):
                 training_config=training_config,
                 beta=beta,
                 quantize=quantize,
+                based_on=based_on,
             )
             print(f"[2/3] Training complete ({result.duration_seconds:.1f}s)")
             _print_adapter_metadata(result.adapter_path, label="Trained adapter")
@@ -627,19 +728,35 @@ class PipelineTool(ModelResolutionMixin, Tool):
         lora_cfg = getattr(adapters_cfg, "lora", None) if adapters_cfg else None
         return lora_cfg.base_path if lora_cfg and hasattr(lora_cfg, "base_path") else None
 
-    def _do_register(self, registry, training_result: TrainingResult, overwrite: bool):
+    def _do_register(self, registry, training_result: RunResult, overwrite: bool, deploy: bool):
         """Perform the actual adapter registration."""
         return registry.register(
             training_result=training_result,
-            adapter_id=self.args.id,
+            adapter_id=self._adapter_id,
             description=getattr(self.args, "description", None),
-            enabled=True,
+            deploy=deploy,
             overwrite=overwrite,
         )
 
-    def _run_register(self, training_result: TrainingResult) -> int:
-        """Run registration step."""
-        from ...training.lora import AdapterRegistry
+    def _confirm_overwrite(self, registry) -> bool | None:
+        """Check if adapter exists and confirm overwrite. Returns None to skip."""
+        if getattr(self.args, "overwrite", False):
+            return True
+        existing = registry.get(self._adapter_id)
+        if not existing:
+            return False
+        response = input(f"Adapter '{self._adapter_id}' already exists. Overwrite? [y/N] ")
+        if response.strip().lower() not in ("y", "yes"):
+            print("Registration skipped.")
+            return None
+        return True
+
+    def _run_register(self, training_result: RunResult) -> int:
+        """Run registration step with interactive prompts."""
+        response = input("\nCopy to registry? [Y/n] ").strip().lower()
+        if response in ("n", "no"):
+            print(f"Adapter available at: {training_result.adapter_path}")
+            return 0
 
         base_path = self._get_adapter_base_path()
         if base_path is None:
@@ -647,37 +764,22 @@ class PipelineTool(ModelResolutionMixin, Tool):
             return 1
 
         registry = AdapterRegistry(self.lg, base_path)
-        self.lg.info("step 3/3: registering adapter", extra={"adapter_id": self.args.id})
-        overwrite = getattr(self.args, "overwrite", False)
+        overwrite = self._confirm_overwrite(registry)
+        if overwrite is None:
+            return 0
+
+        response = input("Deploy adapter? [Y/n] ").strip().lower()
+        deploy = response not in ("n", "no")
 
         try:
-            info = self._do_register(registry, training_result, overwrite)
-            print(f"[3/3] Registered adapter '{info.adapter_id}'")
-            _print_adapter_metadata(info.path, label="Deployed adapter")
+            info = self._do_register(registry, training_result, overwrite, deploy)
+            status = "and deployed" if deploy else "(not deployed)"
+            print(f"Registered {status} adapter '{info.adapter_id}'")
+            _print_adapter_metadata(info.path, label="Adapter")
             return 0
         except ValueError as e:
-            error_msg = str(e)
-            if "already exists" in error_msg and not overwrite:
-                response = input(f"\nAdapter '{self.args.id}' already exists. Overwrite? [y/N] ")
-                if response.lower() in ("y", "yes"):
-                    info = self._do_register(registry, training_result, overwrite=True)
-                    print(f"[3/3] Registered adapter '{info.adapter_id}'")
-                    _print_adapter_metadata(info.path, label="Deployed adapter")
-                    return 0
-                print("Registration skipped.")
-                return 1
-            self.lg.error("registration failed", extra={"error": error_msg})
+            self.lg.error("registration failed", extra={"error": str(e)})
             return 1
-
-    def _validate_args(self) -> bool:
-        """Validate required arguments."""
-        if not getattr(self.args, "context", None):
-            self.lg.error("--context is required")
-            return False
-        if not getattr(self.args, "id", None):
-            self.lg.error("--id is required")
-            return False
-        return True
 
     def _setup_paths(self, adapter_id: str) -> tuple[Path, Path, Path]:
         """Set up working directory and paths."""
@@ -690,29 +792,27 @@ class PipelineTool(ModelResolutionMixin, Tool):
         if getattr(self.args, "list_models", False):
             return self._list_models()
 
-        if not self._validate_args():
-            return 1
-
         model_path = self._resolve_model(getattr(self.args, "model", None))
         if model_path is None:
             return 1
 
-        # Get or create DPO run for tracking
         try:
+            self._resolve_from_queue()
             self._run_id = self._get_or_create_run()
         except ValueError as e:
             self.lg.error(str(e))
             return 1
 
-        adapter_id = self.args.id
-        work_dir, data_path, adapter_path = self._setup_paths(adapter_id)
+        work_dir, data_path, adapter_path = self._setup_paths(self._adapter_id)
+        self._print_pipeline_header(model_path, work_dir)
+        return self._execute_pipeline(data_path, adapter_path, model_path)
 
-        print(f"\nDPO Pipeline: {self.args.context} -> {adapter_id}")
+    def _print_pipeline_header(self, model_path: Path, work_dir: Path) -> None:
+        """Print pipeline startup info."""
+        print(f"\nDPO Pipeline: {self._resolved_context} -> {self._adapter_id}")
         print(f"Model: {model_path.name}")
         print(f"Output directory: {work_dir}")
         print(f"Run ID: {self._run_id}\n")
-
-        return self._execute_pipeline(data_path, adapter_path, model_path)
 
     def _execute_pipeline(self, data_path: Path, adapter_path: Path, model_path: Path) -> int:
         """Execute the three pipeline steps with run tracking."""
@@ -736,13 +836,14 @@ class PipelineTool(ModelResolutionMixin, Tool):
         print(f"\nPipeline failed at {step}")
         return 1
 
-    def _finish_pipeline(self, client, training_result: TrainingResult) -> int:
+    def _finish_pipeline(self, client, training_result: RunResult) -> int:
         """Handle registration and completion after successful training."""
         skip_register = getattr(self.args, "skip_register", False)
         reg_failed = False if skip_register else self._run_register(training_result) != 0
 
-        # Always record metrics if training succeeded
-        client.complete(self._run_id, metrics=self._extract_metrics(training_result))
+        # Record metrics and adapter info
+        metrics, adapter_info = self._extract_run_data(training_result)
+        client.complete(self._run_id, metrics=metrics, adapter_info=adapter_info)
 
         if skip_register:
             print(f"\nTraining complete! Adapter at: {training_result.adapter_path}")
@@ -750,23 +851,26 @@ class PipelineTool(ModelResolutionMixin, Tool):
             print("\nTraining complete, but registration failed (see above)")
             return 1
         else:
-            print(f"\nPipeline complete! Adapter '{self.args.id}' is ready.")
+            print(f"\nPipeline complete! Adapter '{self._adapter_id}' is ready.")
         return 0
 
-    def _extract_metrics(self, result: TrainingResult) -> dict:
-        """Extract metrics from training result for DB storage."""
+    def _extract_run_data(self, result: RunResult) -> tuple[dict, dict]:
+        """Extract metrics and adapter info from training result."""
         metrics = dict(result.metrics) if result.metrics else {}
         metrics["duration_seconds"] = result.duration_seconds
         metrics["samples_trained"] = result.samples_trained
 
-        # Add adapter metadata for identification/verification
         adapter_meta = compute_adapter_metadata(result.adapter_path)
-        metrics["adapter"] = adapter_meta.to_dict()
-        return metrics
+        adapter_info = {"mtime": adapter_meta.mtime, "md5": adapter_meta.md5}
+        return metrics, adapter_info
 
 
 class ResetTool(Tool):
-    """Reset DPO training data for a context."""
+    """Reset DPO training data for a context.
+
+    Clears pending pairs only - completed runs and their trained pairs remain intact.
+    Uses soft-delete via system_status JSONB.
+    """
 
     # Display name for NULL context_key (used in list output)
     _NULL_CONTEXT_DISPLAY = "(no context)"
@@ -803,131 +907,134 @@ class ResetTool(Tool):
         """Build SQLAlchemy filter for context_key (handles NULL correctly)."""
         return column.is_(None) if context_key is None else column == context_key
 
-    def _list_contexts(self, session) -> list[tuple[str, int, int]]:
-        """List all contexts with run and pair counts (excludes deleted runs)."""
-        from sqlalchemy import func, select
+    def _count_pending_pairs(self, session, context_key: str | None) -> int:
+        """Count pending pairs for a context."""
 
-        from ...training.dpo import DpoRun, DpoRunPair
-
-        # Get distinct contexts with run counts (excluding deleted)
         stmt = (
-            select(DpoRun.context_key, func.count(DpoRun.id).label("run_count"))
-            .where(DpoRun.status != "deleted")
-            .group_by(DpoRun.context_key)
-            .order_by(DpoRun.context_key)
+            select(func.count())
+            .select_from(PendingPair)
+            .join(Run, PendingPair.run_id == Run.id)
+            .where(
+                self._context_filter(Run.context_key, context_key),
+                Run.method == "dpo",
+                _not_deleted_filter(Run),
+            )
+        )
+        return session.scalar(stmt) or 0
+
+    def _list_contexts(self, session) -> list[tuple[str, int, int]]:
+        """List all contexts with run and pending pair counts."""
+
+        stmt = (
+            select(Run.context_key, func.count(Run.id).label("run_count"))
+            .where(Run.method == "dpo", _not_deleted_filter(Run))
+            .group_by(Run.context_key)
+            .order_by(Run.context_key)
         )
         results = []
         for row in session.execute(stmt):
             display_key = row.context_key or self._NULL_CONTEXT_DISPLAY
-            run_count = row.run_count
-
-            # Count pairs for this context (use _context_filter for NULL handling)
-            pair_stmt = (
-                select(func.count())
-                .select_from(DpoRunPair)
-                .join(DpoRun, DpoRunPair.run_id == DpoRun.id)
-                .where(
-                    self._context_filter(DpoRun.context_key, row.context_key),
-                    DpoRun.status != "deleted",
-                )
-            )
-            pair_count = session.scalar(pair_stmt) or 0
-            results.append((display_key, run_count, pair_count))
+            pair_count = self._count_pending_pairs(session, row.context_key)
+            results.append((display_key, row.run_count, pair_count))
 
         return results
 
     def _count_data(self, session, context_key: str | None) -> tuple[int, int]:
-        """Count runs and pairs for the context (excludes deleted runs)."""
-        from sqlalchemy import func, select
+        """Count runs and pending pairs for the context."""
 
-        from ...training.dpo import DpoRun, DpoRunPair
+        context_filter = self._context_filter(Run.context_key, context_key)
 
-        context_filter = self._context_filter(DpoRun.context_key, context_key)
-
-        # Count runs (excluding deleted)
+        # Count runs (excluding soft-deleted)
         run_count_stmt = (
             select(func.count())
-            .select_from(DpoRun)
-            .where(context_filter, DpoRun.status != "deleted")
+            .select_from(Run)
+            .where(context_filter, Run.method == "dpo", _not_deleted_filter(Run))
         )
         run_count = session.scalar(run_count_stmt) or 0
 
-        # Count pairs linked to those runs
+        # Count pending pairs linked to those runs
         pair_count_stmt = (
             select(func.count())
-            .select_from(DpoRunPair)
-            .join(DpoRun, DpoRunPair.run_id == DpoRun.id)
-            .where(context_filter)
+            .select_from(PendingPair)
+            .join(Run, PendingPair.run_id == Run.id)
+            .where(context_filter, Run.method == "dpo", _not_deleted_filter(Run))
         )
         pair_count = session.scalar(pair_count_stmt) or 0
 
         return run_count, pair_count
 
     def _delete_data(self, session, context_key: str | None) -> tuple[int, int]:
-        """Soft-delete runs for the context. Returns (runs_deleted, pairs_freed)."""
-        from sqlalchemy import delete, select, update
+        """Soft-delete runs and clear pending pairs. Returns (runs_deleted, pairs_freed)."""
 
-        from ...training.dpo import DpoRun, DpoRunPair
+        context_filter = self._context_filter(Run.context_key, context_key)
 
-        context_filter = self._context_filter(DpoRun.context_key, context_key)
+        # Get runs for this context (excluding already soft-deleted)
+        runs_stmt = select(Run).where(context_filter, Run.method == "dpo", _not_deleted_filter(Run))
+        runs = list(session.scalars(runs_stmt).all())
 
-        # Get run IDs for this context (excluding already deleted)
-        run_ids_stmt = select(DpoRun.id).where(context_filter, DpoRun.status != "deleted")
-        run_ids = list(session.scalars(run_ids_stmt).all())
-
-        if not run_ids:
+        if not runs:
             return 0, 0
 
-        # Delete pairs to free them for reuse (hard delete - they're just links)
-        pairs_stmt = delete(DpoRunPair).where(DpoRunPair.run_id.in_(run_ids))
+        run_ids = [r.id for r in runs]
+
+        # Delete pending pairs (hard delete - they become available for other runs)
+        pairs_stmt = delete(PendingPair).where(PendingPair.run_id.in_(run_ids))
         pairs_result = session.execute(pairs_stmt)
         pairs_deleted = pairs_result.rowcount
 
-        # Soft-delete runs (set status to 'deleted')
-        runs_stmt = update(DpoRun).where(DpoRun.id.in_(run_ids)).values(status="deleted")
-        runs_result = session.execute(runs_stmt)
-        runs_deleted = runs_result.rowcount
+        # Soft-delete runs via system_status
+        now = utc_now().isoformat()
+        for run in runs:
+            run.system_status = {"deleted": True, "deleted_at": now}
 
-        return runs_deleted, pairs_deleted
+        return len(runs), pairs_deleted
 
     def _count_all_data(self, session) -> tuple[int, int]:
-        """Count all runs and pairs across all contexts (excludes deleted)."""
-        from sqlalchemy import func, select
-
-        from ...training.dpo import DpoRun, DpoRunPair
+        """Count all runs and pending pairs across all contexts."""
 
         run_count = (
             session.scalar(
-                select(func.count()).select_from(DpoRun).where(DpoRun.status != "deleted")
+                select(func.count())
+                .select_from(Run)
+                .where(Run.method == "dpo", _not_deleted_filter(Run))
             )
             or 0
         )
-        pair_count = session.scalar(select(func.count()).select_from(DpoRunPair)) or 0
+        # Only count pending pairs for active runs
+        pair_count = (
+            session.scalar(
+                select(func.count())
+                .select_from(PendingPair)
+                .join(Run, PendingPair.run_id == Run.id)
+                .where(Run.method == "dpo", _not_deleted_filter(Run))
+            )
+            or 0
+        )
         return run_count, pair_count
 
     def _delete_all_data(self, session) -> tuple[int, int]:
-        """Soft-delete all runs. Returns (runs_deleted, pairs_freed)."""
-        from sqlalchemy import delete, select, update
+        """Soft-delete all runs and clear pending pairs. Returns (runs_deleted, pairs_freed)."""
 
-        from ...training.dpo import DpoRun, DpoRunPair
+        # Get all non-deleted runs
+        runs = list(
+            session.scalars(select(Run).where(Run.method == "dpo", _not_deleted_filter(Run))).all()
+        )
 
-        # Get IDs of non-deleted runs
-        run_ids = list(session.scalars(select(DpoRun.id).where(DpoRun.status != "deleted")).all())
-
-        if not run_ids:
+        if not runs:
             return 0, 0
 
-        # Delete pairs to free them (hard delete - they're just links)
-        pairs_result = session.execute(delete(DpoRunPair).where(DpoRunPair.run_id.in_(run_ids)))
+        run_ids = [r.id for r in runs]
+
+        # Delete pending pairs (hard delete)
+        pairs_result = session.execute(delete(PendingPair).where(PendingPair.run_id.in_(run_ids)))
         pairs_deleted = pairs_result.rowcount
 
-        # Soft-delete runs
-        runs_result = session.execute(
-            update(DpoRun).where(DpoRun.id.in_(run_ids)).values(status="deleted")
-        )
-        runs_deleted = runs_result.rowcount
+        # Soft-delete runs via system_status
+        now = utc_now().isoformat()
+        for run in runs:
+            run.system_status = {"deleted": True, "deleted_at": now}
 
-        return runs_deleted, pairs_deleted
+        return len(runs), pairs_deleted
 
     def run(self, **kwargs: Any) -> int:
         context_key = getattr(self.args, "context", None)
@@ -956,7 +1063,7 @@ class ResetTool(Tool):
             return 0
 
         print("\nAvailable contexts:\n")
-        print(f"  {'Context':<30} {'Runs':>8} {'Pairs':>10}")
+        print(f"  {'Context':<30} {'Runs':>8} {'Pending':>10}")
         print(f"  {'-' * 30} {'-' * 8} {'-' * 10}")
         for ctx, runs, pairs in contexts:
             print(f"  {ctx:<30} {runs:>8} {pairs:>10}")
@@ -973,9 +1080,10 @@ class ResetTool(Tool):
             print(f"No training data found for context '{context_key}'")
             return 0
 
-        print(f"\nThis will delete for context '{context_key}':")
-        print(f"  Training runs:    {run_count}")
-        print(f"  Run-pair links:   {pair_count}")
+        print(f"\nThis will reset for context '{context_key}':")
+        print(f"  Training runs:    {run_count} (soft-delete)")
+        print(f"  Pending pairs:    {pair_count} (cleared)")
+        print("  Note: Completed runs and trained pairs are preserved.")
         print()
 
         if not confirm:
@@ -987,7 +1095,7 @@ class ResetTool(Tool):
         runs_deleted, pairs_deleted = self._delete_data(session, db_context_key)
         session.commit()
 
-        print(f"Deleted {runs_deleted} runs, {pairs_deleted} run-pair links")
+        print(f"Soft-deleted {runs_deleted} runs, cleared {pairs_deleted} pending pairs")
         return 0
 
     def _run_reset_all(self, session, confirm: bool) -> int:
@@ -998,9 +1106,10 @@ class ResetTool(Tool):
             print("No training data found.")
             return 0
 
-        print("\nThis will delete ALL training data:")
-        print(f"  Training runs:    {run_count}")
-        print(f"  Run-pair links:   {pair_count}")
+        print("\nThis will reset ALL training data:")
+        print(f"  Training runs:    {run_count} (soft-delete)")
+        print(f"  Pending pairs:    {pair_count} (cleared)")
+        print("  Note: Completed runs and trained pairs are preserved.")
         print()
 
         if not confirm:
@@ -1012,7 +1121,7 @@ class ResetTool(Tool):
         runs_deleted, pairs_deleted = self._delete_all_data(session)
         session.commit()
 
-        print(f"Deleted {runs_deleted} runs, {pairs_deleted} run-pair links")
+        print(f"Soft-deleted {runs_deleted} runs, cleared {pairs_deleted} pending pairs")
         return 0
 
 

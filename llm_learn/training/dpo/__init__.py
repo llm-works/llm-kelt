@@ -1,31 +1,48 @@
 """DPO (Direct Preference Optimization) training package.
 
 Provides:
-- DpoClient: Training run management with pair assignment
-- DpoTrainer: Actual DPO training using TRL
+- Client: Training run management with pair assignment
+- Trainer: Actual DPO training using TRL
 - train_dpo: Convenience function for training
+- export_run_pairs: Export pending pairs for a run to TRL DPO format
+- export_preferences: Export from atomic preferences (legacy)
 """
 
-from .client import DpoClient, DpoRun, DpoRunInfo, DpoRunPair, PairList
+from .client import (
+    Client,
+    PendingPair,
+    Run,
+    RunInfo,
+    TrainedPair,
+    _not_deleted_filter,
+)
+from .export import PairTuple, export_preferences, export_run_pairs
 
 __all__ = [
-    "DpoClient",
-    "DpoRun",
-    "DpoRunInfo",
-    "DpoRunPair",
-    "PairList",
+    # Core client
+    "Client",
+    "_not_deleted_filter",
+    # Models
+    "Run",
+    "RunInfo",
+    "PendingPair",
+    "TrainedPair",
+    # Export
+    "PairTuple",
+    "export_preferences",
+    "export_run_pairs",
     # Training functions (lazy-loaded, require 'training' extras)
-    "DpoTrainer",
+    "Trainer",
     "train_dpo",
 ]
 
 
 def __getattr__(name: str):
     """Lazy import training classes that require optional dependencies."""
-    if name == "DpoTrainer":
-        from .trainer import DpoTrainer
+    if name == "Trainer":
+        from .trainer import Trainer
 
-        return DpoTrainer
+        return Trainer
     if name == "train_dpo":
         from .trainer import train_dpo
 

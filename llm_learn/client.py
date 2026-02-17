@@ -20,17 +20,8 @@ from .memory import atomic
 from .memory.isolation import IsolationContext
 
 if TYPE_CHECKING:
-    from .memory.atomic import (
-        AssertionsClient,
-        DirectivesClient,
-        EmbeddingAdapter,
-        FeedbackClient,
-        InteractionsClient,
-        PredictionsClient,
-        PreferencesClient,
-        Protocol,
-        SolutionsClient,
-    )
+    from .memory.atomic import Protocol
+    from .training import TrainClient
 
 
 class LearnClient:
@@ -38,9 +29,9 @@ class LearnClient:
     Main client for the Learn framework, scoped to an isolation context.
 
     Provides unified access to all framework capabilities:
-    - Memory storage (facts, feedback, solutions, preferences, etc.)
-    - Embeddings for semantic search
-    - Context-aware LLM queries
+    - learn.atomic.* - Fact-based memory storage (assertions, solutions, feedback, etc.)
+    - learn.train.* - Training methods (DPO, SFT, etc.)
+    - learn.query - Context-aware LLM queries
 
     Usage (via factory - recommended):
         from appinfra.config import Config
@@ -64,9 +55,13 @@ class LearnClient:
         )
 
     Memory API:
-        learn.assertions.add("Prefers concise explanations", category="preferences")
-        learn.solutions.record(agent_name="reviewer", problem="...", ...)
-        learn.feedback.record(signal="positive", content_id=456)
+        learn.atomic.assertions.add("Prefers concise explanations", category="preferences")
+        learn.atomic.solutions.record(agent_name="reviewer", problem="...", ...)
+        learn.atomic.feedback.record(signal="positive", content_id=456)
+
+    Training API:
+        learn.train.dpo.create(adapter_name="my-adapter")
+        learn.train.dpo.list_runs(status="pending")
 
     Query API (requires llm_client):
         response = await learn.query.ask("What's a good approach?")
@@ -117,6 +112,7 @@ class LearnClient:
             embedding_store=self._embedding_store,
         )
         self._context_builder = ContextBuilder(self._atomic.assertions)
+        self._train: TrainClient | None = None
 
     def _setup_query_interface(self) -> None:
         """Initialize context query interface if LLM client is available."""
@@ -214,51 +210,18 @@ class LearnClient:
         """Access content storage API."""
         return self._content
 
-    # Convenience aliases for atomic primitives
     @property
-    def assertions(self) -> AssertionsClient:
-        """Shorthand for atomic.assertions."""
-        return self._atomic.assertions
+    def train(self) -> TrainClient:
+        """Access training client for DPO, SFT, etc."""
+        if self._train is None:
+            from .training import TrainClient
 
-    @property
-    def facts(self) -> AssertionsClient:
-        """Alias for assertions."""
-        return self._atomic.assertions
-
-    @property
-    def solutions(self) -> SolutionsClient:
-        """Shorthand for atomic.solutions."""
-        return self._atomic.solutions
-
-    @property
-    def predictions(self) -> PredictionsClient:
-        """Shorthand for atomic.predictions."""
-        return self._atomic.predictions
-
-    @property
-    def feedback(self) -> FeedbackClient:
-        """Shorthand for atomic.feedback."""
-        return self._atomic.feedback
-
-    @property
-    def directives(self) -> DirectivesClient:
-        """Shorthand for atomic.directives."""
-        return self._atomic.directives
-
-    @property
-    def interactions(self) -> InteractionsClient:
-        """Shorthand for atomic.interactions."""
-        return self._atomic.interactions
-
-    @property
-    def preferences(self) -> PreferencesClient:
-        """Shorthand for atomic.preferences."""
-        return self._atomic.preferences
-
-    @property
-    def embeddings(self) -> EmbeddingAdapter:
-        """Shorthand for atomic.embeddings."""
-        return self._atomic.embeddings
+            self._train = TrainClient(
+                self._lg,
+                self._db.session,
+                self._context.context_key,
+            )
+        return self._train
 
     @property
     def database(self) -> Database:

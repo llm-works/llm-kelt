@@ -77,18 +77,18 @@ def populate_facts(learn: LearnClient):
     """Clear and populate sample facts for the demo."""
     print(f"\n{H2}▶ Populating Facts{RESET}")
 
-    existing = learn.facts.list_active()
+    existing = learn.atomic.assertions.list_active()
     if existing:
         for fact in existing:
-            learn.facts.deactivate(fact.id)
+            learn.atomic.assertions.deactivate(fact.id)
         print(f"  {MUTED}Cleared {len(existing)} existing facts{RESET}")
 
     for content, category in _SAMPLE_FACTS:
-        learn.facts.add(content, category=category)
+        learn.atomic.assertions.add(content, category=category)
 
     print(f"  {OK}✓ Added {len(_SAMPLE_FACTS)} facts across 4 categories:{RESET}")
     categories: dict[str, list] = {}
-    for fact in learn.facts.list_active():
+    for fact in learn.atomic.assertions.list_active():
         categories.setdefault(fact.category or "uncategorized", []).append(fact)
     for cat, facts in sorted(categories.items()):
         print(f"    {INFO}[{cat}]{RESET} {len(facts)} facts")
@@ -108,7 +108,7 @@ async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedde
     try:
         print(f"  {MUTED}Connecting to embedding server...{RESET}")
         result = await embed_missing_facts(
-            lg=lg, embedder=embedder, embedding_adapter=learn.embeddings, batch_size=50
+            lg=lg, embedder=embedder, embedding_adapter=learn.atomic.embeddings, batch_size=50
         )
         print(f"  {OK}✓ Embedded {result.processed} facts{RESET}")
         if result.failed:
@@ -126,7 +126,7 @@ async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedde
     print(f"  {MUTED}Using synthetic embeddings for demo...{RESET}")
 
     # Set demo embeddings manually based on keywords
-    for i, fact in enumerate(learn.facts.list_active()):
+    for i, fact in enumerate(learn.atomic.assertions.list_active()):
         embedding = [0.0] * 384
         content_lower = fact.content.lower()
         # Create simple keyword-based embeddings for demo
@@ -139,7 +139,7 @@ async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedde
         if "test" in content_lower or "mock" in content_lower:
             embedding[3] = 0.9
         embedding[i % 384] = 0.5  # Ensure uniqueness
-        learn.embeddings.set_embedding(fact.id, embedding, "demo-model")
+        learn.atomic.embeddings.set_embedding(fact.id, embedding, "demo-model")
 
     print(f"  {OK}✓ Set synthetic embeddings for all facts{RESET}")
     return None
@@ -154,7 +154,7 @@ async def demo_similarity_search(learn: LearnClient, embedder: Embedder):
     print(f'\n  {LLM_Q}Query: "{query}"{RESET}')
 
     query_result = await embedder.embed_async(query)
-    similar_facts = learn.embeddings.search_similar(
+    similar_facts = learn.atomic.embeddings.search_similar(
         query=query_result.embedding, model_name=embedder.model, top_k=5, min_similarity=0.3
     )
 
@@ -167,7 +167,7 @@ async def demo_similarity_search(learn: LearnClient, embedder: Embedder):
     # Search with category filter
     print(f"\n  {LLM_Q}Query: \"{query}\" {MUTED}(filtered to 'security' category){RESET}")
 
-    similar_security = learn.embeddings.search_similar(
+    similar_security = learn.atomic.embeddings.search_similar(
         query=query_result.embedding,
         model_name=embedder.model,
         top_k=5,
@@ -187,7 +187,7 @@ async def demo_rag_vs_static(learn: LearnClient, config: Config, embedder: Embed
     print(f"\n{H2}▶ RAG vs Static Context Injection{RESET}")
     print(f"  {MUTED}Comparing which facts get included in the LLM prompt{RESET}")
 
-    context_builder = ContextBuilder(learn.facts)
+    context_builder = ContextBuilder(learn.atomic.assertions)
     question = "How should I handle database queries securely?"
 
     # Static: just takes first N facts regardless of relevance
@@ -207,7 +207,7 @@ async def demo_rag_vs_static(learn: LearnClient, config: Config, embedder: Embed
 
     if embedder:
         query_result = await embedder.embed_async(question)
-        similar = learn.embeddings.search_similar(
+        similar = learn.atomic.embeddings.search_similar(
             query=query_result.embedding, model_name=embedder.model, top_k=3, min_similarity=0.3
         )
         print(f"  {OK}Selected facts:{RESET}")
@@ -230,14 +230,14 @@ async def demo_rag_query(learn: LearnClient, config: Config, lg: Logger, embedde
     try:
         llm_factory = LLMClientFactory(lg)
         llm_client = llm_factory.from_config(config.llm.to_dict())
-        context_builder = ContextBuilder(learn.facts)
+        context_builder = ContextBuilder(learn.atomic.assertions)
 
         query = ContextQuery(
             client=llm_client,
             context_builder=context_builder,
             base_system_prompt="You are a coding assistant.",
             embedder=embedder,
-            embedding_adapter=learn.embeddings,
+            embedding_adapter=learn.atomic.embeddings,
         )
 
         question = "What are best practices for API security?"

@@ -4,26 +4,23 @@ import json
 import tempfile
 from pathlib import Path
 
-from llm_learn.training import (
-    export_feedback_classifier,
-    export_feedback_sft,
-    export_preferences_dpo,
-)
+from llm_learn.training import export_feedback_classifier, export_feedback_sft
+from llm_learn.training.dpo import export_preferences
 
 
 class TestExportPreferencesDPO:
-    """Test export_preferences_dpo function."""
+    """Test export_preferences function."""
 
     def test_export_basic(self, learn_client, database, clean_tables):
         """Test basic DPO export."""
         # Create test data
-        learn_client.preferences.record(
+        learn_client.atomic.preferences.record(
             context="Summarize this article",
             chosen="Concise summary",
             rejected="Verbose essay",
             category="synthesis",
         )
-        learn_client.preferences.record(
+        learn_client.atomic.preferences.record(
             context="Explain quantum computing",
             chosen="Simple explanation",
             rejected="Overly complex explanation",
@@ -32,7 +29,7 @@ class TestExportPreferencesDPO:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "dpo.jsonl"
-            result = export_preferences_dpo(
+            result = export_preferences(
                 database.session,
                 learn_client.context.context_key,
                 output_path,
@@ -57,13 +54,19 @@ class TestExportPreferencesDPO:
 
     def test_export_filter_by_category(self, learn_client, database, clean_tables):
         """Test export filtering by category."""
-        learn_client.preferences.record(context="A", chosen="G", rejected="B", category="synthesis")
-        learn_client.preferences.record(context="B", chosen="G", rejected="B", category="analysis")
-        learn_client.preferences.record(context="C", chosen="G", rejected="B", category="synthesis")
+        learn_client.atomic.preferences.record(
+            context="A", chosen="G", rejected="B", category="synthesis"
+        )
+        learn_client.atomic.preferences.record(
+            context="B", chosen="G", rejected="B", category="analysis"
+        )
+        learn_client.atomic.preferences.record(
+            context="C", chosen="G", rejected="B", category="synthesis"
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "dpo.jsonl"
-            result = export_preferences_dpo(
+            result = export_preferences(
                 database.session,
                 learn_client.context.context_key,
                 output_path,
@@ -74,13 +77,13 @@ class TestExportPreferencesDPO:
 
     def test_export_filter_by_margin(self, learn_client, database, clean_tables):
         """Test export filtering by minimum margin."""
-        learn_client.preferences.record(context="A", chosen="G", rejected="B", margin=0.9)
-        learn_client.preferences.record(context="B", chosen="G", rejected="B", margin=0.5)
-        learn_client.preferences.record(context="C", chosen="G", rejected="B", margin=0.3)
+        learn_client.atomic.preferences.record(context="A", chosen="G", rejected="B", margin=0.9)
+        learn_client.atomic.preferences.record(context="B", chosen="G", rejected="B", margin=0.5)
+        learn_client.atomic.preferences.record(context="C", chosen="G", rejected="B", margin=0.3)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "dpo.jsonl"
-            result = export_preferences_dpo(
+            result = export_preferences(
                 database.session,
                 learn_client.context.context_key,
                 output_path,
@@ -93,7 +96,7 @@ class TestExportPreferencesDPO:
         """Test export with no data."""
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "dpo.jsonl"
-            result = export_preferences_dpo(
+            result = export_preferences(
                 database.session,
                 learn_client.context.context_key,
                 output_path,
@@ -105,11 +108,11 @@ class TestExportPreferencesDPO:
 
     def test_export_creates_parent_dirs(self, learn_client, database, clean_tables):
         """Test that export creates parent directories."""
-        learn_client.preferences.record(context="A", chosen="G", rejected="B")
+        learn_client.atomic.preferences.record(context="A", chosen="G", rejected="B")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "nested" / "dir" / "dpo.jsonl"
-            result = export_preferences_dpo(
+            result = export_preferences(
                 database.session,
                 learn_client.context.context_key,
                 output_path,
@@ -132,7 +135,7 @@ class TestExportFeedbackSFT:
         )
 
         # Record feedback on that content
-        learn_client.feedback.record(
+        learn_client.atomic.feedback.record(
             signal="positive",
             content_id=content_id,
             strength=0.9,
@@ -171,12 +174,12 @@ class TestExportFeedbackSFT:
             source="test",
         )
 
-        learn_client.feedback.record(
+        learn_client.atomic.feedback.record(
             signal="positive",
             content_id=good_id,
             strength=0.9,
         )
-        learn_client.feedback.record(
+        learn_client.atomic.feedback.record(
             signal="negative",
             content_id=bad_id,
             strength=0.9,
@@ -205,12 +208,12 @@ class TestExportFeedbackSFT:
             source="test",
         )
 
-        learn_client.feedback.record(
+        learn_client.atomic.feedback.record(
             signal="positive",
             content_id=strong_id,
             strength=0.9,
         )
-        learn_client.feedback.record(
+        learn_client.atomic.feedback.record(
             signal="positive",
             content_id=weak_id,
             strength=0.3,
@@ -235,7 +238,7 @@ class TestExportFeedbackSFT:
             source="test",
         )
 
-        learn_client.feedback.record(
+        learn_client.atomic.feedback.record(
             signal="positive",
             content_id=content_id,
             strength=0.9,
@@ -275,12 +278,12 @@ class TestExportFeedbackClassifier:
             source="test",
         )
 
-        learn_client.feedback.record(
+        learn_client.atomic.feedback.record(
             signal="positive",
             content_id=good_id,
             strength=0.9,
         )
-        learn_client.feedback.record(
+        learn_client.atomic.feedback.record(
             signal="negative",
             content_id=bad_id,
             strength=0.9,
@@ -317,12 +320,12 @@ class TestExportFeedbackClassifier:
             source="test",
         )
 
-        learn_client.feedback.record(
+        learn_client.atomic.feedback.record(
             signal="positive",
             content_id=good_id,
             strength=0.9,
         )
-        learn_client.feedback.record(
+        learn_client.atomic.feedback.record(
             signal="dismiss",
             content_id=dismiss_id,
             strength=0.9,
@@ -350,12 +353,12 @@ class TestExportFeedbackClassifier:
             source="test",
         )
 
-        learn_client.feedback.record(
+        learn_client.atomic.feedback.record(
             signal="positive",
             content_id=strong_id,
             strength=0.9,
         )
-        learn_client.feedback.record(
+        learn_client.atomic.feedback.record(
             signal="positive",
             content_id=weak_id,
             strength=0.3,

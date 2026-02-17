@@ -1,9 +1,10 @@
-"""Tests for DPO training client."""
+"""Tests for DPO training client with new schema."""
 
 import pytest
 
-from llm_learn import ConflictError, NotFoundError, ValidationError
-from llm_learn.training import DpoClient
+from llm_learn import NotFoundError, ValidationError
+from llm_learn.training.dpo import Client as DpoClient
+from llm_learn.training.dpo import PairTuple
 
 
 @pytest.fixture
@@ -21,7 +22,7 @@ def sample_preferences(learn_client, clean_tables):
     """Create sample preference pairs for testing."""
     ids = []
     for i in range(5):
-        fact_id = learn_client.preferences.record(
+        fact_id = learn_client.atomic.preferences.record(
             context=f"Context {i}",
             chosen=f"Good response {i}",
             rejected=f"Bad response {i}",
@@ -32,18 +33,34 @@ def sample_preferences(learn_client, clean_tables):
     return ids
 
 
-class TestDpoRunCRUD:
-    """Test basic CRUD operations for DPO runs."""
+def make_pairs(fact_ids: list[int]) -> list[PairTuple]:
+    """Convert fact IDs to pair tuples for testing.
+
+    Uses fact_id for both chosen and rejected (same preference fact).
+    This is intentional for CRUD/lifecycle tests that don't need distinct
+    chosen/rejected content. Tests validating export content quality should
+    use distinct IDs.
+    """
+    return [(fid, fid, f"Context {i}") for i, fid in enumerate(fact_ids)]
+
+
+class TestRunCRUD:
+    """Test basic CRUD operations for training runs."""
 
     def test_create_run(self, dpo_client, clean_tables):
-        """Test creating a DPO run."""
+        """Test creating a training run."""
         run = dpo_client.create(adapter_name="test-adapter")
 
         assert run.id > 0
+        assert run.method == "dpo"
         assert run.adapter_name == "test-adapter"
+        assert run.adapter == {"name": "test-adapter"}
         assert run.status == "pending"
         assert run.config is None
         assert run.metrics is None
+        assert run.based_on is None
+        assert run.system_status is None
+        assert run.is_deleted is False
         assert run.created_at is not None
         assert run.started_at is None
         assert run.completed_at is None
@@ -54,6 +71,88 @@ class TestDpoRunCRUD:
         run = dpo_client.create(adapter_name="test", config=config)
 
         assert run.config == config
+
+    def test_create_run_with_based_on(self, dpo_client, clean_tables):
+        """Test creating a run with lineage (based_on)."""
+        parent = dpo_client.create(adapter_name="parent")
+        child = dpo_client.create(adapter_name="child", based_on=parent.id)
+
+        assert child.based_on == parent.id
+
+    def test_create_run_with_invalid_based_on(self, dpo_client, clean_tables):
+        """Test creating a run with non-existent parent raises NotFoundError."""
+        with pytest.raises(NotFoundError, match="Parent run 99999 not found"):
+            dpo_client.create(adapter_name="orphan", based_on=99999)
+
+    def test_replace_stale_reuses_pending_run(self, dpo_client, clean_tables):
+        """Test that replace_stale=True (default) reuses existing pending run."""
+        first = dpo_client.create(adapter_name="first")
+        second = dpo_client.create(adapter_name="second")  # Should reuse first
+
+        # Same run ID - it was reused, not created new
+        assert second.id == first.id
+        # Only one run exists
+        assert len(dpo_client.list_runs()) == 1
+
+    def test_replace_stale_false_creates_new(self, dpo_client, clean_tables):
+        """Test that replace_stale=False always creates a new run."""
+        first = dpo_client.create(adapter_name="first")
+        second = dpo_client.create(adapter_name="second", replace_stale=False)
+
+        assert second.id != first.id
+        assert len(dpo_client.list_runs()) == 2
+
+    def test_replace_stale_clears_pairs(self, dpo_client, sample_preferences, clean_tables):
+        """Test that resetting a pending run clears its pairs."""
+        pairs = make_pairs(sample_preferences[:2])
+
+        first = dpo_client.create(adapter_name="first")
+        dpo_client.assign_pairs(first.id, pairs)
+        assert dpo_client.count_pending_pairs() == 2
+
+        # Create again - should reset and clear pairs
+        second = dpo_client.create(adapter_name="second")
+        assert second.id == first.id
+        assert dpo_client.count_pending_pairs() == 0
+
+    def test_replace_stale_callback_rejects(self, dpo_client, clean_tables):
+        """Test that on_replace callback can reject replacement."""
+        first = dpo_client.create(adapter_name="first")
+
+        # Callback returns False - should create new run instead
+        second = dpo_client.create(
+            adapter_name="second",
+            on_replace=lambda existing: False,
+        )
+
+        assert second.id != first.id
+        assert len(dpo_client.list_runs()) == 2
+
+    def test_replace_stale_callback_accepts(self, dpo_client, clean_tables):
+        """Test that on_replace callback can accept replacement."""
+        callback_called = []
+
+        first = dpo_client.create(adapter_name="first")
+
+        def track_callback(existing):
+            callback_called.append(existing.id)
+            return True
+
+        second = dpo_client.create(adapter_name="second", on_replace=track_callback)
+
+        assert second.id == first.id
+        assert callback_called == [first.id]
+
+    def test_replace_stale_ignores_running_runs(self, dpo_client, clean_tables):
+        """Test that running runs are not replaced."""
+        first = dpo_client.create(adapter_name="first")
+        dpo_client.start(first.id)  # Now it's running
+
+        second = dpo_client.create(adapter_name="second")
+
+        # Should create new since first is running, not pending
+        assert second.id != first.id
+        assert len(dpo_client.list_runs()) == 2
 
     def test_get_run(self, dpo_client, clean_tables):
         """Test getting a run by ID."""
@@ -71,50 +170,74 @@ class TestDpoRunCRUD:
 
     def test_list_runs(self, dpo_client, clean_tables):
         """Test listing runs."""
-        dpo_client.create(adapter_name="run-1")
-        dpo_client.create(adapter_name="run-2")
-        dpo_client.create(adapter_name="run-3")
+        dpo_client.create(adapter_name="run-1", replace_stale=False)
+        dpo_client.create(adapter_name="run-2", replace_stale=False)
+        dpo_client.create(adapter_name="run-3", replace_stale=False)
 
-        runs = dpo_client.list()
+        runs = dpo_client.list_runs()
         assert len(runs) == 3
 
     def test_list_runs_with_status_filter(self, dpo_client, clean_tables):
         """Test listing runs filtered by status."""
-        dpo_client.create(adapter_name="pending-run")
-        started_run = dpo_client.create(adapter_name="started-run")
+        dpo_client.create(adapter_name="pending-run", replace_stale=False)
+        started_run = dpo_client.create(adapter_name="started-run", replace_stale=False)
         dpo_client.start(started_run.id)
 
-        pending = dpo_client.list(status="pending")
+        pending = dpo_client.list_runs(status="pending")
         assert len(pending) == 1
         assert pending[0].adapter_name == "pending-run"
 
-        running = dpo_client.list(status="running")
+        running = dpo_client.list_runs(status="running")
         assert len(running) == 1
         assert running[0].adapter_name == "started-run"
 
     def test_list_runs_invalid_status(self, dpo_client, clean_tables):
         """Test listing with invalid status raises ValidationError."""
         with pytest.raises(ValidationError, match="status must be one of"):
-            dpo_client.list(status="invalid")
+            dpo_client.list_runs(status="invalid")
 
     def test_list_runs_descending(self, dpo_client, clean_tables):
         """Test listing runs in descending order (default)."""
-        dpo_client.create(adapter_name="first")
-        dpo_client.create(adapter_name="second")
-        dpo_client.create(adapter_name="third")
+        dpo_client.create(adapter_name="first", replace_stale=False)
+        dpo_client.create(adapter_name="second", replace_stale=False)
+        dpo_client.create(adapter_name="third", replace_stale=False)
 
-        runs = dpo_client.list(descending=True)
+        runs = dpo_client.list_runs(descending=True)
         assert runs[0].adapter_name == "third"  # Most recent first
 
-    def test_delete_run(self, dpo_client, clean_tables):
-        """Test deleting a run."""
-        run = dpo_client.create(adapter_name="to-delete")
+    def test_delete_pending_run_cancels(self, dpo_client, clean_tables):
+        """Test deleting a pending run transitions to cancelled status."""
+        run = dpo_client.create(adapter_name="to-cancel")
+        assert run.status == "pending"
 
         result = dpo_client.delete(run.id)
         assert result is True
 
-        # Verify deleted
+        # Cancelled runs are still visible (not soft-deleted)
+        cancelled = dpo_client.get(run.id)
+        assert cancelled is not None
+        assert cancelled.status == "cancelled"
+        assert cancelled.is_deleted is False
+
+    def test_delete_completed_run_soft_deletes(self, dpo_client, clean_tables):
+        """Test deleting a completed run soft-deletes it."""
+        run = dpo_client.create(adapter_name="to-soft-delete")
+        dpo_client.start(run.id)
+        dpo_client.complete(run.id, metrics={"loss": 0.1})
+
+        result = dpo_client.delete(run.id)
+        assert result is True
+
+        # Soft-deleted - not visible by default
         assert dpo_client.get(run.id) is None
+
+        # But visible with include_deleted
+        all_runs = dpo_client.list_runs(include_deleted=True)
+        deleted_run = next((r for r in all_runs if r.id == run.id), None)
+        assert deleted_run is not None
+        assert deleted_run.status == "completed"  # Status unchanged
+        assert deleted_run.is_deleted is True
+        assert deleted_run.system_status.get("deleted") is True
 
     def test_delete_nonexistent_run(self, dpo_client, clean_tables):
         """Test deleting a nonexistent run returns False."""
@@ -123,12 +246,13 @@ class TestDpoRunCRUD:
 
 
 class TestPairAssignment:
-    """Test preference pair assignment."""
+    """Test preference pair assignment with new schema."""
 
     def test_assign_pairs(self, dpo_client, sample_preferences):
         """Test assigning pairs to a run."""
         run = dpo_client.create(adapter_name="assign-test")
-        count = dpo_client.assign_pairs(run.id, sample_preferences[:3])
+        pairs = make_pairs(sample_preferences[:3])
+        count = dpo_client.assign_pairs(run.id, pairs)
 
         assert count == 3
 
@@ -140,102 +264,163 @@ class TestPairAssignment:
 
     def test_assign_to_nonexistent_run(self, dpo_client, sample_preferences):
         """Test assigning to nonexistent run raises NotFoundError."""
+        pairs = make_pairs(sample_preferences[:1])
         with pytest.raises(NotFoundError, match="not found"):
-            dpo_client.assign_pairs(99999, sample_preferences[:1])
+            dpo_client.assign_pairs(99999, pairs)
 
-    def test_exclusive_assignment_constraint(self, dpo_client, sample_preferences):
-        """Test that pairs can only be assigned to one run (exclusive)."""
-        run1 = dpo_client.create(adapter_name="run-1")
-        run2 = dpo_client.create(adapter_name="run-2")
+    def test_assign_to_non_pending_run(self, dpo_client, sample_preferences):
+        """Test assigning to non-pending run raises ValidationError."""
+        run = dpo_client.create(adapter_name="status-test")
+        pairs = make_pairs(sample_preferences[:1])
 
-        # Assign pairs to first run
-        dpo_client.assign_pairs(run1.id, sample_preferences[:3])
+        # Start the run (status becomes 'running')
+        dpo_client.start(run.id)
 
-        # Try to assign same pairs to second run - should fail
-        with pytest.raises(ConflictError, match="already assigned"):
-            dpo_client.assign_pairs(run2.id, sample_preferences[:3])
-
-    def test_partial_overlap_fails(self, dpo_client, sample_preferences):
-        """Test that partial overlap in assignment fails."""
-        run1 = dpo_client.create(adapter_name="run-1")
-        run2 = dpo_client.create(adapter_name="run-2")
-
-        # Assign first 3 to run1
-        dpo_client.assign_pairs(run1.id, sample_preferences[:3])
-
-        # Try to assign pairs 2-4 to run2 (overlaps on 2,3)
-        with pytest.raises(ConflictError, match="already assigned"):
-            dpo_client.assign_pairs(run2.id, sample_preferences[2:5])
+        with pytest.raises(ValidationError, match="must be 'pending'"):
+            dpo_client.assign_pairs(run.id, pairs)
 
     def test_get_pairs(self, dpo_client, sample_preferences):
-        """Test getting pairs assigned to a run."""
+        """Test getting pending pairs assigned to a run."""
         run = dpo_client.create(adapter_name="get-pairs-test")
-        dpo_client.assign_pairs(run.id, sample_preferences[:3])
+        pairs = make_pairs(sample_preferences[:3])
+        dpo_client.assign_pairs(run.id, pairs)
 
-        pairs = dpo_client.get_pairs(run.id)
-        assert len(pairs) == 3
+        retrieved = dpo_client.get_pairs(run.id)
+        assert len(retrieved) == 3
 
-        # Verify structure
-        for fact, details in pairs:
-            assert fact.type == "preference"
-            assert details is not None
-            assert details.context.startswith("Context")
+        # Verify structure - pairs are (chosen_id, rejected_id, prompt)
+        for chosen_id, rejected_id, prompt in retrieved:
+            assert chosen_id in sample_preferences[:3]
+            assert rejected_id == chosen_id  # Same fact for both
+            assert prompt.startswith("Context")
 
     def test_get_pairs_nonexistent_run(self, dpo_client, clean_tables):
         """Test getting pairs from nonexistent run raises NotFoundError."""
         with pytest.raises(NotFoundError, match="not found"):
             dpo_client.get_pairs(99999)
 
+    def test_count_pending_pairs(self, dpo_client, sample_preferences):
+        """Test counting pending pairs."""
+        run = dpo_client.create(adapter_name="count-test")
+        pairs = make_pairs(sample_preferences[:3])
+        dpo_client.assign_pairs(run.id, pairs)
 
-class TestUntrainedPairs:
-    """Test get_untrained_pairs functionality."""
+        # Count for specific run
+        assert dpo_client.count_pending_pairs(run.id) == 3
 
-    def test_get_untrained_pairs_all(self, dpo_client, sample_preferences):
-        """Test getting all untrained pairs (none assigned yet)."""
-        pairs = dpo_client.get_untrained_pairs()
-        assert len(pairs) == 5
+        # Count for all runs in context
+        assert dpo_client.count_pending_pairs() == 3
 
-    def test_get_untrained_pairs_excludes_assigned(self, dpo_client, sample_preferences):
-        """Test that assigned pairs are excluded."""
-        run = dpo_client.create(adapter_name="test")
-        dpo_client.assign_pairs(run.id, sample_preferences[:3])
 
-        untrained = dpo_client.get_untrained_pairs()
-        assert len(untrained) == 2  # 5 total - 3 assigned = 2 untrained
+class TestLineageFiltering:
+    """Test lineage-based pair filtering."""
 
-    def test_get_untrained_pairs_min_margin(self, dpo_client, sample_preferences):
-        """Test filtering by minimum margin."""
-        # Pairs have margins: 0.5, 0.6, 0.7, 0.8, 0.9
-        pairs = dpo_client.get_untrained_pairs(min_margin=0.7)
-        assert len(pairs) == 3  # 0.7, 0.8, 0.9
+    def test_pairs_filtered_by_lineage(self, dpo_client, sample_preferences):
+        """Test that pairs used in ancestor runs are filtered out."""
+        pairs = make_pairs(sample_preferences)
 
-    def test_get_untrained_pairs_limit(self, dpo_client, sample_preferences):
-        """Test limiting results."""
-        pairs = dpo_client.get_untrained_pairs(limit=2)
-        assert len(pairs) == 2
+        # Create parent run and assign first 3 pairs
+        parent = dpo_client.create(adapter_name="parent")
+        dpo_client.assign_pairs(parent.id, pairs[:3])
+        dpo_client.start(parent.id)
+        dpo_client.complete(parent.id)
 
-    def test_get_untrained_pairs_combined_filters(self, dpo_client, sample_preferences):
-        """Test combining min_margin and limit."""
-        pairs = dpo_client.get_untrained_pairs(min_margin=0.6, limit=2)
-        assert len(pairs) == 2
+        # Create child run based on parent
+        child = dpo_client.create(adapter_name="child", based_on=parent.id)
+
+        # Try to assign all 5 pairs - should only get 2 (not used in parent)
+        assigned = dpo_client.assign_pairs(child.id, pairs)
+        assert assigned == 2
+
+        # Verify the assigned pairs are the last 2
+        child_pairs = dpo_client.get_pairs(child.id)
+        assert len(child_pairs) == 2
+
+    def test_multi_level_lineage(self, dpo_client, sample_preferences):
+        """Test lineage filtering works across multiple generations."""
+        pairs = make_pairs(sample_preferences)
+
+        # Grandparent uses pair 0
+        grandparent = dpo_client.create(adapter_name="grandparent")
+        dpo_client.assign_pairs(grandparent.id, [pairs[0]])
+        dpo_client.start(grandparent.id)
+        dpo_client.complete(grandparent.id)
+
+        # Parent uses pairs 1-2
+        parent = dpo_client.create(adapter_name="parent", based_on=grandparent.id)
+        dpo_client.assign_pairs(parent.id, pairs[1:3])
+        dpo_client.start(parent.id)
+        dpo_client.complete(parent.id)
+
+        # Child should only get pairs 3-4
+        child = dpo_client.create(adapter_name="child", based_on=parent.id)
+        assigned = dpo_client.assign_pairs(child.id, pairs)
+        assert assigned == 2
+
+    def test_no_lineage_allows_all_pairs(self, dpo_client, sample_preferences):
+        """Test that runs without lineage can use any pairs."""
+        pairs = make_pairs(sample_preferences)
+
+        run1 = dpo_client.create(adapter_name="run1")
+        dpo_client.assign_pairs(run1.id, pairs[:3])
+
+        # Run2 has no lineage relationship to run1
+        # Use replace_stale=False to create independent run (not reset run1)
+        run2 = dpo_client.create(adapter_name="run2", replace_stale=False)
+        assert run2.id != run1.id  # Verify independent runs
+        # All pairs available since no lineage
+        assigned = dpo_client.assign_pairs(run2.id, pairs)
+        assert assigned == 5
+
+
+class TestPairMovement:
+    """Test pair movement from pending to trained on completion."""
+
+    def test_pairs_move_to_trained_on_complete(self, dpo_client, sample_preferences):
+        """Test that completing a run moves pairs to trained table."""
+        run = dpo_client.create(adapter_name="complete-test")
+        pairs = make_pairs(sample_preferences[:3])
+        dpo_client.assign_pairs(run.id, pairs)
+
+        # Before completion - pairs are pending
+        assert len(dpo_client.get_pairs(run.id)) == 3
+        assert len(dpo_client.get_trained_pairs(run.id)) == 0
+
+        dpo_client.start(run.id)
+        dpo_client.complete(run.id)
+
+        # After completion - pairs moved to trained
+        assert len(dpo_client.get_pairs(run.id)) == 0
+        assert len(dpo_client.get_trained_pairs(run.id)) == 3
+
+    def test_pairs_cleared_on_fail(self, dpo_client, sample_preferences):
+        """Test that failing a run clears pending pairs (frees for reuse)."""
+        run = dpo_client.create(adapter_name="fail-test")
+        pairs = make_pairs(sample_preferences[:3])
+        dpo_client.assign_pairs(run.id, pairs)
+
+        dpo_client.start(run.id)
+        dpo_client.fail(run.id, "Test failure")
+
+        # Pairs cleared (freed for reuse)
+        assert len(dpo_client.get_pairs(run.id)) == 0
+        assert len(dpo_client.get_trained_pairs(run.id)) == 0
 
     def test_pairs_freed_after_run_delete(self, dpo_client, sample_preferences):
-        """Test that deleting a run frees its pairs for reuse."""
+        """Test that soft-deleting a run clears pending pairs."""
         run = dpo_client.create(adapter_name="to-delete")
-        dpo_client.assign_pairs(run.id, sample_preferences[:3])
-
-        # Verify pairs are assigned
-        assert len(dpo_client.get_untrained_pairs()) == 2
+        pairs = make_pairs(sample_preferences[:3])
+        dpo_client.assign_pairs(run.id, pairs)
 
         # Delete the run
         dpo_client.delete(run.id)
 
-        # All pairs should be untrained now
-        assert len(dpo_client.get_untrained_pairs()) == 5
+        # Pending pairs should be cleared
+        assert dpo_client.count_pending_pairs() == 0
 
 
 class TestLifecycle:
-    """Test DPO run lifecycle transitions."""
+    """Test training run lifecycle transitions."""
 
     def test_start_run(self, dpo_client, clean_tables):
         """Test starting a run transitions to running."""
@@ -283,7 +468,7 @@ class TestLifecycle:
             dpo_client.complete(run.id)
 
     def test_invalid_transition_completed_to_failed(self, dpo_client, clean_tables):
-        """Test that completed runs cannot transition to failed (only to deleted)."""
+        """Test that completed runs cannot transition (terminal state)."""
         run = dpo_client.create()
         dpo_client.start(run.id)
         dpo_client.complete(run.id)
@@ -292,7 +477,7 @@ class TestLifecycle:
             dpo_client.fail(run.id, "error")
 
     def test_invalid_transition_failed_to_running(self, dpo_client, clean_tables):
-        """Test that failed runs cannot restart (only transition to deleted)."""
+        """Test that failed runs cannot restart (terminal state)."""
         run = dpo_client.create()
         dpo_client.start(run.id)
         dpo_client.fail(run.id, "error")
@@ -319,11 +504,11 @@ class TestContextIsolation:
         run_b = client_b.create(adapter_name="run-b")
 
         # Each client should only see its own runs
-        assert len(client_a.list()) == 1
-        assert client_a.list()[0].adapter_name == "run-a"
+        assert len(client_a.list_runs()) == 1
+        assert client_a.list_runs()[0].adapter_name == "run-a"
 
-        assert len(client_b.list()) == 1
-        assert client_b.list()[0].adapter_name == "run-b"
+        assert len(client_b.list_runs()) == 1
+        assert client_b.list_runs()[0].adapter_name == "run-b"
 
         # Cross-context get should return None
         assert client_a.get(run_b.id) is None
@@ -350,7 +535,7 @@ class TestContextIsolation:
         client_a_all = DpoClient(
             lg=logger, session_factory=database.session, context_key="tenant:a:*"
         )
-        runs = client_a_all.list()
+        runs = client_a_all.list_runs()
         assert len(runs) == 2
         assert {r.adapter_name for r in runs} == {"a1-run", "a2-run"}
 
@@ -359,7 +544,7 @@ class TestContextIsolation:
         client = DpoClient(lg=logger, session_factory=database.session, context_key="tenant:*")
 
         # Listing works with glob pattern
-        assert client.list() == []
+        assert client.list_runs() == []
 
         # Creating should fail - glob patterns are read-only
         with pytest.raises(ValidationError, match="glob-pattern"):
@@ -371,26 +556,45 @@ class TestResetAll:
 
     def test_reset_all(self, dpo_client, sample_preferences):
         """Test resetting all runs in context."""
-        # Create runs and assign pairs
-        run1 = dpo_client.create(adapter_name="run-1")
-        run2 = dpo_client.create(adapter_name="run-2")
-        dpo_client.assign_pairs(run1.id, sample_preferences[:2])
-        dpo_client.assign_pairs(run2.id, sample_preferences[2:4])
+        pairs = make_pairs(sample_preferences)
+
+        # Create runs and assign pairs (replace_stale=False to create multiple)
+        run1 = dpo_client.create(adapter_name="run-1", replace_stale=False)
+        run2 = dpo_client.create(adapter_name="run-2", replace_stale=False)
+        dpo_client.assign_pairs(run1.id, pairs[:2])
+        dpo_client.assign_pairs(run2.id, pairs[2:4])
 
         # Verify pairs are assigned
-        assert len(dpo_client.get_untrained_pairs()) == 1
+        assert dpo_client.count_pending_pairs() == 4
 
         # Reset all
         count = dpo_client.reset_all()
         assert count == 2
 
-        # Verify runs are gone
-        assert len(dpo_client.list()) == 0
+        # Verify runs are soft-deleted (not visible by default)
+        assert len(dpo_client.list_runs()) == 0
 
-        # Verify all pairs are now untrained
-        assert len(dpo_client.get_untrained_pairs()) == 5
+        # Verify pending pairs are cleared
+        assert dpo_client.count_pending_pairs() == 0
 
     def test_reset_all_empty(self, dpo_client, clean_tables):
         """Test reset_all with no runs returns 0."""
         count = dpo_client.reset_all()
         assert count == 0
+
+    def test_clear_pending_pairs_for_context(self, dpo_client, sample_preferences):
+        """Test clearing pending pairs without deleting runs."""
+        pairs = make_pairs(sample_preferences[:3])
+        run = dpo_client.create(adapter_name="test-run")
+        dpo_client.assign_pairs(run.id, pairs)
+
+        assert dpo_client.count_pending_pairs() == 3
+
+        # Clear pending pairs
+        cleared = dpo_client.clear_pending_pairs_for_context()
+        assert cleared == 3
+
+        # Run still exists
+        assert dpo_client.get(run.id) is not None
+        # But pairs are gone
+        assert dpo_client.count_pending_pairs() == 0

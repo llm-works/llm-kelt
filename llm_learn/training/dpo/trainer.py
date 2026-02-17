@@ -12,7 +12,8 @@ from appinfra.log import Logger
 
 from llm_learn.core.base import utc_now
 
-from ..config import LoraConfig, TrainingConfig, TrainingResult
+from ..config import RunConfig, RunResult
+from ..lora import Config as LoraConfig
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
@@ -39,7 +40,7 @@ def _load_dpo_dataset(data_path: Path, eval_split: float):
     return dataset, None
 
 
-class DpoTrainer:
+class Trainer:
     """Trainer for LoRA adapters using Direct Preference Optimization."""
 
     def __init__(
@@ -49,21 +50,26 @@ class DpoTrainer:
         output_dir: str | Path,
         base_model: str = DEFAULT_BASE_MODEL,
         lora_config: LoraConfig | None = None,
-        training_config: TrainingConfig | None = None,
+        training_config: RunConfig | None = None,
         beta: float = 0.1,
         quantize: bool = True,
         reference_free: bool = False,
+        based_on: Path | None = None,
     ):
         self._lg = lg
         self.data_path = Path(data_path)
         self.output_dir = Path(output_dir)
         self.base_model = base_model
         self.lora_config = lora_config or LoraConfig()
-        self.training_config = training_config or TrainingConfig()
+        self.training_config = training_config or RunConfig()
         self.beta = beta
         self.quantize = quantize
         self.reference_free = reference_free
+        self.based_on = based_on
+        self._init_state()
 
+    def _init_state(self):
+        """Initialize mutable state to None (set during training)."""
         self.model = None
         self.ref_model = None
         self.tokenizer = None
@@ -96,10 +102,28 @@ class DpoTrainer:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+    def _apply_lora_adapter(self):
+        """Apply LoRA adapter - load existing or create new."""
+        from peft import PeftModel, get_peft_model
+
+        if self.based_on is not None:
+            self._lg.info(f"loading existing adapter: {self.based_on}")
+            self.model = PeftModel.from_pretrained(
+                self.model, str(self.based_on), is_trainable=True
+            )
+        else:
+            peft_config = self.lora_config.to_peft_config()
+            self.model = get_peft_model(self.model, peft_config)
+
+        trainable, total = self.model.get_nb_trainable_parameters()
+        self._lg.info(
+            f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
+        )
+
     def _load_model(self):
         """Load base model with optional quantization and apply LoRA."""
         import torch
-        from peft import get_peft_model, prepare_model_for_kbit_training
+        from peft import prepare_model_for_kbit_training
         from transformers import AutoModelForCausalLM
 
         self._lg.info(f"loading base model: {self.base_model}")
@@ -119,12 +143,7 @@ class DpoTrainer:
         if self.quantize:
             self.model = prepare_model_for_kbit_training(self.model)
 
-        peft_config = self.lora_config.to_peft_config()
-        self.model = get_peft_model(self.model, peft_config)
-        trainable, total = self.model.get_nb_trainable_parameters()
-        self._lg.info(
-            f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
-        )
+        self._apply_lora_adapter()
 
     def _load_reference_model(self):
         """Load reference model for DPO (unless reference-free mode).
@@ -246,11 +265,9 @@ class DpoTrainer:
 
         return final_path, self._collect_metrics()
 
-    def _build_result(
-        self, adapter_path: Path, metrics: dict, started_at: datetime
-    ) -> TrainingResult:
+    def _build_result(self, adapter_path: Path, metrics: dict, started_at: datetime) -> RunResult:
         """Build the training result."""
-        return TrainingResult(
+        return RunResult(
             adapter_path=adapter_path,
             base_model=self.base_model,
             method="dpo",
@@ -274,9 +291,10 @@ class DpoTrainer:
             started_at=started_at,
             completed_at=utc_now(),
             samples_trained=len(self.train_dataset) * self.training_config.num_epochs,  # type: ignore[arg-type]
+            based_on=self.based_on,
         )
 
-    def train(self) -> TrainingResult:
+    def train(self) -> RunResult:
         """Run the full training pipeline."""
         started_at = utc_now()
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -302,11 +320,12 @@ def train_dpo(
     output_dir: str | Path,
     base_model: str = DEFAULT_BASE_MODEL,
     lora_config: LoraConfig | None = None,
-    training_config: TrainingConfig | None = None,
+    training_config: RunConfig | None = None,
     beta: float = 0.1,
     quantize: bool = True,
     reference_free: bool = False,
-) -> TrainingResult:
+    based_on: Path | None = None,
+) -> RunResult:
     """Train a LoRA adapter using Direct Preference Optimization.
 
     Args:
@@ -319,11 +338,12 @@ def train_dpo(
         beta: DPO beta parameter (higher = more conservative).
         quantize: Use 4-bit quantization (QLoRA). Reduces VRAM ~4x.
         reference_free: Skip reference model to save VRAM (may reduce quality).
+        based_on: Path to existing adapter to train on top of (for lineage).
 
     Returns:
-        TrainingResult with adapter path, metrics, and training metadata.
+        RunResult with adapter path, metrics, and training metadata.
     """
-    trainer = DpoTrainer(
+    trainer = Trainer(
         lg=lg,
         data_path=data_path,
         output_dir=output_dir,
@@ -333,5 +353,6 @@ def train_dpo(
         beta=beta,
         quantize=quantize,
         reference_free=reference_free,
+        based_on=based_on,
     )
     return trainer.train()

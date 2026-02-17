@@ -78,8 +78,8 @@ class TestRAGIntegration:
 
         fact_ids = []
         for content, category, embedding in facts_data:
-            fact_id = learn_client.assertions.add(content, category=category)
-            learn_client.embeddings.set_embedding(fact_id, embedding, "test-model")
+            fact_id = learn_client.atomic.assertions.add(content, category=category)
+            learn_client.atomic.embeddings.set_embedding(fact_id, embedding, "test-model")
             fact_ids.append(fact_id)
 
         return fact_ids
@@ -89,12 +89,12 @@ class TestRAGIntegration:
         self, learn_client, mock_embedder, mock_llm_client, sample_facts_with_embeddings
     ):
         """Test that RAG retrieves facts relevant to the query."""
-        context_builder = ContextBuilder(learn_client.assertions)
+        context_builder = ContextBuilder(learn_client.atomic.assertions)
         query = ContextQuery(
             client=mock_llm_client,
             context_builder=context_builder,
             embedder=mock_embedder,
-            embedding_adapter=learn_client.embeddings,
+            embedding_adapter=learn_client.atomic.embeddings,
         )
 
         # Ask about Python - should retrieve Python-related facts
@@ -120,12 +120,12 @@ class TestRAGIntegration:
         self, learn_client, mock_embedder, mock_llm_client, sample_facts_with_embeddings
     ):
         """Test that RAG excludes facts below similarity threshold."""
-        context_builder = ContextBuilder(learn_client.assertions)
+        context_builder = ContextBuilder(learn_client.atomic.assertions)
         query = ContextQuery(
             client=mock_llm_client,
             context_builder=context_builder,
             embedder=mock_embedder,
-            embedding_adapter=learn_client.embeddings,
+            embedding_adapter=learn_client.atomic.embeddings,
         )
 
         # Ask about concise responses - "brief" keyword triggers [0.1, 0.8, 0.1] embedding
@@ -154,15 +154,15 @@ class TestRAGIntegration:
     ):
         """Test RAG gracefully handles when no facts have embeddings."""
         # Add facts but don't embed them
-        learn_client.assertions.add("User prefers TypeScript")
-        learn_client.assertions.add("Output format: JSON")
+        learn_client.atomic.assertions.add("User prefers TypeScript")
+        learn_client.atomic.assertions.add("Output format: JSON")
 
-        context_builder = ContextBuilder(learn_client.assertions)
+        context_builder = ContextBuilder(learn_client.atomic.assertions)
         query = ContextQuery(
             client=mock_llm_client,
             context_builder=context_builder,
             embedder=mock_embedder,
-            embedding_adapter=learn_client.embeddings,
+            embedding_adapter=learn_client.atomic.embeddings,
         )
 
         # Should work but return no facts
@@ -183,12 +183,12 @@ class TestRAGIntegration:
         self, learn_client, mock_embedder, mock_llm_client, sample_facts_with_embeddings
     ):
         """Test that RAG respects top_k limit."""
-        context_builder = ContextBuilder(learn_client.assertions)
+        context_builder = ContextBuilder(learn_client.atomic.assertions)
         query = ContextQuery(
             client=mock_llm_client,
             context_builder=context_builder,
             embedder=mock_embedder,
-            embedding_adapter=learn_client.embeddings,
+            embedding_adapter=learn_client.atomic.embeddings,
         )
 
         # Set very low min_similarity to get all facts, but limit to 2
@@ -210,12 +210,12 @@ class TestRAGIntegration:
         self, learn_client, mock_embedder, mock_llm_client, sample_facts_with_embeddings
     ):
         """Test that RAG respects min_similarity threshold."""
-        context_builder = ContextBuilder(learn_client.assertions)
+        context_builder = ContextBuilder(learn_client.atomic.assertions)
         query = ContextQuery(
             client=mock_llm_client,
             context_builder=context_builder,
             embedder=mock_embedder,
-            embedding_adapter=learn_client.embeddings,
+            embedding_adapter=learn_client.atomic.embeddings,
         )
 
         # Set very high min_similarity - should return very few or no facts
@@ -240,22 +240,22 @@ class TestRAGIntegration:
     ):
         """Test that RAG only retrieves active facts."""
         # Create active and inactive facts with same embedding
-        active_id = learn_client.assertions.add("Active fact about Python")
-        inactive_id = learn_client.assertions.add("Inactive fact about Python")
+        active_id = learn_client.atomic.assertions.add("Active fact about Python")
+        inactive_id = learn_client.atomic.assertions.add("Inactive fact about Python")
 
         # Give both the same Python-related embedding
-        learn_client.embeddings.set_embedding(active_id, [0.9, 0.1, 0.0], "test-model")
-        learn_client.embeddings.set_embedding(inactive_id, [0.9, 0.1, 0.0], "test-model")
+        learn_client.atomic.embeddings.set_embedding(active_id, [0.9, 0.1, 0.0], "test-model")
+        learn_client.atomic.embeddings.set_embedding(inactive_id, [0.9, 0.1, 0.0], "test-model")
 
         # Deactivate one
-        learn_client.assertions.deactivate(inactive_id)
+        learn_client.atomic.assertions.deactivate(inactive_id)
 
-        context_builder = ContextBuilder(learn_client.assertions)
+        context_builder = ContextBuilder(learn_client.atomic.assertions)
         query = ContextQuery(
             client=mock_llm_client,
             context_builder=context_builder,
             embedder=mock_embedder,
-            embedding_adapter=learn_client.embeddings,
+            embedding_adapter=learn_client.atomic.embeddings,
         )
 
         await query.ask(
@@ -275,13 +275,13 @@ class TestRAGIntegration:
         self, learn_client, mock_embedder, mock_llm_client, sample_facts_with_embeddings
     ):
         """Test RAG works with custom system prompt."""
-        context_builder = ContextBuilder(learn_client.assertions)
+        context_builder = ContextBuilder(learn_client.atomic.assertions)
         query = ContextQuery(
             client=mock_llm_client,
             context_builder=context_builder,
             base_system_prompt="You are a helpful coding assistant.",
             embedder=mock_embedder,
-            embedding_adapter=learn_client.embeddings,
+            embedding_adapter=learn_client.atomic.embeddings,
         )
 
         await query.ask(
@@ -303,12 +303,12 @@ class TestRAGIntegration:
         """Test RAG works across multi-turn conversations."""
         from llm_learn.inference.query import Conversation
 
-        context_builder = ContextBuilder(learn_client.assertions)
+        context_builder = ContextBuilder(learn_client.atomic.assertions)
         query = ContextQuery(
             client=mock_llm_client,
             context_builder=context_builder,
             embedder=mock_embedder,
-            embedding_adapter=learn_client.embeddings,
+            embedding_adapter=learn_client.atomic.embeddings,
         )
 
         conv = Conversation()

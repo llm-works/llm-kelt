@@ -4,6 +4,7 @@ infra := $(shell appinfra scripts-path)
 # Configuration
 INFRA_DEV_PKG_NAME := llm_learn
 INFRA_PYTEST_COVERAGE_THRESHOLD := 30
+INFRA_DEV_DOCSTRING_THRESHOLD := 90
 
 # Test configuration file (used by integration and e2e tests)
 export LEARN_TEST_CONFIG_FILE := $(local)etc/llm-learn.yaml
@@ -43,14 +44,15 @@ type::
 	@if [ -d "examples" ]; then $(PYTHON) -m mypy examples/ --follow-imports=skip --ignore-missing-imports; fi
 
 # Custom e2e tests: run sequentially (-n 0) because GPU tests can't share GPU memory
-test.e2e::
+# Note: single colon overrides the infra target (double colon would append)
+test.e2e:
 	@echo "* running end-to-end tests (sequential for GPU)..."
 	@$(PYTHON) -m pytest tests/ -m e2e -n 0 -qq --tb=short || { ec=$$?; [ $$ec -eq 5 ] && exit 0 || exit $$ec; }
 	@echo "* end-to-end tests done"
 .PHONY: test.e2e
 
 # Database migrations
-ALEMBIC := $(PYTHON) -m alembic -c migrations/alembic.ini
+ALEMBIC := $(PYTHON) -m alembic -c llm_learn/migrations/alembic.ini
 .PHONY: migrate migrate.status migrate.history
 
 migrate: ## Run database migrations to latest

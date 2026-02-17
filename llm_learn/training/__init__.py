@@ -9,40 +9,27 @@ Contains utilities for training data preparation and model fine-tuning:
 Install training dependencies with: pip install llm-learn[training]
 """
 
-from .config import LoraConfig, TrainingConfig, TrainingResult
-from .dpo import DpoClient, DpoRun, DpoRunInfo, DpoRunPair, PairList
-from .export import (
-    ExportResult,
-    export_feedback_classifier,
-    export_feedback_sft,
-    export_preferences_dpo,
-)
+from .client import Client as TrainClient
+from .config import RunConfig, RunResult
+from .export import ExportResult, export_feedback_classifier, export_feedback_sft
 from .lora import AdapterInfo, AdapterRegistry
 
 __all__ = [
-    # DPO training
-    "DpoClient",
-    "DpoRun",
-    "DpoRunInfo",
-    "DpoRunPair",
-    "PairList",
     # Export functions
     "ExportResult",
-    "export_preferences_dpo",
     "export_feedback_sft",
     "export_feedback_classifier",
     # Config dataclasses
-    "LoraConfig",
-    "TrainingConfig",
-    "TrainingResult",
+    "RunConfig",
+    "RunResult",
     # Adapter registry
     "AdapterRegistry",
     "AdapterInfo",
+    # Client aggregator
+    "TrainClient",
     # Training functions (lazy-loaded, require 'training' extras)
     "train_lora",
     "train_dpo",
-    "DpoTrainer",
-    "LoraTrainer",
 ]
 
 
@@ -56,12 +43,4 @@ def __getattr__(name: str):
         from .dpo import train_dpo
 
         return train_dpo
-    if name == "DpoTrainer":
-        from .dpo import DpoTrainer
-
-        return DpoTrainer
-    if name == "LoraTrainer":
-        from .lora import LoraTrainer
-
-        return LoraTrainer
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

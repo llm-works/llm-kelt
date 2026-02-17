@@ -1,27 +1,30 @@
 """LoRA/SFT training package.
 
 Provides:
-- LoraTrainer: LoRA training using TRL
+- Config: LoRA adapter configuration
+- Trainer: LoRA training using TRL
 - train_lora: Convenience function for training
 - AdapterRegistry: Adapter registration with llm-infer
 """
 
+from .config import Config
 from .registry import AdapterInfo, AdapterRegistry
 
 __all__ = [
+    "Config",
     "AdapterInfo",
     "AdapterRegistry",
-    "LoraTrainer",
+    "Trainer",
     "train_lora",
 ]
 
 
 def __getattr__(name: str):
     """Lazy import training classes that require optional dependencies."""
-    if name == "LoraTrainer":
-        from .trainer import LoraTrainer
+    if name == "Trainer":
+        from .trainer import Trainer
 
-        return LoraTrainer
+        return Trainer
     if name == "train_lora":
         from .trainer import train_lora
 

@@ -22,3 +22,5 @@ models:
   # Qwen2.5 instruct models
   # ---------------------------------------------------------------------------
   qwen2.5-coder-3b-instruct-bnb-4bit: {}
+  qwen2.5-3b-instruct-bnb-4bit: {}
+  qwen2.5-3b-instruct-unsloth-bnb-4bit: {}

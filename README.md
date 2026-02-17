@@ -108,17 +108,18 @@ await embedder.close_async()
 ### Training Data Export
 
 ```python
-from llm_learn.training import export_preferences_dpo, export_feedback_sft
+from llm_learn.training import export_feedback_sft
+from llm_learn.training.dpo import export_preferences
 
 # Record preference pairs
-learn.preferences.record(
+learn.atomic.preferences.record(
     context="Explain gradient descent",
     chosen="Concise, accurate explanation",
     rejected="Verbose, rambling explanation",
 )
 
 # Export to DPO format for TRL
-result = export_preferences_dpo(
+result = export_preferences(
     session_factory=learn.database.session,
     context_key=learn.context_key,
     output_path="preferences.jsonl",
@@ -139,7 +140,8 @@ result = export_feedback_sft(
 
 ```python
 from appinfra.log import LogConfig, LoggerFactory
-from llm_learn.training import train_lora, LoraConfig, TrainingConfig
+from llm_learn.training import train_lora, RunConfig
+from llm_learn.training.lora import Config as LoraConfig
 
 lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
 
@@ -150,7 +152,7 @@ result = train_lora(
     output_dir="./my_adapter",
     base_model="Qwen/Qwen2.5-7B-Instruct",
     lora_config=LoraConfig(r=16, lora_alpha=32),
-    training_config=TrainingConfig(
+    training_config=RunConfig(
         num_epochs=3,
         batch_size=4,
         learning_rate=2e-4,
@@ -230,13 +232,13 @@ See the [`examples/`](examples/) directory for complete working examples:
 
 | Class/Function | Description |
 |----------------|-------------|
-| `export_preferences_dpo` | Export preference pairs for DPO |
+| `dpo.export_preferences` | Export preference pairs for DPO |
 | `export_feedback_sft` | Export feedback for SFT |
 | `export_feedback_classifier` | Export for binary classification |
 | `train_lora` | Train LoRA adapter with SFT |
 | `train_dpo` | Train with Direct Preference Optimization |
-| `LoraConfig` | LoRA hyperparameters |
-| `TrainingConfig` | Training hyperparameters |
+| `lora.Config` | LoRA hyperparameters |
+| `RunConfig` | Training hyperparameters |
 | `AdapterRegistry` | Manage trained adapters |
 
 ## Requirements

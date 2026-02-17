@@ -1,10 +1,10 @@
 """DPO training client with pair management.
 
 Manages DPO training runs:
-- Creating training runs
-- Assigning preference pairs to runs (exclusive - each pair used once)
+- Creating training runs (with lineage via based_on)
+- Assigning preference pairs to runs (lineage-aware - pairs excluded from ancestor runs)
 - Tracking run lifecycle (pending → running → completed/failed)
-- Querying untrained pairs
+- Moving pairs from pending to trained on completion
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-from appinfra.db.utils import detach
 from appinfra.log import Logger
 from sqlalchemy import (
     BigInteger,
@@ -24,20 +23,25 @@ from sqlalchemy import (
     String,
     Table,
     Text,
-    UniqueConstraint,
+    or_,
     select,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
 from llm_learn.core.base import Base, utc_now
-from llm_learn.core.exceptions import ConflictError, NotFoundError, ValidationError
-from llm_learn.memory.atomic.models import Fact, PreferenceDetails
+from llm_learn.core.exceptions import NotFoundError, ValidationError
 from llm_learn.memory.isolation import build_context_filter
 
-# Type alias for pair lists
-PairList = list[tuple[Fact, PreferenceDetails]]
+from .export import PairTuple
+
+
+def _not_deleted_filter(model):
+    """Build filter for non-deleted runs (system_status is NULL or deleted != true)."""
+    return or_(
+        model.system_status.is_(None),
+        model.system_status["deleted"].astext != "true",
+    )
 
 
 # =============================================================================
@@ -45,25 +49,33 @@ PairList = list[tuple[Fact, PreferenceDetails]]
 # =============================================================================
 
 
-class DpoRun(Base):
-    """DPO training run metadata.
+class Run(Base):
+    """Generic training run metadata.
 
-    Tracks the lifecycle of a DPO training run:
+    Supports multiple training methods (DPO, SFT, RLHF).
+    Tracks the lifecycle of a training run:
     - pending: Created, waiting in queue
     - running: Training in progress
     - completed: Successfully finished
     - failed: Terminated with error
+
+    System state tracked via system_status JSONB (e.g., {"deleted": true, "deleted_at": "..."}).
     """
 
-    __tablename__ = "dpo_runs"
+    __tablename__ = "training_runs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    method: Mapped[str] = mapped_column(String(20), nullable=False)
     context_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    adapter_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    adapter: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    based_on: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("training_runs.id", ondelete="SET NULL"), nullable=True
+    )
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     metrics: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    system_status: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
@@ -71,48 +83,92 @@ class DpoRun(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        Index("idx_dpo_runs_context", "context_key"),
-        Index("idx_dpo_runs_status", "status"),
-        Index("idx_dpo_runs_adapter", "adapter_name"),
-        Index("idx_dpo_runs_created", "created_at"),
+        Index("idx_training_runs_method", "method"),
+        Index("idx_training_runs_context", "context_key"),
+        Index("idx_training_runs_status", "status"),
+        Index("idx_training_runs_created", "created_at"),
+        Index("idx_training_runs_based_on", "based_on"),
         Index(
-            "idx_dpo_runs_context_prefix",
+            "idx_training_runs_context_prefix",
             "context_key",
             postgresql_ops={"context_key": "varchar_pattern_ops"},
         ),
     )
 
+    @property
+    def adapter_name(self) -> str | None:
+        """Get adapter name from adapter JSONB."""
+        if self.adapter is None:
+            return None
+        return self.adapter.get("name")
+
+    @property
+    def is_deleted(self) -> bool:
+        """Check if run is soft-deleted."""
+        if self.system_status is None:
+            return False
+        return bool(self.system_status.get("deleted", False))
+
     def __repr__(self) -> str:
-        return f"<DpoRun(id={self.id}, status={self.status!r}, adapter={self.adapter_name!r})>"
+        return f"<Run(id={self.id}, method={self.method!r}, status={self.status!r})>"
 
 
-class DpoRunPair(Base):
-    """Junction table linking DPO runs to preference pairs.
+class PendingPair(Base):
+    """Temporary table for pairs assigned to pending/running DPO runs.
 
-    The UNIQUE constraint on preference_fact_id enforces exclusive assignment:
-    each preference pair can only be assigned to ONE training run at a time.
+    Pairs reference solution facts via chosen/rejected fact IDs.
+    Deleted when run completes (moved to trained) or fails (freed for retry).
     """
 
-    __tablename__ = "dpo_run_pairs"
+    __tablename__ = "dpo_pending_pairs"
 
     run_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("dpo_runs.id", ondelete="CASCADE"), primary_key=True
+        BigInteger, ForeignKey("training_runs.id", ondelete="CASCADE"), primary_key=True
     )
-    preference_fact_id: Mapped[int] = mapped_column(
+    chosen_fact_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), primary_key=True
     )
+    rejected_fact_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), primary_key=True
+    )
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
     assigned_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
 
-    __table_args__ = (
-        Index("idx_dpo_run_pairs_run", "run_id"),
-        Index("idx_dpo_run_pairs_fact", "preference_fact_id"),
-        UniqueConstraint("preference_fact_id", name="uq_dpo_run_pair_exclusive"),
-    )
+    __table_args__ = (Index("idx_dpo_pending_pairs_run", "run_id"),)
 
     def __repr__(self) -> str:
-        return f"<DpoRunPair(run={self.run_id}, fact={self.preference_fact_id})>"
+        return f"<PendingPair(run={self.run_id}, chosen={self.chosen_fact_id}, rejected={self.rejected_fact_id})>"
+
+
+class TrainedPair(Base):
+    """Permanent history of pairs used in completed DPO training.
+
+    Pairs are moved here when a run completes successfully.
+    Used for lineage-based exclusion in future runs.
+    """
+
+    __tablename__ = "dpo_trained_pairs"
+
+    run_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("training_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    chosen_fact_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), primary_key=True
+    )
+    rejected_fact_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), primary_key=True
+    )
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    trained_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+    __table_args__ = (Index("idx_dpo_trained_pairs_run", "run_id"),)
+
+    def __repr__(self) -> str:
+        return f"<TrainedPair(run={self.run_id}, chosen={self.chosen_fact_id}, rejected={self.rejected_fact_id})>"
 
 
 # =============================================================================
@@ -121,31 +177,51 @@ class DpoRunPair(Base):
 
 
 @dataclass
-class DpoRunInfo:
-    """DPO run information, detached from database session."""
+class RunInfo:
+    """Training run information, detached from database session."""
 
     id: int
+    method: str
     context_key: str | None
-    adapter_name: str | None
+    adapter: dict | None
+    based_on: int | None
     status: str
     config: dict | None
     metrics: dict | None
     error_message: str | None
+    system_status: dict | None
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
 
+    @property
+    def adapter_name(self) -> str | None:
+        """Get adapter name from adapter dict."""
+        if self.adapter is None:
+            return None
+        return self.adapter.get("name")
+
+    @property
+    def is_deleted(self) -> bool:
+        """Check if run is soft-deleted."""
+        if self.system_status is None:
+            return False
+        return bool(self.system_status.get("deleted", False))
+
     @classmethod
-    def from_model(cls, run: DpoRun) -> DpoRunInfo:
+    def from_model(cls, run: Run) -> RunInfo:
         """Create from ORM model."""
         return cls(
             id=run.id,
+            method=run.method,
             context_key=run.context_key,
-            adapter_name=run.adapter_name,
+            adapter=run.adapter,
+            based_on=run.based_on,
             status=run.status,
             config=run.config,
             metrics=run.metrics,
             error_message=run.error_message,
+            system_status=run.system_status,
             created_at=run.created_at,
             started_at=run.started_at,
             completed_at=run.completed_at,
@@ -157,29 +233,24 @@ class DpoRunInfo:
 # =============================================================================
 
 # Valid status values and allowed transitions
-VALID_STATUSES = {"pending", "running", "completed", "failed", "deleted"}
+VALID_STATUSES = {"pending", "running", "completed", "failed", "cancelled"}
 STATUS_TRANSITIONS = {
-    "pending": {"running", "failed", "deleted"},  # Can start, fail, or be deleted
-    "running": {
-        "pending",
-        "completed",
-        "failed",
-        "deleted",
-    },  # Can reset, complete, fail, or delete
-    "completed": {"deleted"},  # Can only be deleted
-    "failed": {"deleted"},  # Can only be deleted
-    "deleted": set(),  # Terminal state
+    "pending": {"running", "failed", "cancelled"},
+    "running": {"pending", "completed", "failed"},
+    "completed": set(),  # Terminal - use soft-delete to hide
+    "failed": set(),  # Terminal - use soft-delete to hide
+    "cancelled": set(),  # Terminal - user cancelled before execution
 }
 
 
-class DpoClient:
+class Client:
     """Client for DPO training with pair management.
 
     Manages:
     - Creating/listing/deleting DPO training runs
-    - Assigning preference pairs to runs (exclusive - each pair used once)
+    - Assigning preference pairs to runs (lineage-aware)
     - Tracking run lifecycle (pending → running → completed/failed)
-    - Querying untrained pairs
+    - Moving pairs from pending to trained on completion
     """
 
     def __init__(
@@ -189,44 +260,49 @@ class DpoClient:
         context_key: str | None,
         ensure_schema: bool = False,
     ) -> None:
-        """
-        Initialize DPO client.
+        """Initialize DPO client.
 
         Args:
             lg: Logger instance.
             session_factory: Callable that returns a context manager for database sessions.
             context_key: Context key to scope operations (None = no filtering).
-            ensure_schema: If True, create DPO tables if they don't exist.
+            ensure_schema: If True, create training tables if they don't exist.
         """
         self._lg = lg
         self._session_factory = session_factory
         self.context_key = context_key
+        self.method = "dpo"
 
         if ensure_schema:
             self._ensure_tables()
 
     def _ensure_tables(self) -> None:
-        """Create DPO tables if they don't exist."""
+        """Create training tables if they don't exist."""
         with self._session_factory() as session:
             engine = session.get_bind()
             tables = [
-                cast(Table, DpoRun.__table__),
-                cast(Table, DpoRunPair.__table__),
+                cast(Table, Run.__table__),
+                cast(Table, PendingPair.__table__),
+                cast(Table, TrainedPair.__table__),
             ]
             Base.metadata.create_all(engine, tables=tables)
-            self._lg.debug("ensured DPO tables exist")
+            self._lg.debug("ensured training tables exist")
 
     def _build_context_filter(self, column):
         """Build context filter condition with pattern matching support."""
         return build_context_filter(self.context_key, column)
 
-    def _get_run(self, session, run_id: int) -> DpoRun | None:
-        """Get run by ID, verifying context ownership."""
-        stmt = select(DpoRun).where(DpoRun.id == run_id)
-        context_filter = self._build_context_filter(DpoRun.context_key)
+    def _get_run(self, session, run_id: int) -> Run | None:
+        """Get run by ID, verifying context ownership and method."""
+        stmt = select(Run).where(
+            Run.id == run_id,
+            Run.method == self.method,
+            _not_deleted_filter(Run),
+        )
+        context_filter = self._build_context_filter(Run.context_key)
         if context_filter is not None:
             stmt = stmt.where(context_filter)
-        return cast(DpoRun | None, session.scalar(stmt))
+        return cast(Run | None, session.scalar(stmt))
 
     # -------------------------------------------------------------------------
     # CRUD operations
@@ -236,166 +312,316 @@ class DpoClient:
         self,
         adapter_name: str | None = None,
         config: dict | None = None,
-    ) -> DpoRunInfo:
-        """
-        Create a new DPO training run.
+        based_on: int | None = None,
+        replace_stale: bool = True,
+        on_replace: Callable[[RunInfo], bool] | None = None,
+    ) -> RunInfo:
+        """Create a new DPO training run, or reset an existing pending run.
+
+        If a pending run already exists for this context and `replace_stale=True`,
+        clears its pairs and returns it (no new run created). This allows callers
+        to safely retry run creation without accumulating orphan runs.
 
         Args:
             adapter_name: Optional name for the adapter being trained.
             config: Optional training configuration dict.
+            based_on: Optional run ID to base this run on (for lineage).
+            replace_stale: If True (default), reuse any existing pending run for
+                this context by clearing its pairs. If False, always create new.
+            on_replace: Optional callback invoked before resetting a pending run.
+                Receives the existing RunInfo. If it returns False, a new run is
+                created instead. Defaults to always True (reset without prompting).
 
         Returns:
-            DpoRunInfo with the new run's details.
+            RunInfo with the run's details (existing reset or newly created).
 
         Raises:
             ValidationError: If client was created with a glob-pattern context_key.
+            NotFoundError: If based_on run doesn't exist.
         """
         if _is_pattern(self.context_key):
             raise ValidationError(
                 "Cannot create runs with a glob-pattern context_key; use an exact context."
             )
-        run = DpoRun(
-            context_key=self.context_key,
-            adapter_name=adapter_name,
-            config=config,
-        )
 
         with self._session_factory() as session:
-            session.add(run)
-            session.flush()
-            info = DpoRunInfo.from_model(run)
-            self._lg.debug(
-                "created DPO run",
-                extra={"run_id": info.id, "adapter_name": adapter_name},
-            )
-            return info
+            # Check for existing pending run to reuse (only when not creating child run)
+            if replace_stale and based_on is None:
+                existing = self._find_pending_run(session)
+                if existing is not None:
+                    # Check callback - if False, fall through to create new
+                    if on_replace is None or on_replace(RunInfo.from_model(existing)):
+                        return self._reset_pending_run(session, existing, adapter_name, config)
 
-    def get(self, run_id: int) -> DpoRunInfo | None:
-        """Get a DPO run by ID."""
+            return self._create_new_run(session, adapter_name, config, based_on)
+
+    def _create_new_run(
+        self,
+        session,
+        adapter_name: str | None,
+        config: dict | None,
+        based_on: int | None,
+    ) -> RunInfo:
+        """Create a new training run in the database."""
+        if based_on is not None:
+            parent = self._get_run(session, based_on)
+            if parent is None:
+                raise NotFoundError(f"Parent run {based_on} not found")
+
+        adapter = {"name": adapter_name} if adapter_name else None
+        run = Run(
+            method=self.method,
+            context_key=self.context_key,
+            adapter=adapter,
+            based_on=based_on,
+            config=config,
+        )
+        session.add(run)
+        session.flush()
+        info = RunInfo.from_model(run)
+        self._lg.debug(
+            "created training run",
+            extra={"run_id": info.id, "method": self.method, "adapter_name": adapter_name},
+        )
+        return info
+
+    def _find_pending_run(self, session) -> Run | None:
+        """Find existing pending run for this context."""
+        stmt = (
+            select(Run)
+            .where(Run.method == self.method)
+            .where(Run.context_key == self.context_key)
+            .where(Run.status == "pending")
+            .where(_not_deleted_filter(Run))
+            .order_by(Run.created_at.desc())
+            .limit(1)
+        )
+        return cast(Run | None, session.scalar(stmt))
+
+    def _reset_pending_run(
+        self,
+        session,
+        run: Run,
+        adapter_name: str | None = None,
+        config: dict | None = None,
+    ) -> RunInfo:
+        """Clear pairs from pending run, update parameters, and return for reuse."""
+        self._clear_pending_pairs(session, run.id)
+
+        # Update run with caller's parameters
+        if adapter_name is not None:
+            run.adapter = {"name": adapter_name}
+        if config is not None:
+            run.config = config
+        session.flush()
+
+        self._lg.debug(
+            "reset pending run for reuse",
+            extra={"run_id": run.id, "context_key": run.context_key},
+        )
+        return RunInfo.from_model(run)
+
+    def get(self, run_id: int) -> RunInfo | None:
+        """Get a training run by ID."""
         with self._session_factory() as session:
             run = self._get_run(session, run_id)
             if run is None:
                 return None
-            return DpoRunInfo.from_model(run)
+            return RunInfo.from_model(run)
 
-    def list(
+    def list_runs(
         self,
         status: str | None = None,
         limit: int = 100,
         descending: bool = True,
         include_deleted: bool = False,
-    ) -> list[DpoRunInfo]:
-        """
-        List DPO runs.
+    ) -> list[RunInfo]:
+        """List DPO training runs.
 
         Args:
-            status: Filter by status (pending, running, completed, failed, deleted).
+            status: Filter by status (pending, running, completed, failed).
             limit: Maximum number of runs to return.
             descending: Order by created_at descending (newest first).
-            include_deleted: Include deleted runs (default False).
+            include_deleted: Include soft-deleted runs (default False).
 
         Returns:
-            List of DpoRunInfo.
+            List of RunInfo.
         """
         if status is not None and status not in VALID_STATUSES:
             raise ValidationError(f"status must be one of {VALID_STATUSES}")
 
         with self._session_factory() as session:
-            stmt = select(DpoRun)
-            context_filter = self._build_context_filter(DpoRun.context_key)
+            stmt = select(Run).where(Run.method == self.method)
+            context_filter = self._build_context_filter(Run.context_key)
             if context_filter is not None:
                 stmt = stmt.where(context_filter)
             if status is not None:
-                stmt = stmt.where(DpoRun.status == status)
-            elif not include_deleted:
-                stmt = stmt.where(DpoRun.status != "deleted")
-            order = DpoRun.created_at.desc() if descending else DpoRun.created_at.asc()
+                stmt = stmt.where(Run.status == status)
+            if not include_deleted:
+                stmt = stmt.where(_not_deleted_filter(Run))
+            order = Run.created_at.desc() if descending else Run.created_at.asc()
             stmt = stmt.order_by(order).limit(limit)
 
             runs = list(session.scalars(stmt).all())
-            return [DpoRunInfo.from_model(r) for r in runs]
+            return [RunInfo.from_model(r) for r in runs]
 
     def delete(self, run_id: int) -> bool:
-        """Delete a DPO run (frees assigned pairs for reuse)."""
+        """Delete a training run.
+
+        For pending runs: transitions to 'cancelled' status (proper state change).
+        For other runs: soft-deletes via system_status (hides without changing history).
+
+        In both cases, pending pairs are cleared and become available for reuse.
+        """
         with self._session_factory() as session:
             run = self._get_run(session, run_id)
             if run is None:
                 return False
-            session.delete(run)
-            self._lg.debug("deleted DPO run", extra={"run_id": run_id})
+
+            # Clear pending pairs (they become available for other runs)
+            self._clear_pending_pairs(session, run_id)
+
+            if run.status == "pending":
+                # Pending runs can be properly cancelled
+                run.status = "cancelled"
+                self._lg.debug("cancelled pending run", extra={"run_id": run_id})
+            else:
+                # Running/completed/failed runs are soft-deleted (preserve history)
+                run.system_status = {"deleted": True, "deleted_at": utc_now().isoformat()}
+                self._lg.debug("soft-deleted training run", extra={"run_id": run_id})
             return True
 
     # -------------------------------------------------------------------------
     # Pair assignment
     # -------------------------------------------------------------------------
 
-    def assign_pairs(self, run_id: int, pair_fact_ids: Sequence[int]) -> int:
-        """
-        Assign preference pairs to a DPO run.
+    def _validate_pending_status(self, run: Run) -> None:
+        """Validate run is in pending status for modification."""
+        if run.status != "pending":
+            raise ValidationError(f"Cannot modify run in '{run.status}' status (must be 'pending')")
 
-        Each pair can only be assigned to ONE run (exclusive assignment).
-        Attempting to assign an already-assigned pair raises ConflictError.
+    def _filter_and_assign_pairs(self, session, run_id: int, pairs: Sequence[PairTuple]) -> int:
+        """Filter pairs by lineage and insert. Returns count assigned."""
+        lineage_pairs = self._get_lineage_pairs(session, run_id)
+        new_pairs = [p for p in pairs if (p[0], p[1]) not in lineage_pairs]
+
+        if not new_pairs:
+            self._lg.debug(
+                "all pairs filtered by lineage",
+                extra={"run_id": run_id, "input_count": len(pairs)},
+            )
+            return 0
+
+        self._insert_pending_pairs(session, run_id, new_pairs)
+        self._lg.debug(
+            "assigned pairs to run",
+            extra={"run_id": run_id, "assigned": len(new_pairs)},
+        )
+        return len(new_pairs)
+
+    def assign_pairs(self, run_id: int, pairs: Sequence[PairTuple]) -> int:
+        """Assign preference pairs to a DPO run.
+
+        Pairs that have been used in this run's lineage are automatically filtered out.
 
         Args:
             run_id: The run ID to assign pairs to.
-            pair_fact_ids: List of preference fact IDs to assign.
+            pairs: List of (chosen_fact_id, rejected_fact_id, prompt) tuples.
 
         Returns:
-            Number of pairs assigned.
+            Number of pairs assigned (may be less than input if some filtered by lineage).
 
         Raises:
             NotFoundError: If run_id doesn't exist or isn't accessible.
-            ConflictError: If any pair is already assigned to another run.
+            ValidationError: If run is not in 'pending' status.
         """
-        if not pair_fact_ids:
+        if not pairs:
             return 0
 
         with self._session_factory() as session:
             run = self._get_run(session, run_id)
             if run is None:
-                raise NotFoundError(f"DPO run {run_id} not found")
+                raise NotFoundError(f"Training run {run_id} not found")
+            self._validate_pending_status(run)
+            return self._filter_and_assign_pairs(session, run_id, pairs)
 
-            self._check_pairs_available(session, pair_fact_ids)
-            self._insert_pairs(session, run_id, pair_fact_ids)
+    def _get_lineage_pairs(self, session, run_id: int) -> set[tuple[int, int]]:
+        """Get all pairs used in ancestor runs (for lineage-based exclusion)."""
+        # Walk the lineage chain using recursive CTE
 
-            self._lg.debug(
-                "assigned pairs to DPO run",
-                extra={"run_id": run_id, "count": len(pair_fact_ids)},
-            )
-            return len(pair_fact_ids)
+        # Build recursive CTE manually
+        anchor = select(Run.id, Run.based_on).where(Run.id == run_id)
+        lineage_cte = anchor.cte(name="lineage", recursive=True)
 
-    def _check_pairs_available(self, session, pair_fact_ids: Sequence[int]) -> None:
-        """Check that none of the pairs are already assigned."""
-        existing_stmt = select(DpoRunPair.preference_fact_id).where(
-            DpoRunPair.preference_fact_id.in_(pair_fact_ids)
+        recursive = select(Run.id, Run.based_on).where(Run.id == lineage_cte.c.based_on)
+        lineage_cte = lineage_cte.union_all(recursive)
+
+        # Get trained pairs from all runs in lineage
+        stmt = select(TrainedPair.chosen_fact_id, TrainedPair.rejected_fact_id).where(
+            TrainedPair.run_id.in_(select(lineage_cte.c.id))
         )
-        existing_ids = set(session.scalars(existing_stmt).all())
-        if existing_ids:
-            raise ConflictError(f"Pairs already assigned to other runs: {sorted(existing_ids)}")
 
-    def _insert_pairs(self, session, run_id: int, pair_fact_ids: Sequence[int]) -> None:
-        """Insert pairs, handling concurrent assignment race condition."""
-        try:
-            for fact_id in pair_fact_ids:
-                session.add(DpoRunPair(run_id=run_id, preference_fact_id=fact_id))
-            session.flush()
-        except IntegrityError as e:
-            session.rollback()
-            if "uq_dpo_run_pair_exclusive" in str(e):
-                raise ConflictError(
-                    "Pairs were assigned by another process during operation"
-                ) from e
-            raise
+        results = session.execute(stmt).all()
+        return {(row[0], row[1]) for row in results}
 
-    def get_pairs(self, run_id: int) -> PairList:
-        """
-        Get all preference pairs assigned to a DPO run.
+    def _insert_pending_pairs(self, session, run_id: int, pairs: Sequence[PairTuple]) -> None:
+        """Insert pairs into pending table."""
+        for chosen_id, rejected_id, prompt in pairs:
+            session.add(
+                PendingPair(
+                    run_id=run_id,
+                    chosen_fact_id=chosen_id,
+                    rejected_fact_id=rejected_id,
+                    prompt=prompt,
+                )
+            )
+        session.flush()
+
+    def _clear_pending_pairs(self, session, run_id: int) -> int:
+        """Delete all pending pairs for a run."""
+        from sqlalchemy import delete
+
+        stmt = delete(PendingPair).where(PendingPair.run_id == run_id)
+        result = session.execute(stmt)
+        return int(result.rowcount)
+
+    def _move_pairs_to_trained(self, session, run_id: int) -> int:
+        """Move pairs from pending to trained (on completion)."""
+        # Get pending pairs
+        stmt = select(PendingPair).where(PendingPair.run_id == run_id)
+        pending = list(session.scalars(stmt).all())
+
+        if not pending:
+            return 0
+
+        # Insert into trained
+        now = utc_now()
+        for pair in pending:
+            session.add(
+                TrainedPair(
+                    run_id=run_id,
+                    chosen_fact_id=pair.chosen_fact_id,
+                    rejected_fact_id=pair.rejected_fact_id,
+                    prompt=pair.prompt,
+                    trained_at=now,
+                )
+            )
+
+        # Delete from pending
+        from sqlalchemy import delete
+
+        session.execute(delete(PendingPair).where(PendingPair.run_id == run_id))
+
+        return len(pending)
+
+    def get_pairs(self, run_id: int) -> list[PairTuple]:
+        """Get all pending pairs assigned to a run.
 
         Args:
             run_id: The run ID.
 
         Returns:
-            List of (Fact, PreferenceDetails) tuples.
+            List of (chosen_fact_id, rejected_fact_id, prompt) tuples.
 
         Raises:
             NotFoundError: If run_id doesn't exist or isn't accessible.
@@ -403,89 +629,148 @@ class DpoClient:
         with self._session_factory() as session:
             run = self._get_run(session, run_id)
             if run is None:
-                raise NotFoundError(f"DPO run {run_id} not found")
+                raise NotFoundError(f"Training run {run_id} not found")
 
             stmt = (
-                select(Fact, PreferenceDetails)
-                .join(PreferenceDetails, Fact.id == PreferenceDetails.fact_id)
-                .join(DpoRunPair, DpoRunPair.preference_fact_id == Fact.id)
-                .where(DpoRunPair.run_id == run_id, Fact.type == "preference")
-                .order_by(Fact.created_at)
+                select(
+                    PendingPair.chosen_fact_id,
+                    PendingPair.rejected_fact_id,
+                    PendingPair.prompt,
+                )
+                .where(PendingPair.run_id == run_id)
+                .order_by(PendingPair.assigned_at)
             )
 
-            results = list(session.execute(stmt).all())
-            return self._detach_pairs(results, session)
+            results = session.execute(stmt).all()
+            return [(r[0], r[1], r[2]) for r in results]
 
-    def get_untrained_pairs(
-        self,
-        *,
-        min_margin: float | None = None,
-        limit: int | None = None,
-    ) -> PairList:
-        """
-        Get preference pairs that haven't been assigned to any DPO run.
+    def get_trained_pairs(self, run_id: int) -> list[PairTuple]:
+        """Get all trained pairs for a completed run.
 
         Args:
-            min_margin: Only include pairs with margin >= this value.
-            limit: Maximum number of pairs to return.
+            run_id: The run ID.
 
         Returns:
-            List of (Fact, PreferenceDetails) tuples for untrained pairs.
+            List of (chosen_fact_id, rejected_fact_id, prompt) tuples.
+
+        Raises:
+            NotFoundError: If run_id doesn't exist or isn't accessible.
         """
         with self._session_factory() as session:
-            stmt = self._build_untrained_pairs_query(min_margin, limit)
-            results = list(session.execute(stmt).all())
-            return self._detach_pairs(results, session)
+            run = self._get_run(session, run_id)
+            if run is None:
+                raise NotFoundError(f"Training run {run_id} not found")
 
-    def _build_untrained_pairs_query(self, min_margin: float | None, limit: int | None):
-        """Build query for untrained preference pairs."""
-        assigned_subq = select(DpoRunPair.preference_fact_id)
-        stmt = (
-            select(Fact, PreferenceDetails)
-            .join(PreferenceDetails, Fact.id == PreferenceDetails.fact_id)
-            .where(
-                Fact.type == "preference",
-                Fact.active == True,  # noqa: E712
-                ~Fact.id.in_(assigned_subq),
+            stmt = (
+                select(
+                    TrainedPair.chosen_fact_id,
+                    TrainedPair.rejected_fact_id,
+                    TrainedPair.prompt,
+                )
+                .where(TrainedPair.run_id == run_id)
+                .order_by(TrainedPair.trained_at)
             )
-        )
-        context_filter = build_context_filter(self.context_key, Fact.context_key)
-        if context_filter is not None:
-            stmt = stmt.where(context_filter)
-        if min_margin is not None:
-            stmt = stmt.where(PreferenceDetails.margin >= min_margin)
-        stmt = stmt.order_by(Fact.created_at)
-        if limit is not None:
-            stmt = stmt.limit(limit)
-        return stmt
 
-    def _detach_pairs(self, results, session) -> PairList:
-        """Detach fact/details pairs from session for safe return."""
-        detached = []
-        for fact, details in results:
-            detach(fact, session)
-            detach(details, session)
-            detached.append((fact, details))
-        return detached
+            results = session.execute(stmt).all()
+            return [(r[0], r[1], r[2]) for r in results]
+
+    def count_pending_pairs(self, run_id: int | None = None) -> int:
+        """Count pending pairs for a run or all runs in context."""
+        with self._session_factory() as session:
+            from sqlalchemy import func
+
+            stmt = select(func.count()).select_from(PendingPair)
+
+            if run_id is not None:
+                stmt = stmt.where(PendingPair.run_id == run_id)
+            else:
+                # Count for all runs in context
+                subq = select(Run.id).where(
+                    Run.method == self.method,
+                    _not_deleted_filter(Run),
+                )
+                context_filter = self._build_context_filter(Run.context_key)
+                if context_filter is not None:
+                    subq = subq.where(context_filter)
+                stmt = stmt.where(PendingPair.run_id.in_(subq))
+
+            return session.scalar(stmt) or 0
 
     # -------------------------------------------------------------------------
     # Lifecycle
     # -------------------------------------------------------------------------
 
     def start(self, run_id: int) -> None:
-        """Mark a DPO run as started."""
+        """Mark a training run as started."""
         self._transition(run_id, "running")
 
-    def complete(self, run_id: int, metrics: dict | None = None) -> None:
-        """Mark a DPO run as completed."""
-        self._transition(run_id, "completed", metrics=metrics)
+    def complete(
+        self,
+        run_id: int,
+        metrics: dict | None = None,
+        adapter_info: dict | None = None,
+    ) -> None:
+        """Mark a training run as completed and move pairs to trained.
+
+        Args:
+            run_id: The run to complete.
+            metrics: Optional training metrics to store.
+            adapter_info: Optional adapter metadata (mtime, md5) to merge into adapter field.
+        """
+        with self._session_factory() as session:
+            run = self._get_run(session, run_id)
+            if run is None:
+                raise NotFoundError(f"Training run {run_id} not found")
+
+            allowed = STATUS_TRANSITIONS.get(run.status, set())
+            if "completed" not in allowed:
+                raise ValidationError(
+                    f"Cannot transition from '{run.status}' to 'completed'. "
+                    f"Allowed transitions: {allowed or 'none (terminal state)'}"
+                )
+
+            # Move pairs to trained table
+            pairs_moved = self._move_pairs_to_trained(session, run_id)
+
+            # Update run
+            run.status = "completed"
+            run.completed_at = utc_now()
+            if metrics is not None:
+                run.metrics = metrics
+            if adapter_info is not None:
+                # Merge adapter_info into existing adapter field
+                run.adapter = {**(run.adapter or {}), **adapter_info}
+
+            self._lg.debug(
+                "completed training run",
+                extra={"run_id": run_id, "pairs_trained": pairs_moved},
+            )
 
     def fail(self, run_id: int, error: str) -> None:
-        """Mark a DPO run as failed."""
-        self._transition(run_id, "failed", error_message=error)
+        """Mark a training run as failed (clears pending pairs for reuse)."""
+        with self._session_factory() as session:
+            run = self._get_run(session, run_id)
+            if run is None:
+                raise NotFoundError(f"Training run {run_id} not found")
+
+            allowed = STATUS_TRANSITIONS.get(run.status, set())
+            if "failed" not in allowed:
+                raise ValidationError(
+                    f"Cannot transition from '{run.status}' to 'failed'. "
+                    f"Allowed transitions: {allowed or 'none (terminal state)'}"
+                )
+
+            # Clear pending pairs (they become available for other runs)
+            self._clear_pending_pairs(session, run_id)
+
+            run.status = "failed"
+            run.completed_at = utc_now()
+            run.error_message = error
+
+            self._lg.debug("failed training run", extra={"run_id": run_id, "error": error})
 
     def reset(self, run_id: int) -> None:
-        """Reset a running DPO run back to pending (for retry after transient failure)."""
+        """Reset a running training run back to pending (for retry after transient failure)."""
         self._transition(run_id, "pending", clear_started=True)
 
     def _transition(
@@ -500,7 +785,7 @@ class DpoClient:
         with self._session_factory() as session:
             run = self._get_run(session, run_id)
             if run is None:
-                raise NotFoundError(f"DPO run {run_id} not found")
+                raise NotFoundError(f"Training run {run_id} not found")
 
             allowed = STATUS_TRANSITIONS.get(run.status, set())
             if new_status not in allowed:
@@ -511,7 +796,7 @@ class DpoClient:
 
             self._apply_transition(run, new_status, metrics, error_message, clear_started)
             self._lg.debug(
-                "DPO run status changed", extra={"run_id": run_id, "new_status": new_status}
+                "training run status changed", extra={"run_id": run_id, "new_status": new_status}
             )
 
     def _apply_transition(self, run, new_status, metrics, error_message, clear_started):
@@ -534,20 +819,50 @@ class DpoClient:
     # -------------------------------------------------------------------------
 
     def reset_all(self) -> int:
-        """Delete all DPO runs for this context (frees all pairs)."""
+        """Soft-delete all training runs for this context (clears pending pairs)."""
         with self._session_factory() as session:
-            stmt = select(DpoRun)
-            context_filter = self._build_context_filter(DpoRun.context_key)
+            stmt = select(Run).where(
+                Run.method == self.method,
+                _not_deleted_filter(Run),
+            )
+            context_filter = self._build_context_filter(Run.context_key)
             if context_filter is not None:
                 stmt = stmt.where(context_filter)
 
             runs = list(session.scalars(stmt).all())
             count = len(runs)
 
+            now = utc_now().isoformat()
             for run in runs:
-                session.delete(run)
+                self._clear_pending_pairs(session, run.id)
+                run.system_status = {"deleted": True, "deleted_at": now}
 
-            self._lg.info("reset all DPO runs", extra={"count": count})
+            self._lg.info("reset all training runs", extra={"count": count})
+            return count
+
+    def clear_pending_pairs_for_context(self) -> int:
+        """Clear all pending pairs for this context (without deleting runs)."""
+        with self._session_factory() as session:
+            from sqlalchemy import delete
+
+            # Get run IDs for this context
+            run_stmt = select(Run.id).where(
+                Run.method == self.method,
+                _not_deleted_filter(Run),
+            )
+            context_filter = self._build_context_filter(Run.context_key)
+            if context_filter is not None:
+                run_stmt = run_stmt.where(context_filter)
+
+            run_ids = list(session.scalars(run_stmt).all())
+            if not run_ids:
+                return 0
+
+            stmt = delete(PendingPair).where(PendingPair.run_id.in_(run_ids))
+            result = session.execute(stmt)
+            count = int(result.rowcount)
+
+            self._lg.info("cleared pending pairs", extra={"count": count})
             return count
 
 
