@@ -754,16 +754,19 @@ class PipelineTool(ModelResolutionMixin, Tool):
 
     def _resolve_from_run_id(self, run_id: int) -> None:
         """Resolve context/adapter/method from a specific run ID."""
-        client = self._get_training_client()
-        run = client.get(run_id)
-        if run is None:
-            raise ValueError(f"Training run {run_id} not found")
-        if run.status != "pending":
-            raise ValueError(f"Training run {run_id} is {run.status}, expected pending")
-        self._run_id = int(run_id)
-        self._resolved_context = run.context_key
-        self._resolved_adapter_id = run.adapter_name
-        self._run_method = run.method
+        from llm_learn.training.models import Run
+
+        with self._get_database().session() as session:
+            stmt = select(Run).where(Run.id == run_id, _not_deleted_filter(Run))
+            run = session.scalar(stmt)
+            if run is None:
+                raise ValueError(f"Training run {run_id} not found")
+            if run.status != "pending":
+                raise ValueError(f"Training run {run_id} is {run.status}, expected pending")
+            self._run_id = int(run_id)
+            self._resolved_context = run.context_key
+            self._resolved_adapter_id = run.adapter.get("name") if run.adapter else None
+            self._run_method = run.method
         self.lg.info(
             "resolved run from --run-id",
             extra={
