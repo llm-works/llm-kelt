@@ -752,12 +752,42 @@ class PipelineTool(ModelResolutionMixin, Tool):
             adapter_name = run.adapter.get("name") if run.adapter else None
             return (run.id, run.context_key, adapter_name, run.method)
 
+    def _resolve_from_run_id(self, run_id: int) -> None:
+        """Resolve context/adapter/method from a specific run ID."""
+        from llm_learn.training.models import Run
+
+        with self._get_database().session() as session:
+            stmt = select(Run).where(Run.id == run_id, _not_deleted_filter(Run))
+            run = session.scalar(stmt)
+            if run is None:
+                raise ValueError(f"Training run {run_id} not found")
+            if run.status != "pending":
+                raise ValueError(f"Training run {run_id} is {run.status}, expected pending")
+            self._run_id = int(run_id)
+            self._resolved_context = run.context_key
+            self._resolved_adapter_id = run.adapter.get("name") if run.adapter else None
+            self._run_method = run.method
+            if self._resolved_adapter_id is None:
+                raise ValueError(f"Run {run_id} has no adapter name; use --id")
+        self.lg.info(
+            "resolved run from --run-id",
+            extra={
+                "run_id": self._run_id,
+                "context": self._resolved_context,
+                "method": self._run_method,
+            },
+        )
+
     def _resolve_from_queue(self) -> None:
         """Resolve context, adapter_id, and method from pending queue if not provided."""
         context_arg = getattr(self.args, "context", None)
         id_arg = getattr(self.args, "id", None)
+        run_id_arg = getattr(self.args, "run_id", None)
 
-        # If both provided, nothing to resolve (default to dpo method for backward compat)
+        if run_id_arg:
+            self._resolve_from_run_id(int(run_id_arg))
+            return
+
         if context_arg and id_arg:
             self._resolved_context = context_arg
             self._resolved_adapter_id = id_arg
@@ -1300,6 +1330,82 @@ class PipelineTool(ModelResolutionMixin, Tool):
         return metrics, adapter_info
 
 
+class PruneTool(Tool):
+    """Prune training runs from a given ID onwards.
+
+    Deletes runs >= the specified ID and all associated pending/trained data.
+    """
+
+    def __init__(self, parent: Any = None) -> None:
+        config = ToolConfig(
+            name="prune",
+            help_text="Prune training runs from ID onwards (delete runs and data)",
+        )
+        super().__init__(parent, config)
+
+    def add_args(self, parser) -> None:
+        parser.add_argument("from_id", type=int, help="Prune all runs >= this ID")
+        parser.add_argument(
+            "--dry-run", action="store_true", help="Show what would be pruned without doing it"
+        )
+
+    def _get_database(self) -> Database:
+        """Get Database instance from config."""
+        config = DotDict(**dict(self.app.config)) if self.app.config else DotDict()
+        dbs = getattr(config, "dbs", None)
+        if dbs is None or not hasattr(dbs, "main"):
+            raise ValueError("Database not configured: missing dbs.main in config")
+        return Database(self.lg, PG(self.lg, dbs.main))
+
+    def _delete_items(self, session, table, run_ids: list[int]) -> int:
+        """Delete items from a training data table for given run IDs."""
+        return int(session.execute(delete(table).where(table.run_id.in_(run_ids))).rowcount)
+
+    def _execute_prune(self, session, runs: list, run_ids: list[int]) -> None:
+        """Delete associated data and soft-delete runs."""
+        dpo_pending = self._delete_items(session, PendingPair, run_ids)
+        sft_pending = self._delete_items(session, PendingExample, run_ids)
+        dpo_trained = self._delete_items(session, TrainedPair, run_ids)
+        sft_trained = self._delete_items(session, TrainedExample, run_ids)
+
+        now = utc_now().isoformat()
+        for r in runs:
+            r.system_status = {"deleted": True, "deleted_at": now}
+        session.commit()
+
+        print(f"\nPruned {len(runs)} run(s)")
+        if dpo_pending or dpo_trained:
+            print(f"  DPO: {dpo_pending} pending, {dpo_trained} trained pairs deleted")
+        if sft_pending or sft_trained:
+            print(f"  SFT: {sft_pending} pending, {sft_trained} trained examples deleted")
+
+    def run(self, **kwargs: Any) -> int:
+        from_id: int = self.args.from_id
+        dry_run: bool = self.args.dry_run
+
+        database = self._get_database()
+        with database.session() as session:
+            stmt = select(Run).where(Run.id >= from_id, _not_deleted_filter(Run)).order_by(Run.id)
+            runs = list(session.scalars(stmt))
+
+            if not runs:
+                print("No matching runs found")
+                return 0
+
+            run_ids = [r.id for r in runs]
+            print(f"Runs to prune ({len(runs)}):")
+            for r in runs:
+                adapter_name = r.adapter.get("name") if r.adapter else "?"
+                print(f"  {r.id}: {r.method} [{r.status}] {r.context_key} -> {adapter_name}")
+
+            if dry_run:
+                print("\n(dry-run, no changes made)")
+                return 0
+
+            self._execute_prune(session, runs, run_ids)
+            return 0
+
+
 class ResetTool(Tool):
     """Reset training data (DPO and SFT) for a context.
 
@@ -1542,6 +1648,7 @@ class TrainTool(Tool):
         self.add_tool(SftTool(self))
         self.add_tool(RegisterTool(self))
         self.add_tool(PipelineTool(self))
+        self.add_tool(PruneTool(self))
         self.add_tool(ResetTool(self))
 
     def run(self, **kwargs: Any) -> int:
