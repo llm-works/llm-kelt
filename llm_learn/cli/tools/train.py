@@ -767,6 +767,8 @@ class PipelineTool(ModelResolutionMixin, Tool):
             self._resolved_context = run.context_key
             self._resolved_adapter_id = run.adapter.get("name") if run.adapter else None
             self._run_method = run.method
+            if self._resolved_adapter_id is None:
+                raise ValueError(f"Run {run_id} has no adapter name; use --id")
         self.lg.info(
             "resolved run from --run-id",
             extra={
@@ -1388,7 +1390,7 @@ class PruneTool(Tool):
 
             if not runs:
                 print("No matching runs found")
-                return 1
+                return 0
 
             run_ids = [r.id for r in runs]
             print(f"Runs to prune ({len(runs)}):")
