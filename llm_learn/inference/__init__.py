@@ -10,7 +10,7 @@ For LLM client functionality, use llm_infer.client directly:
 
 Usage:
     from llm_infer.client import LLMClient
-    from llm_learn import LearnClientFactory, IsolationContext
+    from llm_learn import LearnClientFactory, ClientContext
     from llm_learn.inference import ContextBuilder
     from appinfra.config import Config
     from appinfra.log import LoggerFactory, LogConfig
@@ -19,7 +19,7 @@ Usage:
     config = Config("etc/llm-learn.yaml")
     lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
     factory = LearnClientFactory(lg)
-    context = IsolationContext(context_key="my-agent")
+    context = ClientContext(context_key="my-agent")
     learn = factory.create_from_config(context=context, config=config)
     client = LLMClient.from_config(config["llm"])
     context_builder = ContextBuilder(learn.assertions)

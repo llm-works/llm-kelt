@@ -17,7 +17,7 @@ from .inference.context import ContextBuilder
 from .inference.embedder import Embedder
 from .inference.query import ContextQuery
 from .memory import atomic
-from .memory.isolation import IsolationContext
+from .memory.isolation import ClientContext
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,19 +38,19 @@ class LearnClient:
     Usage (via factory - recommended):
         from appinfra.config import Config
         from appinfra.log import LogConfig, LoggerFactory
-        from llm_learn import LearnClientFactory, IsolationContext
+        from llm_learn import LearnClientFactory, ClientContext
 
         config = Config("etc/llm-learn.yaml")
         lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
 
         factory = LearnClientFactory(lg)
-        context = IsolationContext(context_key="my-agent", schema_name="public")
+        context = ClientContext(context_key="my-agent", schema_name="public")
         learn = factory.create_from_config(context=context, config=config)
 
     Usage (direct - for testing or shared resources):
-        from llm_learn import LearnClient, IsolationContext
+        from llm_learn import LearnClient, ClientContext
 
-        context = IsolationContext(context_key="my-agent", schema_name="public")
+        context = ClientContext(context_key="my-agent", schema_name="public")
         learn = LearnClient(
             database=db, context=context, lg=lg,
             embedder=embedder, llm_client=llm_client,
@@ -63,7 +63,7 @@ class LearnClient:
 
     Training API:
         manifest = learn.train.manifest.create(
-            adapter_id="my-adapter",
+            key="my-adapter",
             method="dpo",
             model="Qwen/Qwen2.5-7B-Instruct",
             data=[{"prompt": "...", "chosen": "...", "rejected": "..."}],
@@ -79,7 +79,7 @@ class LearnClient:
         self,
         lg: Logger,
         database: Database,
-        context: IsolationContext,
+        context: ClientContext,
         embedder: Embedder | None = None,
         llm_client: ChatClient | None = None,
         learn_config: DotDict | None = None,
@@ -90,7 +90,7 @@ class LearnClient:
 
         Args:
             database: Database instance
-            context: IsolationContext for data partitioning (any string format)
+            context: ClientContext for data partitioning (any string format)
             lg: Optional logger instance
             embedder: Optional embedder for generating embeddings
             llm_client: Optional LLM client for context-aware queries
@@ -135,11 +135,11 @@ class LearnClient:
             )
 
     @property
-    def context(self) -> IsolationContext:
+    def context(self) -> ClientContext:
         """
         Get isolation context for this client.
 
-        Returns the current IsolationContext with context_key and schema_name.
+        Returns the current ClientContext with context_key and schema_name.
         """
         return self._context
 

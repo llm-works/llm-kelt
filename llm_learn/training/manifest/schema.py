@@ -7,6 +7,7 @@ that specify everything needed to run a training job:
 - Training hyperparameters
 - Training data (inline or external)
 - Lineage (parent adapter)
+- Training output (populated after completion)
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ from datetime import datetime
 from typing import Any, Literal
 
 from appinfra import DotDict
+
+from ..schema import Adapter, RunResult
 
 
 @dataclass
@@ -77,21 +80,22 @@ class Manifest:
     the base model and adapter registry.
 
     Attributes:
+        adapter: Output adapter key (series name, e.g., "my-agent-sft").
+        method: Training method ("dpo" or "sft").
+        data: Training data specification.
         version: Schema version for forward compatibility.
         created_at: When manifest was created.
-        method: Training method ("dpo" or "sft").
-        adapter_id: Output adapter identifier.
         source: Provenance information.
         model: Base model configuration.
-        parent_adapter: Parent adapter path or registry ID (for lineage).
+        parent: Parent adapter for lineage (continue training from this adapter).
         lora: LoRA configuration (converted to lora.Config by clients).
         training: Training hyperparameters (merged with TRAINING_DEFAULTS by trainers).
         method_config: Method-specific configuration (interpreted by dpo/sft clients).
-        data: Training data specification.
+        output: Training result (populated after training completes).
     """
 
     # Required fields
-    adapter_id: str
+    adapter: str
     method: Literal["dpo", "sft"]
     data: Data
 
@@ -102,17 +106,20 @@ class Manifest:
     # Optional configuration
     source: Source = field(default_factory=Source)
     model: Model = field(default_factory=Model)
-    parent_adapter: str | None = None
+    parent: Adapter | None = None
     lora: DotDict = field(default_factory=DotDict)
     training: DotDict = field(default_factory=DotDict)
     method_config: DotDict = field(default_factory=DotDict)
 
+    # Output (populated after training)
+    output: RunResult | None = None
+
     def __post_init__(self) -> None:
         """Validate manifest."""
-        if not self.adapter_id:
-            raise ValueError("adapter_id is required")
+        if not self.adapter:
+            raise ValueError("adapter is required")
         if self.method not in ("dpo", "sft"):
             raise ValueError(f"method must be 'dpo' or 'sft', got '{self.method}'")
-        # Validate adapter_id has no path traversal
-        if "/" in self.adapter_id or "\\" in self.adapter_id or ".." in self.adapter_id:
-            raise ValueError(f"Invalid adapter_id: {self.adapter_id}")
+        # Validate adapter key has no path traversal
+        if "/" in self.adapter or "\\" in self.adapter or ".." in self.adapter:
+            raise ValueError(f"Invalid adapter: {self.adapter}")

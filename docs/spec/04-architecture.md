@@ -563,7 +563,7 @@ class AdapterRegistry:
         adapter_path: str,
         metadata: AdapterMetadata,
     ) -> str:
-        """Register a new adapter, return adapter_id."""
+        """Register a new adapter, return key."""
         ...
 
     async def get_adapter(
@@ -584,7 +584,7 @@ class AdapterRegistry:
     async def set_active(
         self,
         context_key: str,
-        adapter_id: str,
+        key: str,
     ) -> None:
         """Set active adapter for context."""
         ...

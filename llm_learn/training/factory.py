@@ -27,13 +27,13 @@ class Factory:
     - train.registry: Adapter registry for listing/managing adapters
 
     Usage:
-        from llm_learn import LearnClient, IsolationContext
+        from llm_learn import LearnClient, ClientContext
 
         learn = LearnClient(...)
 
         # Create and submit a manifest
         manifest = learn.train.manifest.create(
-            adapter_id="coding-v1",
+            key="coding-v1",
             method="dpo",
             model="Qwen/Qwen2.5-7B-Instruct",
             data=[{"prompt": "...", "chosen": "...", "rejected": "..."}],

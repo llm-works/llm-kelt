@@ -29,18 +29,18 @@ import httpx
 import yaml
 from appinfra.log import Logger
 
-from ..config import RunResult
+from ..schema import RunResult
 
 
 @dataclass
 class AdapterInfo:
     """Information about a registered adapter."""
 
-    adapter_id: str
+    key: str
     path: Path
     deployed: bool
     description: str | None = None
-    based_on: str | None = None
+    parent: str | None = None
 
 
 class AdapterRegistry:
@@ -78,10 +78,10 @@ class AdapterRegistry:
                 path.mkdir(parents=True, exist_ok=True)
                 self._lg.info(f"created directory: {path}")
 
-    def _validate_adapter_id(self, adapter_id: str) -> None:
-        """Validate adapter_id has no path traversal characters."""
-        if "/" in adapter_id or "\\" in adapter_id or ".." in adapter_id:
-            raise ValueError(f"Invalid adapter_id: {adapter_id}")
+    def _validate_key(self, key: str) -> None:
+        """Validate key has no path traversal characters."""
+        if "/" in key or "\\" in key or ".." in key:
+            raise ValueError(f"Invalid key: {key}")
 
     def _write_adapter_config(
         self,
@@ -97,8 +97,8 @@ class AdapterRegistry:
             "method": training_result.method,
             "training_config": training_result.config,
         }
-        if training_result.based_on is not None:
-            config["based_on"] = str(training_result.based_on)
+        if training_result.parent is not None:
+            config["parent"] = training_result.parent.path
         config_path = adapter_path / "config.yaml"
         with config_path.open("w") as f:
             yaml.safe_dump(config, f)
@@ -112,17 +112,17 @@ class AdapterRegistry:
         with config_path.open("r") as f:
             return yaml.safe_load(f) or {}
 
-    def is_deployed(self, adapter_id: str) -> bool:
+    def is_deployed(self, key: str) -> bool:
         """Check if an adapter is deployed (symlink exists).
 
         Args:
-            adapter_id: Adapter to check
+            key: Adapter to check
 
         Returns:
             True if adapter is deployed (symlink exists in deployed/)
         """
-        self._validate_adapter_id(adapter_id)
-        return (self.deployed_path / adapter_id).is_symlink()
+        self._validate_key(key)
+        return (self.deployed_path / key).is_symlink()
 
     def resolve(self, ref: str | Path) -> Path:
         """Resolve adapter reference (path or ID) to a path.
@@ -145,29 +145,27 @@ class AdapterRegistry:
                 return info.path
         raise ValueError(f"Adapter not found: {ref}")
 
-    def _prepare_adapter_path(self, adapter_id: str, source_path: Path, overwrite: bool) -> Path:
+    def _prepare_adapter_path(self, key: str, source_path: Path, overwrite: bool) -> Path:
         """Validate and prepare adapter path, removing existing if overwriting."""
-        self._validate_adapter_id(adapter_id)
-        adapter_path = self.adapters_path / adapter_id
+        self._validate_key(key)
+        adapter_path = self.adapters_path / key
 
         if adapter_path.exists() and not overwrite:
-            raise ValueError(
-                f"Adapter '{adapter_id}' already exists. Use overwrite=True to replace."
-            )
+            raise ValueError(f"Adapter '{key}' already exists. Use overwrite=True to replace.")
         if not source_path.exists():
             raise FileNotFoundError(f"Adapter path not found: {source_path}")
 
         if adapter_path.exists():
-            self._remove_deploy_symlink(adapter_id)
+            self._remove_deploy_symlink(key)
             shutil.rmtree(adapter_path)
-            self._lg.info(f"removed existing adapter: {adapter_id}")
+            self._lg.info(f"removed existing adapter: {key}")
 
         return adapter_path
 
     def register(
         self,
         training_result: RunResult,
-        adapter_id: str,
+        key: str,
         description: str | None = None,
         deploy: bool = True,
         overwrite: bool = False,
@@ -178,7 +176,7 @@ class AdapterRegistry:
 
         Args:
             training_result: Result from train_lora or train_dpo
-            adapter_id: Unique identifier for the adapter (no slashes)
+            key: Unique identifier for the adapter (no slashes)
             description: Optional human-readable description
             deploy: Whether to deploy the adapter (create symlink)
             overwrite: If True, overwrite existing adapter with same ID
@@ -187,87 +185,88 @@ class AdapterRegistry:
             AdapterInfo with registration details
 
         Raises:
-            ValueError: If adapter_id is invalid or already exists
+            ValueError: If key is invalid or already exists
             FileNotFoundError: If training result path doesn't exist
         """
-        adapter_path = self._prepare_adapter_path(
-            adapter_id, training_result.adapter_path, overwrite
-        )
-        shutil.copytree(training_result.adapter_path, adapter_path)
+        if training_result.adapter is None:
+            raise ValueError("Training result has no adapter")
+        source_path = Path(training_result.adapter.path)
+        adapter_path = self._prepare_adapter_path(key, source_path, overwrite)
+        shutil.copytree(source_path, adapter_path)
         self._lg.info(f"copied adapter to: {adapter_path}")
 
         desc = description or f"{training_result.method} adapter from {training_result.base_model}"
         self._write_adapter_config(adapter_path, training_result, desc)
 
         if deploy:
-            self._create_deploy_symlink(adapter_id)
+            self._create_deploy_symlink(key)
 
         config = self._read_adapter_config(adapter_path)
         return AdapterInfo(
-            adapter_id=adapter_id,
+            key=key,
             path=adapter_path,
             deployed=deploy,
             description=desc,
-            based_on=config.get("based_on"),
+            parent=config.get("parent"),
         )
 
-    def _create_deploy_symlink(self, adapter_id: str) -> None:
+    def _create_deploy_symlink(self, key: str) -> None:
         """Create symlink in deployed directory."""
-        symlink_path = self.deployed_path / adapter_id
+        symlink_path = self.deployed_path / key
 
         if symlink_path.exists() or symlink_path.is_symlink():
             symlink_path.unlink()
 
         # Use relative path for symlink
-        relative_target = Path("..") / "adapters" / adapter_id
+        relative_target = Path("..") / "adapters" / key
         symlink_path.symlink_to(relative_target)
         self._lg.info(f"created symlink: {symlink_path} -> {relative_target}")
 
-    def _remove_deploy_symlink(self, adapter_id: str) -> None:
+    def _remove_deploy_symlink(self, key: str) -> None:
         """Remove symlink from deployed directory if it exists."""
-        symlink_path = self.deployed_path / adapter_id
+        symlink_path = self.deployed_path / key
         if symlink_path.is_symlink():
             symlink_path.unlink()
             self._lg.info(f"removed symlink: {symlink_path}")
 
-    def set_deployed(self, adapter_id: str, deployed: bool) -> None:
+    def set_deployed(self, key: str, deployed: bool) -> None:
         """Deploy or undeploy an adapter.
 
         Args:
-            adapter_id: Adapter to modify
+            key: Adapter to modify
             deployed: True to deploy (create symlink), False to undeploy
         """
-        self._validate_adapter_id(adapter_id)
-        adapter_path = self.adapters_path / adapter_id
+        self._validate_key(key)
+        adapter_path = self.adapters_path / key
 
         if not adapter_path.exists():
-            raise ValueError(f"Adapter '{adapter_id}' not found")
+            raise ValueError(f"Adapter '{key}' not found")
 
         if deployed:
-            self._create_deploy_symlink(adapter_id)
+            self._create_deploy_symlink(key)
         else:
-            self._remove_deploy_symlink(adapter_id)
+            self._remove_deploy_symlink(key)
 
-        self._lg.info(f"set adapter '{adapter_id}' deployed={deployed}")
+        self._lg.info(f"set adapter '{key}' deployed={deployed}")
 
-    def remove(self, adapter_id: str) -> None:
+    def remove(self, key: str) -> None:
         """Remove an adapter from the registry.
 
         Args:
-            adapter_id: Adapter to remove
+            key: Adapter to remove
         """
-        self._validate_adapter_id(adapter_id)
-        adapter_path = self.adapters_path / adapter_id
+        self._validate_key(key)
+        adapter_path = self.adapters_path / key
 
         if not adapter_path.exists():
-            raise ValueError(f"Adapter '{adapter_id}' not found")
+            raise ValueError(f"Adapter '{key}' not found")
 
         # Remove symlink first if deployed
-        self._remove_deploy_symlink(adapter_id)
+        self._remove_deploy_symlink(key)
 
         # Remove adapter directory
         shutil.rmtree(adapter_path)
-        self._lg.info(f"removed adapter: {adapter_id}")
+        self._lg.info(f"removed adapter: {key}")
 
     def list(self) -> list[AdapterInfo]:
         """List all registered adapters.
@@ -285,31 +284,31 @@ class AdapterRegistry:
                 continue
 
             config = self._read_adapter_config(path)
-            adapter_id = path.name
+            key = path.name
 
             adapters.append(
                 AdapterInfo(
-                    adapter_id=adapter_id,
+                    key=key,
                     path=path,
-                    deployed=self.is_deployed(adapter_id),
+                    deployed=self.is_deployed(key),
                     description=config.get("description"),
-                    based_on=config.get("based_on"),
+                    parent=config.get("parent"),
                 )
             )
 
         return adapters
 
-    def get(self, adapter_id: str) -> AdapterInfo | None:
+    def get(self, key: str) -> AdapterInfo | None:
         """Get info for a specific adapter.
 
         Args:
-            adapter_id: Adapter to look up
+            key: Adapter to look up
 
         Returns:
             AdapterInfo or None if not found
         """
-        self._validate_adapter_id(adapter_id)
-        adapter_path = self.adapters_path / adapter_id
+        self._validate_key(key)
+        adapter_path = self.adapters_path / key
         config_path = adapter_path / "config.yaml"
 
         if not config_path.exists():
@@ -318,18 +317,18 @@ class AdapterRegistry:
         config = self._read_adapter_config(adapter_path)
 
         return AdapterInfo(
-            adapter_id=adapter_id,
+            key=key,
             path=adapter_path,
-            deployed=self.is_deployed(adapter_id),
+            deployed=self.is_deployed(key),
             description=config.get("description"),
-            based_on=config.get("based_on"),
+            parent=config.get("parent"),
         )
 
-    def refresh(self, adapter_id: str | None = None, timeout: float = 10.0) -> dict[str, object]:
+    def refresh(self, key: str | None = None, timeout: float = 10.0) -> dict[str, object]:
         """Notify llm-infer to reload adapters.
 
         Args:
-            adapter_id: Specific adapter to refresh, or None for full scan
+            key: Specific adapter to refresh, or None for full scan
             timeout: Request timeout in seconds
 
         Returns:
@@ -337,9 +336,9 @@ class AdapterRegistry:
         """
         url = f"{self.infer_url}/v1/adapters/refresh"
         params = {}
-        if adapter_id:
-            self._validate_adapter_id(adapter_id)
-            params["adapter_id"] = adapter_id
+        if key:
+            self._validate_key(key)
+            params["key"] = key
 
         try:
             response = httpx.post(url, params=params, timeout=timeout)
@@ -357,7 +356,7 @@ class AdapterRegistry:
     def register_and_refresh(
         self,
         training_result: RunResult,
-        adapter_id: str,
+        key: str,
         description: str | None = None,
         deploy: bool = True,
         overwrite: bool = False,
@@ -368,7 +367,7 @@ class AdapterRegistry:
 
         Args:
             training_result: Result from train_lora or train_dpo
-            adapter_id: Unique identifier for the adapter
+            key: Unique identifier for the adapter
             description: Optional description
             deploy: Whether to deploy the adapter
             overwrite: If True, overwrite existing adapter
@@ -378,10 +377,10 @@ class AdapterRegistry:
         """
         info = self.register(
             training_result=training_result,
-            adapter_id=adapter_id,
+            key=key,
             description=description,
             deploy=deploy,
             overwrite=overwrite,
         )
-        self.refresh(adapter_id=adapter_id)
+        self.refresh(key=key)
         return info

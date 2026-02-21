@@ -13,7 +13,7 @@ from appinfra.log import Logger
 
 from llm_learn.core.base import utc_now
 
-from ..config import TRAINING_DEFAULTS, RunResult
+from ..schema import TRAINING_DEFAULTS, Adapter, RunResult
 from .config import Config as LoraConfig
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
@@ -209,10 +209,12 @@ class Trainer:
 
     def _build_result(self, adapter_path: Path, metrics: dict, started_at: datetime) -> RunResult:
         """Build the training result."""
+        # Adapter md5/mtime populated by caller (runner) after training
+        adapter = Adapter(md5="", mtime="", path=str(adapter_path))
         return RunResult(
-            adapter_path=adapter_path,
+            status="completed",
             base_model=self.base_model,
-            method="lora",
+            method="sft",
             metrics=metrics,
             config={
                 "lora": {
@@ -232,6 +234,7 @@ class Trainer:
             started_at=started_at,
             completed_at=utc_now(),
             samples_trained=len(self.train_dataset) * self.training_config.num_epochs,  # type: ignore[arg-type]
+            adapter=adapter,
         )
 
     def train(self, resume_from: str | Path | None = None) -> RunResult:

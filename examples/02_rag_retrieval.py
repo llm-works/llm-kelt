@@ -265,7 +265,7 @@ async def main():
     print(f"{H1}  Example 02: RAG (Retrieval-Augmented Generation){RESET}")
     print(f"{H1}{'━' * 50}{RESET}")
 
-    from llm_learn import IsolationContext
+    from llm_learn import ClientContext
 
     # Suppress logging noise
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
@@ -274,7 +274,7 @@ async def main():
 
     # Create context for this example
     context_key = get_demo_context_key("rag-demo")
-    context = IsolationContext(context_key=context_key)
+    context = ClientContext(context_key=context_key)
     learn = factory.create_from_config(context=context, config=config)
     print(f"{MUTED}Using context_key={RESET}{INFO}{context_key}{RESET}")
 

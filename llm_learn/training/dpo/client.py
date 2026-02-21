@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING
 from appinfra import DotDict
 from appinfra.log import Logger
 
-from ..config import RunResult
 from ..manifest.loader import resolve_data
 from ..manifest.schema import Manifest
+from ..schema import RunResult
 
 if TYPE_CHECKING:
     from ..lora.config import Config
@@ -59,28 +59,19 @@ class Client:
             self._registry = AdapterRegistry(self._lg, self._registry_path)
         return self._registry
 
-    def _resolve_parent_adapter(self, manifest: Manifest) -> Path | None:
-        """Resolve parent adapter reference to path."""
-        if manifest.parent_adapter is None:
-            return None
+    def _validate_parent(self, manifest: Manifest) -> None:
+        """Validate parent adapter exists."""
+        if manifest.parent is None:
+            return
 
-        parent_ref = manifest.parent_adapter
+        parent_path = Path(manifest.parent.path)
+        if not parent_path.exists():
+            raise ValueError(f"Parent adapter not found: {manifest.parent.path}")
 
-        # Try as direct path first
-        parent_path = Path(parent_ref)
-        if parent_path.exists():
-            self._lg.info("resolved parent adapter from path", extra={"path": str(parent_path)})
-            return parent_path
-
-        # Try registry lookup
-        try:
-            resolved = self.registry.resolve(parent_ref)
-            self._lg.info("resolved parent adapter from registry", extra={"id": parent_ref})
-            return resolved
-        except ValueError:
-            pass
-
-        raise ValueError(f"Parent adapter not found: {parent_ref}")
+        self._lg.info(
+            "using parent adapter",
+            extra={"path": str(parent_path), "md5": manifest.parent.md5},
+        )
 
     def _validate_records(self, manifest: Manifest) -> None:
         """Validate DPO record structure."""
@@ -109,29 +100,27 @@ class Client:
             task_type=lora.get("task_type", defaults.task_type),
         )
 
-    def _prepare_training(
-        self, manifest: Manifest, output_dir: Path | None
-    ) -> tuple[Path, Path, Path | None]:
-        """Prepare training: resolve work dir, data path, and parent adapter."""
-        work_dir = output_dir or (self._registry_path / "work" / manifest.adapter_id)
+    def _prepare_training(self, manifest: Manifest, output_dir: Path | None) -> tuple[Path, Path]:
+        """Prepare training: resolve work dir and data path."""
+        work_dir = output_dir or (self._registry_path / "work" / manifest.adapter)
         work_dir.mkdir(parents=True, exist_ok=True)
 
         data_path = resolve_data(manifest, work_dir)
         self._lg.info("resolved data", extra={"path": str(data_path)})
 
-        parent_adapter = self._resolve_parent_adapter(manifest)
-        return work_dir, data_path, parent_adapter
+        self._validate_parent(manifest)
+        return work_dir, data_path
 
-    def _log_training_start(self, manifest: Manifest, parent: Path | None) -> None:
+    def _log_training_start(self, manifest: Manifest) -> None:
         """Log DPO training start."""
         self._lg.info(
             "starting DPO training",
             extra={
-                "adapter_id": manifest.adapter_id,
+                "adapter": manifest.adapter,
                 "model": manifest.model.base,
                 "epochs": manifest.training.num_epochs,
                 "beta": manifest.method_config.get("beta", 0.1),
-                "parent": str(parent) if parent else None,
+                "parent": manifest.parent.path if manifest.parent else None,
             },
         )
 
@@ -140,12 +129,11 @@ class Client:
         manifest: Manifest,
         work_dir: Path,
         data_path: Path,
-        parent_adapter: Path | None,
     ) -> RunResult:
         """Execute DPO training."""
         from .trainer import train_dpo
 
-        self._log_training_start(manifest, parent_adapter)
+        self._log_training_start(manifest)
 
         result = train_dpo(
             lg=self._lg,
@@ -157,7 +145,7 @@ class Client:
             beta=manifest.method_config.get("beta", 0.1),
             quantize=manifest.model.quantize,
             reference_free=manifest.method_config.get("reference_free", False),
-            based_on=parent_adapter,
+            parent=manifest.parent,
         )
 
         self._lg.info(
@@ -192,19 +180,19 @@ class Client:
         if manifest.data.format == "inline":
             self._validate_records(manifest)
 
-        work_dir, data_path, parent_adapter = self._prepare_training(manifest, output_dir)
-        result = self._execute_dpo(manifest, work_dir, data_path, parent_adapter)
+        work_dir, data_path = self._prepare_training(manifest, output_dir)
+        result = self._execute_dpo(manifest, work_dir, data_path)
 
         if register:
             description = manifest.source.description or "DPO adapter"
             self.registry.register(
                 training_result=result,
-                adapter_id=manifest.adapter_id,
+                key=manifest.adapter,
                 description=description,
                 deploy=True,
                 overwrite=True,
             )
-            self._lg.info("registered adapter", extra={"adapter_id": manifest.adapter_id})
+            self._lg.info("registered adapter", extra={"adapter": manifest.adapter})
 
         return result
 

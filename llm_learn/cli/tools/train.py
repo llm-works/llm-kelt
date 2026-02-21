@@ -10,9 +10,10 @@ from llm_infer.models import ModelResolver
 
 from ...training.lora import AdapterRegistry
 from ...training.lora import Config as LoraConfig
-from ...training.manifest import Runner
 from ...training.manifest.loader import load_manifest
 from ...training.profiles import build_training_config, get_registry_path, load_profile
+from ...training.runner import Runner
+from ...training.schema import Adapter
 
 
 def _print_adapter_metadata(adapter_path: Path) -> None:
@@ -24,9 +25,10 @@ def _print_adapter_metadata(adapter_path: Path) -> None:
 
 def _print_training_result(result) -> None:
     """Print training result summary."""
-    print(f"\nTraining complete! Adapter: {result.adapter_path}")
+    adapter_path = Path(result.adapter.path) if result.adapter else Path("unknown")
+    print(f"\nTraining complete! Adapter: {adapter_path}")
     print(f"  Duration: {result.duration_seconds:.1f}s, Samples: {result.samples_trained}")
-    _print_adapter_metadata(result.adapter_path)
+    _print_adapter_metadata(adapter_path)
 
 
 class _ConfigMixin:
@@ -102,6 +104,11 @@ class DpoTool(_ConfigMixin, Tool):
             return 1
 
         profile = load_profile(self._config(), self.args.profile) if self.args.profile else None
+        parent = None
+        if self.args.based_on:
+            parent_path = Path(self.args.based_on)
+            meta = compute_adapter_metadata(parent_path)
+            parent = Adapter(md5=meta.md5, mtime=meta.mtime, path=str(parent_path))
         result = train_dpo(
             lg=self.lg,
             data_path=Path(self.args.data),
@@ -111,7 +118,7 @@ class DpoTool(_ConfigMixin, Tool):
             training_config=self._build_config(),
             beta=self.args.beta or (profile.get("beta", 0.1) if profile else 0.1),
             quantize=not self.args.no_quantize,
-            based_on=Path(self.args.based_on) if self.args.based_on else None,
+            parent=parent,
         )
         _print_training_result(result)
         return 0
@@ -187,7 +194,7 @@ class ListTool(_ConfigMixin, Tool):
             try:
                 m = load_manifest(path)
                 records = len(m.data.records) if m.data.format == "inline" else "ext"
-                print(f"  {path.name}: {m.method.upper()} {m.adapter_id} ({records} records)")
+                print(f"  {path.name}: {m.method.upper()} {m.adapter} ({records} records)")
             except Exception as e:
                 print(f"  {path.name}: (error: {e})")
         print()
@@ -225,7 +232,7 @@ class ShowTool(_ConfigMixin, Tool):
             return 1
 
         print(f"\nManifest: {path.name}")
-        print(f"  Adapter: {m.adapter_id}, Method: {m.method.upper()}")
+        print(f"  Adapter: {m.adapter}, Method: {m.method.upper()}")
         print(f"  Model: {m.model.base}, Quantize: {m.model.quantize}")
         print(
             f"  Epochs: {m.training.get('num_epochs', 3)}, LR: {m.training.get('learning_rate', 2e-4)}"
@@ -260,7 +267,7 @@ class RunTool(_ConfigMixin, Tool):
             try:
                 m = load_manifest(path)
                 records = len(m.data.records) if m.data.format == "inline" else "ext"
-                print(f"  [{i}] {path.name}: {m.method.upper()} {m.adapter_id} ({records})")
+                print(f"  [{i}] {path.name}: {m.method.upper()} {m.adapter} ({records})")
             except Exception:
                 print(f"  [{i}] {path.name}: (error)")
 
@@ -307,11 +314,11 @@ class RunTool(_ConfigMixin, Tool):
 
     def _print_manifest_result(self, result) -> None:
         """Print manifest training result."""
-        tr = result.training_result
-        print(f"\nTraining complete! Adapter: {result.adapter_id}")
-        print(f"  Path: {tr.adapter_path}, Duration: {tr.duration_seconds:.1f}s")
-        _print_adapter_metadata(tr.adapter_path)
-        print(f"  Archived to: {result.completed_path}")
+        adapter_path = Path(result.adapter.path) if result.adapter else Path("unknown")
+        md5 = result.adapter.md5 if result.adapter else "unknown"
+        print(f"\nTraining complete! Adapter: {md5[:12]}")
+        print(f"  Path: {adapter_path}, Duration: {result.duration_seconds:.1f}s")
+        _print_adapter_metadata(adapter_path)
 
 
 class AdaptersTool(_ConfigMixin, Tool):
@@ -341,9 +348,9 @@ class AdaptersTool(_ConfigMixin, Tool):
             return 0
 
         print("\nAdapters:\n")
-        for a in sorted(adapters, key=lambda x: x.adapter_id):
+        for a in sorted(adapters, key=lambda x: x.key):
             status = "[deployed]" if a.deployed else ""
-            print(f"  {a.adapter_id} {status}")
+            print(f"  {a.key} {status}")
             if a.description:
                 print(f"    {a.description}")
         print()

@@ -11,7 +11,7 @@ from typing import Any
 
 from appinfra import DotDict
 
-from .config import TRAINING_DEFAULTS
+from .schema import TRAINING_DEFAULTS
 
 
 def load_profile(config: DotDict, profile_name: str) -> DotDict:

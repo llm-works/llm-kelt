@@ -5,23 +5,25 @@ Contains utilities for training data preparation and model fine-tuning:
 - dpo: DPO training client and trainer
 - sft: SFT training client
 - lora: LoRA/SFT training and adapter registry
-- config: Training configuration dataclasses
+- schema: Training dataclasses (Adapter, RunResult)
 
 Install training dependencies with: pip install llm-learn[training]
 """
 
-from .config import TRAINING_DEFAULTS, RunResult
 from .dpo import Client as DpoClient
 from .export import ExportResult, export_feedback_classifier, export_feedback_sft
 from .factory import Factory
 from .lora import AdapterInfo, AdapterRegistry
-from .manifest import Client, Data, Manifest, Model, Runner, Source
+from .manifest import Client, Data, Manifest, Model, Source
 from .profiles import build_training_config, get_registry_path, load_profile
+from .runner import Runner
+from .schema import TRAINING_DEFAULTS, Adapter, RunResult
 from .sft import Client as SftClient
 
 __all__ = [
-    # Config & profiles
+    # Schema
     "TRAINING_DEFAULTS",
+    "Adapter",
     "RunResult",
     "build_training_config",
     "load_profile",

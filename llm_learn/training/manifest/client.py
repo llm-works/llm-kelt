@@ -14,6 +14,7 @@ from appinfra.log import Logger
 from .loader import load_manifest as _load_manifest
 from .loader import save_manifest as _save_manifest
 from .schema import (
+    Adapter,
     Data,
     Manifest,
     Model,
@@ -52,7 +53,7 @@ class Client:
     Usage:
         # Create a manifest
         manifest = learn.train.manifest.create(
-            adapter_id="coding-v1",
+            key="coding-v1",
             method="dpo",
             model="Qwen/Qwen2.5-7B-Instruct",
             data=[{"prompt": "...", "chosen": "...", "rejected": "..."}],
@@ -106,12 +107,12 @@ class Client:
 
     def create(
         self,
-        adapter_id: str,
+        adapter: str,
         method: Literal["dpo", "sft"],
         model: str,
         data: list[dict[str, Any]],
         *,
-        parent_adapter: str | None = None,
+        parent: Adapter | None = None,
         context_key: str | None = None,
         description: str | None = None,
         config: dict[str, Any] | None = None,
@@ -119,11 +120,11 @@ class Client:
         """Create a new training manifest with inline data.
 
         Args:
-            adapter_id: Unique identifier for the output adapter.
+            adapter: Output adapter key (series name, e.g., "my-agent-sft").
             method: Training method ("dpo" or "sft").
             model: Base model path or HuggingFace ID.
             data: List of training records (inline data).
-            parent_adapter: Parent adapter path or registry ID for lineage.
+            parent: Parent adapter for lineage (continue training from this).
             context_key: Agent context key for provenance.
             description: Human-readable description.
             config: Override training configuration (num_epochs, etc.).
@@ -137,18 +138,18 @@ class Client:
         )
 
         manifest = Manifest(
-            adapter_id=adapter_id,
+            adapter=adapter,
             method=method,
             data=Data(format="inline", records=data),
             source=source,
             model=model_config,
-            parent_adapter=parent_adapter,
+            parent=parent,
             lora=lora_config,
             training=training_config,
             method_config=method_config,
         )
 
-        self._lg.info("created manifest", extra={"adapter_id": adapter_id, "method": method})
+        self._lg.info("created manifest", extra={"adapter": adapter, "method": method})
         return manifest
 
     def _extract_method_config(self, overrides: dict[str, Any], keys: list[str]) -> dict[str, Any]:
@@ -188,13 +189,13 @@ class Client:
             Path to manifest in pending queue.
 
         Raises:
-            ValueError: If manifest with same adapter_id already pending.
+            ValueError: If manifest with same key already pending.
         """
         pending_dir = self._registry_path / "pending"
-        dest_path = pending_dir / f"{manifest.adapter_id}.yaml"
+        dest_path = pending_dir / f"{manifest.adapter}.yaml"
 
         if dest_path.exists():
-            raise ValueError(f"Manifest already in queue: {manifest.adapter_id}")
+            raise ValueError(f"Manifest already in queue: {manifest.adapter}")
 
         _save_manifest(manifest, dest_path)
         self._lg.info("submitted manifest", extra={"path": str(dest_path)})
@@ -219,31 +220,81 @@ class Client:
         completed_dir = self._registry_path / "completed"
         return sorted(completed_dir.glob("*.yaml"))
 
-    def get_pending(self, adapter_id: str) -> Manifest | None:
-        """Get a pending manifest by adapter ID.
+    def get_pending(self, adapter: str) -> Manifest | None:
+        """Get a pending manifest by adapter key.
 
         Args:
-            adapter_id: Adapter ID to look up.
+            adapter: Adapter key to look up.
 
         Returns:
             Manifest or None if not found.
         """
-        path = self._registry_path / "pending" / f"{adapter_id}.yaml"
+        path = self._registry_path / "pending" / f"{adapter}.yaml"
         if not path.exists():
             return None
         return _load_manifest(path)
 
-    def remove_pending(self, adapter_id: str) -> None:
+    def remove_pending(self, adapter: str) -> None:
         """Remove a manifest from the pending queue.
 
         Args:
-            adapter_id: Adapter ID of manifest to remove.
+            adapter: Adapter key of manifest to remove.
 
         Raises:
             FileNotFoundError: If manifest not in queue.
         """
-        pending_path = self._registry_path / "pending" / f"{adapter_id}.yaml"
+        pending_path = self._registry_path / "pending" / f"{adapter}.yaml"
         if not pending_path.exists():
-            raise FileNotFoundError(f"Manifest not in queue: {adapter_id}")
+            raise FileNotFoundError(f"Manifest not in queue: {adapter}")
         pending_path.unlink()
-        self._lg.info("removed from queue", extra={"adapter_id": adapter_id})
+        self._lg.info("removed from queue", extra={"adapter": adapter})
+
+    def find_adapter(self, md5: str) -> Adapter | None:
+        """Find an adapter by its md5 hash.
+
+        Searches completed manifests for an adapter with matching md5.
+
+        Args:
+            md5: MD5 hash of adapter weights (12 char hex).
+
+        Returns:
+            Adapter if found, None otherwise.
+        """
+        for path in self.list_completed():
+            manifest = _load_manifest(path)
+            if manifest.output and manifest.output.adapter and manifest.output.adapter.md5 == md5:
+                return manifest.output.adapter
+        return None
+
+    def get_latest_completed(
+        self, adapter: str | None = None, context_key: str | None = None
+    ) -> Manifest | None:
+        """Get the most recently completed manifest.
+
+        Args:
+            adapter: Filter by adapter key.
+            context_key: Filter by agent context key.
+
+        Returns:
+            Most recent completed manifest matching filters, or None.
+        """
+        manifests: list[Manifest] = []
+        for path in self.list_completed():
+            manifest = _load_manifest(path)
+            if adapter and manifest.adapter != adapter:
+                continue
+            if context_key and manifest.source.context_key != context_key:
+                continue
+            if manifest.output and manifest.output.status == "completed":
+                manifests.append(manifest)
+
+        if not manifests:
+            return None
+
+        # Sort by completed_at descending, return most recent
+        return max(
+            manifests,
+            key=lambda m: m.output.completed_at
+            if m.output and m.output.completed_at
+            else m.created_at,
+        )

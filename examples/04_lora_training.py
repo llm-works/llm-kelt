@@ -184,12 +184,12 @@ def create_training_data(learn: LearnClient):
     print(f"  {MUTED}Style: concise, structured responses with key points{RESET}")
 
 
-async def query_llm(llm_client: LLMClient, question: str, adapter_id: str | None = None) -> str:
+async def query_llm(llm_client: LLMClient, question: str, key: str | None = None) -> str:
     """Query LLM with optional adapter."""
     response = await llm_client.chat_async(
         messages=[{"role": "user", "content": question}],
         system="You are a helpful AI assistant. Answer questions clearly and accurately.",
-        adapter_id=adapter_id,
+        key=key,
     )
     # Clean up thinking tags if present
     return str(response).replace("<think>\n\n</think>\n\n", "").strip()
@@ -296,13 +296,13 @@ def register_adapter(
     # Register and refresh
     info = registry.register_and_refresh(
         training_result=result,
-        adapter_id=ADAPTER_ID,
+        key=ADAPTER_ID,
         description="Concise structured responses (example)",
         deploy=True,
         overwrite=True,
     )
 
-    print(f"  {OK}✓ Registered adapter: {info.adapter_id}{RESET}")
+    print(f"  {OK}✓ Registered adapter: {info.key}{RESET}")
     print(f"  {OK}✓ Refreshed llm-infer{RESET}")
     print(f"  {MUTED}Path: {info.path}{RESET}")
 
@@ -314,7 +314,7 @@ async def show_finetuned(llm_client: LLMClient):
     print(f"\n{H2}▶ Fine-tuned Response (With Adapter){RESET}")
     print(f"  {LLM_Q}Q: {TEST_QUESTION}{RESET}")
 
-    response = await query_llm(llm_client, TEST_QUESTION, adapter_id=ADAPTER_ID)
+    response = await query_llm(llm_client, TEST_QUESTION, key=ADAPTER_ID)
     print(f"  {LLM_A}{response[:600]}{RESET}")
     if len(response) > 600:
         print(f"  {MUTED}[...truncated, {len(response)} chars total]{RESET}")
@@ -358,7 +358,7 @@ async def main():
     # Suppress logging noise
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
 
-    from llm_learn import IsolationContext
+    from llm_learn import ClientContext
 
     # Initialize
     config = Config("etc/llm-learn.yaml")
@@ -366,7 +366,7 @@ async def main():
 
     # Create context for this example
     context_key = get_demo_context_key("lora-training")
-    context = IsolationContext(context_key=context_key)
+    context = ClientContext(context_key=context_key)
     learn = factory.create_from_config(context=context, config=config)
     print(f"{MUTED}Using context_key={RESET}{INFO}{context_key}{RESET}")
 

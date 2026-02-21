@@ -1,7 +1,6 @@
 """Unit tests for training configuration."""
 
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 
@@ -117,23 +116,28 @@ class TestRunResult:
 
     def test_basic_creation(self):
         """Test creating a RunResult."""
+        from llm_learn.training.schema import Adapter
+
         started = datetime(2024, 1, 1, 10, 0, 0)
         completed = datetime(2024, 1, 1, 11, 30, 0)
 
+        adapter = Adapter(md5="abc123", mtime="2024-01-01T12:00:00", path="/path/to/adapter")
         result = RunResult(
-            adapter_path=Path("/path/to/adapter"),
+            status="completed",
             base_model="Qwen/Qwen2.5-7B-Instruct",
-            method="lora",
+            method="sft",
             metrics={"train_loss": 0.5},
             config={"lora": {"r": 16}},
             started_at=started,
             completed_at=completed,
             samples_trained=1000,
+            adapter=adapter,
         )
 
-        assert result.adapter_path == Path("/path/to/adapter")
+        assert result.adapter is not None
+        assert result.adapter.path == "/path/to/adapter"
         assert result.base_model == "Qwen/Qwen2.5-7B-Instruct"
-        assert result.method == "lora"
+        assert result.method == "sft"
         assert result.metrics["train_loss"] == 0.5
         assert result.samples_trained == 1000
 
@@ -143,9 +147,9 @@ class TestRunResult:
         completed = datetime(2024, 1, 1, 11, 30, 0)
 
         result = RunResult(
-            adapter_path=Path("/path/to/adapter"),
+            status="completed",
             base_model="model",
-            method="lora",
+            method="sft",
             metrics={},
             config={},
             started_at=started,
@@ -159,7 +163,7 @@ class TestRunResult:
     def test_dpo_method(self):
         """Test RunResult with DPO method."""
         result = RunResult(
-            adapter_path=Path("/path/to/adapter"),
+            status="completed",
             base_model="model",
             method="dpo",
             metrics={"train_loss": 0.3, "rewards_chosen": 0.8},

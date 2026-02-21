@@ -29,13 +29,13 @@ def create_server(
     Example:
         from appinfra.config import Config
         from appinfra.log import LogConfig, LoggerFactory
-        from llm_learn import IsolationContext, LearnClientFactory
+        from llm_learn import ClientContext, LearnClientFactory
         from llm_learn.serving import create_server
 
         config = Config("etc/llm-learn.yaml")
         lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
         factory = LearnClientFactory(lg)
-        context = IsolationContext(context_key="my-agent")
+        context = ClientContext(context_key="my-agent")
         learn_client = factory.create_from_config(context=context, config=config)
 
         server = create_server(learn_client)
@@ -92,10 +92,10 @@ def create_server_from_config(config: dict, lg: Logger | None = None) -> Server:
         raise ValueError("context_key is required in config (proxy.context_key or context_key)")
 
     # Use factory to create LearnClient from config
-    from llm_learn import IsolationContext
+    from llm_learn import ClientContext
 
     factory = LearnClientFactory(lg)
-    context = IsolationContext(context_key=str(context_key))
+    context = ClientContext(context_key=str(context_key))
     learn_client = factory.create_from_config(
         context=context,
         config=DotDict(**config),

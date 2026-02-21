@@ -13,8 +13,8 @@ from appinfra.log import Logger
 
 from llm_learn.core.base import utc_now
 
-from ..config import TRAINING_DEFAULTS, RunResult
 from ..lora import Config as LoraConfig
+from ..schema import TRAINING_DEFAULTS, Adapter, RunResult
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
@@ -55,7 +55,7 @@ class Trainer:
         beta: float = 0.1,
         quantize: bool = True,
         reference_free: bool = False,
-        based_on: Path | None = None,
+        parent: Adapter | None = None,
     ):
         self._lg = lg
         self.data_path = Path(data_path)
@@ -66,7 +66,7 @@ class Trainer:
         self.beta = beta
         self.quantize = quantize
         self.reference_free = reference_free
-        self.based_on = based_on
+        self.parent = parent
         self._init_state()
 
     def _init_state(self):
@@ -107,11 +107,9 @@ class Trainer:
         """Apply LoRA adapter - load existing or create new."""
         from peft import PeftModel, get_peft_model
 
-        if self.based_on is not None:
-            self._lg.info(f"loading existing adapter: {self.based_on}")
-            self.model = PeftModel.from_pretrained(
-                self.model, str(self.based_on), is_trainable=True
-            )
+        if self.parent is not None:
+            self._lg.info(f"loading existing adapter: {self.parent.path}")
+            self.model = PeftModel.from_pretrained(self.model, self.parent.path, is_trainable=True)
         else:
             peft_config = self.lora_config.to_peft_config()
             self.model = get_peft_model(self.model, peft_config)
@@ -175,12 +173,12 @@ class Trainer:
         )
 
         # Apply the same adapter to reference model (frozen) if training on top of one
-        if self.based_on is not None:
+        if self.parent is not None:
             from peft import PeftModel
 
-            self._lg.info(f"applying adapter to reference model (frozen): {self.based_on}")
+            self._lg.info(f"applying adapter to reference model (frozen): {self.parent.path}")
             self.ref_model = PeftModel.from_pretrained(
-                self.ref_model, str(self.based_on), is_trainable=False
+                self.ref_model, self.parent.path, is_trainable=False
             )
 
     def _load_data(self):
@@ -281,8 +279,10 @@ class Trainer:
 
     def _build_result(self, adapter_path: Path, metrics: dict, started_at: datetime) -> RunResult:
         """Build the training result."""
+        # Adapter md5/mtime populated by caller (runner) after training
+        adapter = Adapter(md5="", mtime="", path=str(adapter_path))
         return RunResult(
-            adapter_path=adapter_path,
+            status="completed",
             base_model=self.base_model,
             method="dpo",
             metrics=metrics,
@@ -305,7 +305,8 @@ class Trainer:
             started_at=started_at,
             completed_at=utc_now(),
             samples_trained=len(self.train_dataset) * self.training_config.num_epochs,  # type: ignore[arg-type]
-            based_on=self.based_on,
+            adapter=adapter,
+            parent=self.parent,
         )
 
     def train(self) -> RunResult:
@@ -338,7 +339,7 @@ def train_dpo(
     beta: float = 0.1,
     quantize: bool = True,
     reference_free: bool = False,
-    based_on: Path | None = None,
+    parent: Adapter | None = None,
 ) -> RunResult:
     """Train a LoRA adapter using Direct Preference Optimization.
 
@@ -352,10 +353,10 @@ def train_dpo(
         beta: DPO beta parameter (higher = more conservative).
         quantize: Use 4-bit quantization (QLoRA). Reduces VRAM ~4x.
         reference_free: Skip reference model to save VRAM (may reduce quality).
-        based_on: Path to existing adapter to train on top of (for lineage).
+        parent: Parent adapter to train on top of (for lineage).
 
     Returns:
-        RunResult with adapter path, metrics, and training metadata.
+        RunResult with adapter, metrics, and training metadata.
     """
     trainer = Trainer(
         lg=lg,
@@ -367,6 +368,6 @@ def train_dpo(
         beta=beta,
         quantize=quantize,
         reference_free=reference_free,
-        based_on=based_on,
+        parent=parent,
     )
     return trainer.train()

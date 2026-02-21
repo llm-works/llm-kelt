@@ -39,7 +39,7 @@ def build_context_filter(context_key: str | None, column: Any) -> Any:
 
 
 @dataclass
-class IsolationContext:
+class ClientContext:
     """
     Instructions for where to place data and how to partition queries.
 
@@ -56,19 +56,19 @@ class IsolationContext:
 
     Examples:
         # Exact match - single agent
-        context = IsolationContext(
+        context = ClientContext(
             context_key="acme:prod:reviewer",
             schema_name="customer_acme"
         )
 
         # Prefix match - all agents in an environment
-        context = IsolationContext(context_key="acme:prod:*")
+        context = ClientContext(context_key="acme:prod:*")
 
         # Prefix match - all environments for a customer
-        context = IsolationContext(context_key="acme:*")
+        context = ClientContext(context_key="acme:*")
 
         # Single tenant: no filtering, public schema (simplest)
-        context = IsolationContext()
+        context = ClientContext()
 
     Hierarchical Partitioning:
         Use colon-separated (or any delimiter) keys for hierarchy:

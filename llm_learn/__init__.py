@@ -9,7 +9,7 @@ Architecture:
     - learn.query - Context-aware LLM queries
 
 Usage:
-    from llm_learn import LearnClientFactory, IsolationContext
+    from llm_learn import LearnClientFactory, ClientContext
     from appinfra.config import Config
     from appinfra.log import LoggerFactory, LogConfig
 
@@ -19,7 +19,7 @@ Usage:
     factory = LearnClientFactory(lg)
 
     # Create client with isolation context
-    context = IsolationContext(context_key="my-agent")
+    context = ClientContext(context_key="my-agent")
     learn = factory.create_from_config(context=context, config=config)
 
     # Access atomic memory primitives via learn.atomic.*
@@ -41,7 +41,7 @@ Usage:
 
     # Training via learn.train.manifest.*
     manifest = learn.train.manifest.create(
-        adapter_id="my-adapter",
+        key="my-adapter",
         method="dpo",
         model="Qwen/Qwen2.5-7B-Instruct",
         data=[{"prompt": "...", "chosen": "...", "rejected": "..."}],
@@ -61,7 +61,7 @@ from .core.exceptions import (
     ValidationError,
 )
 from .factory import LearnClientFactory
-from .memory import IsolationContext
+from .memory import ClientContext
 
 __all__ = [
     "LearnClient",
@@ -73,5 +73,5 @@ __all__ = [
     "ConfigurationError",
     "ConflictError",
     "SchemaVersionError",
-    "IsolationContext",
+    "ClientContext",
 ]

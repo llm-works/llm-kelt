@@ -43,14 +43,14 @@ class TestLoraTraining:
         )
 
         # Verify result structure
-        assert result.adapter_path.exists(), "Adapter path should exist"
-        assert result.method == "lora"
+        assert Path(result.adapter.path).exists(), "Adapter path should exist"
+        assert result.method == "sft"
         assert result.base_model == str(local_model_path)
         assert result.samples_trained > 0
 
         # Verify adapter files exist
-        adapter_config = result.adapter_path / "adapter_config.json"
-        adapter_weights = result.adapter_path / "adapter_model.safetensors"
+        adapter_config = Path(result.adapter.path) / "adapter_config.json"
+        adapter_weights = Path(result.adapter.path) / "adapter_model.safetensors"
         assert adapter_config.exists(), "adapter_config.json should exist"
         assert adapter_weights.exists(), "adapter_model.safetensors should exist"
 
@@ -63,7 +63,7 @@ class TestLoraTraining:
             device_map="auto",
             trust_remote_code=True,
         )
-        loaded_model = PeftModel.from_pretrained(base_model, str(result.adapter_path))
+        loaded_model = PeftModel.from_pretrained(base_model, str(Path(result.adapter.path)))
         assert loaded_model is not None, "Should be able to load adapter"
 
         # Verify training config was stored
@@ -110,7 +110,7 @@ class TestLoraTraining:
         )
 
         # With eval split, should have eval_loss
-        assert result.adapter_path.exists()
+        assert Path(result.adapter.path).exists()
         assert "eval_loss" in result.metrics, "Should have eval_loss with eval_split > 0"
 
 
@@ -147,14 +147,14 @@ class TestDpoTraining:
         )
 
         # Verify result structure
-        assert result.adapter_path.exists(), "Adapter path should exist"
+        assert Path(result.adapter.path).exists(), "Adapter path should exist"
         assert result.method == "dpo"
         assert result.base_model == str(local_model_path)
         assert result.samples_trained > 0
 
         # Verify adapter files exist
-        adapter_config = result.adapter_path / "adapter_config.json"
-        adapter_weights = result.adapter_path / "adapter_model.safetensors"
+        adapter_config = Path(result.adapter.path) / "adapter_config.json"
+        adapter_weights = Path(result.adapter.path) / "adapter_model.safetensors"
         assert adapter_config.exists(), "adapter_config.json should exist"
         assert adapter_weights.exists(), "adapter_model.safetensors should exist"
 
@@ -168,5 +168,5 @@ class TestDpoTraining:
             device_map="auto",
             trust_remote_code=True,
         )
-        loaded_model = PeftModel.from_pretrained(base_model, str(result.adapter_path))
+        loaded_model = PeftModel.from_pretrained(base_model, str(Path(result.adapter.path)))
         assert loaded_model is not None, "Should be able to load adapter"
