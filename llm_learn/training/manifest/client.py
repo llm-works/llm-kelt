@@ -53,7 +53,7 @@ class Client:
     Usage:
         # Create a manifest
         manifest = learn.train.manifest.create(
-            key="coding-v1",
+            adapter="coding-v1",
             method="dpo",
             model="Qwen/Qwen2.5-7B-Instruct",
             data=[{"prompt": "...", "chosen": "...", "rejected": "..."}],
