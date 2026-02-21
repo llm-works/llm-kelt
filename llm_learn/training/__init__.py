@@ -1,33 +1,49 @@
 """Training modules for Learn framework.
 
 Contains utilities for training data preparation and model fine-tuning:
-- dpo: DPO training with preference pair management (train_dpo)
-- sft: SFT example management and export (uses train_lora for training)
-- lora: LoRA/SFT training and adapter registry (train_lora)
-- export: Data export to training formats
+- manifest: File-based training workflow (create, submit, run manifests)
+- dpo: DPO training client and trainer
+- sft: SFT training client
+- lora: LoRA/SFT training and adapter registry
 - config: Training configuration dataclasses
 
 Install training dependencies with: pip install llm-learn[training]
 """
 
-from .client import Client as TrainClient
-from .config import RunConfig, RunResult
+from .config import TRAINING_DEFAULTS, RunResult
+from .dpo import Client as DpoClient
 from .export import ExportResult, export_feedback_classifier, export_feedback_sft
+from .factory import Factory
 from .lora import AdapterInfo, AdapterRegistry
+from .manifest import Client, Data, Manifest, Model, Runner, Source
+from .profiles import build_training_config, get_registry_path, load_profile
+from .sft import Client as SftClient
 
 __all__ = [
+    # Config & profiles
+    "TRAINING_DEFAULTS",
+    "RunResult",
+    "build_training_config",
+    "load_profile",
+    "get_registry_path",
     # Export functions
     "ExportResult",
     "export_feedback_sft",
     "export_feedback_classifier",
-    # Config dataclasses
-    "RunConfig",
-    "RunResult",
     # Adapter registry
     "AdapterRegistry",
     "AdapterInfo",
-    # Client aggregator
-    "TrainClient",
+    # Clients
+    "Factory",
+    "Client",
+    "DpoClient",
+    "SftClient",
+    # Manifest
+    "Runner",
+    "Manifest",
+    "Source",
+    "Model",
+    "Data",
     # Training functions (lazy-loaded, require 'training' extras)
     "train_lora",
     "train_dpo",

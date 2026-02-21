@@ -80,12 +80,14 @@ class TestLoraTraining:
         tmp_path: Path,
     ):
         """Train with validation split and verify eval metrics are produced."""
-        from llm_learn.training import RunConfig, train_lora
+        from appinfra import DotDict
+
+        from llm_learn.training import train_lora
 
         output_dir = tmp_path / "lora_output_eval"
 
         # Config with eval split
-        config_with_eval = RunConfig(
+        config_with_eval = DotDict(
             num_epochs=fast_training_config.num_epochs,
             batch_size=fast_training_config.batch_size,
             gradient_accumulation_steps=fast_training_config.gradient_accumulation_steps,

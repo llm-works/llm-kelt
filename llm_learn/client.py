@@ -20,8 +20,10 @@ from .memory import atomic
 from .memory.isolation import IsolationContext
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from .memory.atomic import Protocol
-    from .training import TrainClient
+    from .training import Factory as TrainFactory
 
 
 class LearnClient:
@@ -30,7 +32,7 @@ class LearnClient:
 
     Provides unified access to all framework capabilities:
     - learn.atomic.* - Fact-based memory storage (assertions, solutions, feedback, etc.)
-    - learn.train.* - Training methods (DPO, SFT, etc.)
+    - learn.train.* - Training manifest and execution
     - learn.query - Context-aware LLM queries
 
     Usage (via factory - recommended):
@@ -60,8 +62,14 @@ class LearnClient:
         learn.atomic.feedback.record(signal="positive", content_id=456)
 
     Training API:
-        learn.train.dpo.create(adapter_name="my-adapter")
-        learn.train.dpo.list_runs(status="pending")
+        manifest = learn.train.manifest.create(
+            adapter_id="my-adapter",
+            method="dpo",
+            model="Qwen/Qwen2.5-7B-Instruct",
+            data=[{"prompt": "...", "chosen": "...", "rejected": "..."}],
+        )
+        learn.train.manifest.submit(manifest)
+        result = learn.train.dpo.train(manifest)
 
     Query API (requires llm_client):
         response = await learn.query.ask("What's a good approach?")
@@ -112,7 +120,7 @@ class LearnClient:
             embedding_store=self._embedding_store,
         )
         self._context_builder = ContextBuilder(self._atomic.assertions)
-        self._train: TrainClient | None = None
+        self._train: TrainFactory | None = None
 
     def _setup_query_interface(self) -> None:
         """Initialize context query interface if LLM client is available."""
@@ -211,17 +219,41 @@ class LearnClient:
         return self._content
 
     @property
-    def train(self) -> TrainClient:
-        """Access training client for DPO, SFT, etc."""
-        if self._train is None:
-            from .training import TrainClient
+    def train(self) -> TrainFactory:
+        """Access training factory for manifest lifecycle and training execution.
 
-            self._train = TrainClient(
-                self._lg,
-                self._db.session,
-                self._context.context_key,
-            )
+        Requires adapters.lora.base_path to be configured in learn_config.
+
+        Raises:
+            RuntimeError: If adapters.lora.base_path is not configured.
+        """
+        if self._train is None:
+            from .training.factory import Factory
+
+            registry_path = self._get_registry_path()
+            if registry_path is None:
+                raise RuntimeError(
+                    "Training not configured: adapters.lora.base_path not set in learn_config"
+                )
+            self._train = Factory(self._lg, registry_path)
         return self._train
+
+    def _get_registry_path(self) -> Path | None:
+        """Get adapter registry path from learn_config."""
+        if self._learn_config is None:
+            return None
+        adapters = getattr(self._learn_config, "adapters", None)
+        if adapters is None:
+            return None
+        lora = getattr(adapters, "lora", None)
+        if lora is None:
+            return None
+        base_path = getattr(lora, "base_path", None)
+        if base_path is None:
+            return None
+        from pathlib import Path
+
+        return Path(base_path)
 
     @property
     def database(self) -> Database:

@@ -56,8 +56,9 @@ def adapter_registry(logger, adapter_lora_base_path, infer_server_url):
 def trained_adapter(logger, training_model_path, tmp_path_factory):
     """Train a LoRA adapter with distinctive behavior on the inference server's model."""
     import torch
+    from appinfra import DotDict
 
-    from llm_learn.training import RunConfig, train_lora
+    from llm_learn.training import train_lora
     from llm_learn.training.lora import Config as LoraConfig
 
     tmp_path = tmp_path_factory.mktemp("training")
@@ -72,7 +73,7 @@ def trained_adapter(logger, training_model_path, tmp_path_factory):
         lora_dropout=0.0,
         target_modules=["q_proj", "v_proj"],
     )
-    training_config = RunConfig(
+    training_config = DotDict(
         num_epochs=3,  # More epochs for stronger effect
         batch_size=2,
         gradient_accumulation_steps=1,

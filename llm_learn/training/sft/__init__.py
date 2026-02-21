@@ -1,23 +1,13 @@
 """SFT (Supervised Fine-Tuning) training package.
 
 Provides:
-- Client: Training run management with example assignment
-- export_run_examples: Export pending examples for a run to SFT format
+- Client: Training client that operates on manifests
+
+Note: Actual SFT training is provided by llm_learn.training.lora.train_lora.
 """
 
-from .client import (
-    Client,
-    PendingExample,
-    TrainedExample,
-)
-from .export import export_run_examples
+from .client import Client
 
 __all__ = [
-    # Core client
     "Client",
-    # Models
-    "PendingExample",
-    "TrainedExample",
-    # Export
-    "export_run_examples",
 ]

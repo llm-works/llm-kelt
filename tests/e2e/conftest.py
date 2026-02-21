@@ -254,10 +254,9 @@ def fast_lora_config():
 def fast_training_config():
     """Minimal training config for fast tests."""
     import torch
+    from appinfra import DotDict
 
-    from llm_learn.training import RunConfig
-
-    return RunConfig(
+    return DotDict(
         num_epochs=1,
         batch_size=2,
         gradient_accumulation_steps=1,

@@ -1,20 +1,24 @@
 """Adapter registry for llm-infer integration.
 
 Handles:
-- Storing trained adapters in registry directory
+- Storing trained adapters in adapters directory
 - Deploying adapters via symlinks to deployed directory
 - Writing config.yaml for each adapter
 - Calling llm-infer's refresh API
 
 Directory structure:
     base_path/
-    ├── registry/      # All adapters stored here
-    │   ├── v1/
+    ├── pending/       # Manifests waiting for training
+    │   └── coding-v1.yaml
+    ├── completed/     # Finished manifests (archive)
+    │   └── coding-v0.yaml
+    ├── adapters/      # All adapters stored here
+    │   ├── coding-v1/
     │   │   ├── adapter_model.safetensors
     │   │   └── config.yaml
-    │   └── v2/
+    │   └── writing-v1/
     └── deployed/      # Symlinks to enabled adapters (vLLM scans this)
-        └── v1 -> ../registry/v1
+        └── coding-v1 -> ../adapters/coding-v1
 """
 
 import shutil
@@ -59,17 +63,17 @@ class AdapterRegistry:
 
         Args:
             lg: Logger instance
-            base_path: Parent path containing registry/ and deployed/ subdirs
+            base_path: Parent path containing adapters/ and deployed/ subdirs
             infer_url: Base URL for llm-infer API
         """
         self._lg = lg
         self.base_path = Path(base_path).expanduser()
-        self.registry_path = self.base_path / "registry"
+        self.adapters_path = self.base_path / "adapters"
         self.deployed_path = self.base_path / "deployed"
         self.infer_url = infer_url.rstrip("/")
 
         # Ensure directories exist
-        for path in (self.registry_path, self.deployed_path):
+        for path in (self.adapters_path, self.deployed_path):
             if not path.exists():
                 path.mkdir(parents=True, exist_ok=True)
                 self._lg.info(f"created directory: {path}")
@@ -144,7 +148,7 @@ class AdapterRegistry:
     def _prepare_adapter_path(self, adapter_id: str, source_path: Path, overwrite: bool) -> Path:
         """Validate and prepare adapter path, removing existing if overwriting."""
         self._validate_adapter_id(adapter_id)
-        adapter_path = self.registry_path / adapter_id
+        adapter_path = self.adapters_path / adapter_id
 
         if adapter_path.exists() and not overwrite:
             raise ValueError(
@@ -215,7 +219,7 @@ class AdapterRegistry:
             symlink_path.unlink()
 
         # Use relative path for symlink
-        relative_target = Path("..") / "registry" / adapter_id
+        relative_target = Path("..") / "adapters" / adapter_id
         symlink_path.symlink_to(relative_target)
         self._lg.info(f"created symlink: {symlink_path} -> {relative_target}")
 
@@ -234,7 +238,7 @@ class AdapterRegistry:
             deployed: True to deploy (create symlink), False to undeploy
         """
         self._validate_adapter_id(adapter_id)
-        adapter_path = self.registry_path / adapter_id
+        adapter_path = self.adapters_path / adapter_id
 
         if not adapter_path.exists():
             raise ValueError(f"Adapter '{adapter_id}' not found")
@@ -253,7 +257,7 @@ class AdapterRegistry:
             adapter_id: Adapter to remove
         """
         self._validate_adapter_id(adapter_id)
-        adapter_path = self.registry_path / adapter_id
+        adapter_path = self.adapters_path / adapter_id
 
         if not adapter_path.exists():
             raise ValueError(f"Adapter '{adapter_id}' not found")
@@ -272,7 +276,7 @@ class AdapterRegistry:
             List of AdapterInfo for each adapter
         """
         adapters = []
-        for path in self.registry_path.iterdir():
+        for path in self.adapters_path.iterdir():
             if not path.is_dir():
                 continue
 
@@ -305,7 +309,7 @@ class AdapterRegistry:
             AdapterInfo or None if not found
         """
         self._validate_adapter_id(adapter_id)
-        adapter_path = self.registry_path / adapter_id
+        adapter_path = self.adapters_path / adapter_id
         config_path = adapter_path / "config.yaml"
 
         if not config_path.exists():

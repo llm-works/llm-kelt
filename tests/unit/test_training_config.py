@@ -1,11 +1,11 @@
-"""Unit tests for training configuration dataclasses."""
+"""Unit tests for training configuration."""
 
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from llm_learn.training import RunConfig, RunResult
+from llm_learn.training import TRAINING_DEFAULTS, RunResult
 from llm_learn.training.lora import Config as LoraConfig
 
 
@@ -89,95 +89,27 @@ class TestLoraConfig:
             assert config.bias == bias
 
 
-class TestRunConfig:
-    """Test RunConfig validation and defaults."""
+class TestTrainingDefaults:
+    """Test TRAINING_DEFAULTS values."""
 
     def test_default_values(self):
         """Test that default values are sensible."""
-        config = RunConfig()
+        assert TRAINING_DEFAULTS.num_epochs == 3
+        assert TRAINING_DEFAULTS.batch_size == 4
+        assert TRAINING_DEFAULTS.gradient_accumulation_steps == 4
+        assert TRAINING_DEFAULTS.learning_rate == 2e-4
+        assert TRAINING_DEFAULTS.warmup_ratio == 0.03
+        assert TRAINING_DEFAULTS.max_seq_length == 2048
+        assert TRAINING_DEFAULTS.fp16 is True
+        assert TRAINING_DEFAULTS.bf16 is False
+        assert TRAINING_DEFAULTS.gradient_checkpointing is True
+        assert TRAINING_DEFAULTS.seed == 42
 
-        assert config.num_epochs == 3
-        assert config.batch_size == 4
-        assert config.gradient_accumulation_steps == 4
-        assert config.learning_rate == 2e-4
-        assert config.warmup_ratio == 0.03
-        assert config.max_seq_length == 2048
-        assert config.fp16 is True
-        assert config.bf16 is False
-        assert config.gradient_checkpointing is True
-        assert config.seed == 42
-
-    def test_effective_batch_size(self):
-        """Test effective batch size calculation."""
-        config = RunConfig(batch_size=4, gradient_accumulation_steps=8)
-        assert config.effective_batch_size == 32
-
-    def test_invalid_num_epochs(self):
-        """Test that invalid num_epochs raises ValueError."""
-        with pytest.raises(ValueError, match="num_epochs must be positive"):
-            RunConfig(num_epochs=0)
-
-    def test_invalid_batch_size(self):
-        """Test that invalid batch_size raises ValueError."""
-        with pytest.raises(ValueError, match="batch_size must be positive"):
-            RunConfig(batch_size=0)
-
-    def test_invalid_gradient_accumulation_steps(self):
-        """Test that invalid gradient_accumulation_steps raises ValueError."""
-        with pytest.raises(ValueError, match="gradient_accumulation_steps must be positive"):
-            RunConfig(gradient_accumulation_steps=0)
-
-    def test_invalid_learning_rate(self):
-        """Test that invalid learning_rate raises ValueError."""
-        with pytest.raises(ValueError, match="learning_rate must be positive"):
-            RunConfig(learning_rate=0)
-
-        with pytest.raises(ValueError, match="learning_rate must be positive"):
-            RunConfig(learning_rate=-1e-4)
-
-    def test_invalid_warmup_ratio(self):
-        """Test that invalid warmup_ratio raises ValueError."""
-        with pytest.raises(ValueError, match="warmup_ratio must be in"):
-            RunConfig(warmup_ratio=-0.1)
-
-        with pytest.raises(ValueError, match="warmup_ratio must be in"):
-            RunConfig(warmup_ratio=1.0)
-
-    def test_invalid_max_seq_length(self):
-        """Test that invalid max_seq_length raises ValueError."""
-        with pytest.raises(ValueError, match="max_seq_length must be positive"):
-            RunConfig(max_seq_length=0)
-
-    def test_invalid_eval_split(self):
-        """Test that invalid eval_split raises ValueError."""
-        with pytest.raises(ValueError, match="eval_split must be in"):
-            RunConfig(eval_split=-0.1)
-
-        with pytest.raises(ValueError, match="eval_split must be in"):
-            RunConfig(eval_split=1.0)
-
-    def test_both_fp16_and_bf16_raises(self):
-        """Test that enabling both fp16 and bf16 raises ValueError."""
-        with pytest.raises(ValueError, match="Cannot enable both fp16 and bf16"):
-            RunConfig(fp16=True, bf16=True)
-
-    def test_fp16_only(self):
-        """Test fp16 only configuration."""
-        config = RunConfig(fp16=True, bf16=False)
-        assert config.fp16 is True
-        assert config.bf16 is False
-
-    def test_bf16_only(self):
-        """Test bf16 only configuration."""
-        config = RunConfig(fp16=False, bf16=True)
-        assert config.fp16 is False
-        assert config.bf16 is True
-
-    def test_no_mixed_precision(self):
-        """Test configuration without mixed precision."""
-        config = RunConfig(fp16=False, bf16=False)
-        assert config.fp16 is False
-        assert config.bf16 is False
+    def test_is_dotdict(self):
+        """Test that TRAINING_DEFAULTS supports attribute access."""
+        # Should work with both attribute and dict access
+        assert TRAINING_DEFAULTS.num_epochs == TRAINING_DEFAULTS["num_epochs"]
+        assert TRAINING_DEFAULTS.learning_rate == TRAINING_DEFAULTS["learning_rate"]
 
 
 class TestRunResult:

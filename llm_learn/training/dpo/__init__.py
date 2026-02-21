@@ -1,31 +1,19 @@
 """DPO (Direct Preference Optimization) training package.
 
 Provides:
-- Client: Training run management with pair assignment
+- Client: Training client that operates on manifests
 - Trainer: Actual DPO training using TRL
 - train_dpo: Convenience function for training
-- export_run_pairs: Export pending pairs for a run to TRL DPO format
-- export_preferences: Export from atomic preferences (legacy)
+- export_preferences: Export atomic preferences to DPO format
 """
 
-from ..models import Run, RunInfo, _not_deleted_filter
-from .client import Client, PendingPair, TrainedPair
-from .export import PairTuple, export_preferences, export_run_pairs
+from .client import Client
+from .export import ExportResult, export_preferences
 
 __all__ = [
-    # Core client
     "Client",
-    "_not_deleted_filter",
-    # Models
-    "Run",
-    "RunInfo",
-    "PendingPair",
-    "TrainedPair",
-    # Export
-    "PairTuple",
+    "ExportResult",
     "export_preferences",
-    "export_run_pairs",
-    # Training functions (lazy-loaded, require 'training' extras)
     "Trainer",
     "train_dpo",
 ]

@@ -5,7 +5,7 @@ signals that can be injected into LLM prompts or used for training.
 
 Architecture:
     - learn.atomic.* - Fact-based memory storage (assertions, solutions, feedback, etc.)
-    - learn.train.* - Training methods (DPO, SFT, etc.)
+    - learn.train.* - Training manifest and execution (DPO, SFT)
     - learn.query - Context-aware LLM queries
 
 Usage:
@@ -39,9 +39,15 @@ Usage:
         rejected="Verbose version",
     )
 
-    # Access training methods via learn.train.*
-    learn.train.dpo.create(adapter_name="my-adapter")
-    learn.train.dpo.list_runs(status="pending")
+    # Training via learn.train.manifest.*
+    manifest = learn.train.manifest.create(
+        adapter_id="my-adapter",
+        method="dpo",
+        model="Qwen/Qwen2.5-7B-Instruct",
+        data=[{"prompt": "...", "chosen": "...", "rejected": "..."}],
+    )
+    learn.train.manifest.submit(manifest)
+    result = learn.train.dpo.train(manifest)
 """
 
 from .client import LearnClient

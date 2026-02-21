@@ -8,11 +8,12 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from appinfra import DotDict
 from appinfra.log import Logger
 
 from llm_learn.core.base import utc_now
 
-from ..config import RunConfig, RunResult
+from ..config import TRAINING_DEFAULTS, RunResult
 from ..lora import Config as LoraConfig
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
@@ -50,7 +51,7 @@ class Trainer:
         output_dir: str | Path,
         base_model: str = DEFAULT_BASE_MODEL,
         lora_config: LoraConfig | None = None,
-        training_config: RunConfig | None = None,
+        training_config: DotDict | None = None,
         beta: float = 0.1,
         quantize: bool = True,
         reference_free: bool = False,
@@ -61,7 +62,7 @@ class Trainer:
         self.output_dir = Path(output_dir)
         self.base_model = base_model
         self.lora_config = lora_config or LoraConfig()
-        self.training_config = training_config or RunConfig()
+        self.training_config = DotDict({**TRAINING_DEFAULTS, **(training_config or {})})
         self.beta = beta
         self.quantize = quantize
         self.reference_free = reference_free
@@ -333,7 +334,7 @@ def train_dpo(
     output_dir: str | Path,
     base_model: str = DEFAULT_BASE_MODEL,
     lora_config: LoraConfig | None = None,
-    training_config: RunConfig | None = None,
+    training_config: DotDict | None = None,
     beta: float = 0.1,
     quantize: bool = True,
     reference_free: bool = False,
