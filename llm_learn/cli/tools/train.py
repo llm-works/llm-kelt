@@ -256,6 +256,7 @@ class RunTool(_ConfigMixin, Tool):
 
     def add_args(self, parser) -> None:
         parser.add_argument("manifest", nargs="?", help="Manifest path (interactive if omitted)")
+        parser.add_argument("--model", "-m", help="Override model (path, HF ID, or name)")
         parser.add_argument("--skip-register", action="store_true", help="Skip registration")
 
     def _select_interactive(self, pending_dir: Path) -> Path | None:
@@ -305,7 +306,11 @@ class RunTool(_ConfigMixin, Tool):
 
         try:
             runner = Runner(self.lg, registry_path, model_locations=self._model_locations())
-            result = runner.run(manifest_path, skip_registration=self.args.skip_register)
+            result = runner.run(
+                manifest_path,
+                skip_registration=self.args.skip_register,
+                model_override=getattr(self.args, "model", None),
+            )
         except Exception as e:
             self.lg.error(f"Training failed: {e}")
             return 1

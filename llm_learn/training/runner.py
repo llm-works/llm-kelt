@@ -139,6 +139,7 @@ class Runner:
         manifest_path: Path,
         output_dir: Path | None = None,
         skip_registration: bool = False,
+        model_override: str | None = None,
     ) -> RunResult:
         """Execute training from a manifest file.
 
@@ -146,6 +147,7 @@ class Runner:
             manifest_path: Path to manifest YAML file.
             output_dir: Working directory for training.
             skip_registration: If True, don't register adapter to registry.
+            model_override: Override manifest model (path, HF ID, or name to resolve).
 
         Returns:
             RunResult with adapter metadata, metrics, and training info.
@@ -156,6 +158,12 @@ class Runner:
         errors = validate_manifest(manifest)
         if errors:
             raise ValueError(f"Invalid manifest: {'; '.join(errors)}")
+
+        if model_override:
+            self._lg.info(
+                "overriding model", extra={"from": manifest.model.base, "to": model_override}
+            )
+            manifest.model = Model(base=model_override, quantize=manifest.model.quantize)
 
         manifest = self._resolve_model(manifest)
 
