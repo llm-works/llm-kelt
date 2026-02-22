@@ -15,7 +15,7 @@ from .export import ExportResult, export_feedback_classifier, export_feedback_sf
 from .factory import Factory
 from .lora import AdapterInfo, AdapterRegistry
 from .manifest import Client, Data, Manifest, Model, Source
-from .profiles import build_training_config, get_registry_path, load_profile
+from .profiles import build_training_config, get_registry_path, load_default_profile, load_profile
 from .runner import Runner
 from .schema import TRAINING_DEFAULTS, Adapter, RunResult
 from .sft import Client as SftClient
@@ -26,7 +26,8 @@ __all__ = [
     "Adapter",
     "RunResult",
     "build_training_config",
-    "load_profile",
+    "load_default_profile",
+    "load_profile",  # deprecated, use load_default_profile
     "get_registry_path",
     # Export functions
     "ExportResult",

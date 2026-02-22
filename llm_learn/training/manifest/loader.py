@@ -6,7 +6,6 @@ Handles YAML serialization of training manifests and data resolution.
 from __future__ import annotations
 
 import json
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -15,6 +14,7 @@ import yaml
 from appinfra import DotDict
 
 from ..schema import Adapter, RunResult
+from .errors import CorruptedManifestError
 from .schema import Data, Manifest, Model, Source
 
 
@@ -103,19 +103,24 @@ def _validate_required_fields(
     return adapter, method, data_section  # type: ignore[return-value]
 
 
-def load_manifest(path: Path) -> Manifest:
-    """Load training manifest from YAML file."""
-    if not path.exists():
-        raise FileNotFoundError(f"Manifest not found: {path}")
+def _read_yaml_file(path: Path) -> dict:
+    """Read YAML from file (supports .gz)."""
+    import gzip
 
+    if path.suffix == ".gz":
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            return dict(yaml.safe_load(f))
     with path.open("r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+        return dict(yaml.safe_load(f))
 
-    if not isinstance(data, dict):
-        raise ValueError(f"Invalid manifest format: expected dict, got {type(data)}")
 
+def _dict_to_manifest(data: dict) -> Manifest:
+    """Convert validated dict to Manifest object."""
     adapter, method, data_section = _validate_required_fields(data)
-    method_config = data.get(method, {})
+
+    # Training section may contain output (new format) or output at root (old format)
+    training_data = data.get("training", {})
+    output_data = training_data.pop("output", None) or data.get("output")
 
     return Manifest(
         version=data.get("version", 1),
@@ -126,11 +131,25 @@ def load_manifest(path: Path) -> Manifest:
         model=_dict_to_model(data.get("model")),
         parent=_dict_to_adapter(data.get("parent")),
         lora=DotDict(data.get("lora", {})),
-        training=DotDict(data.get("training", {})),
-        method_config=DotDict(method_config),
+        training=DotDict(training_data),
+        method_config=DotDict(data.get(method, {})),
         data=_dict_to_data(data_section),
-        output=_dict_to_output(data.get("output")),
+        output=_dict_to_output(output_data),
     )
+
+
+def load_manifest(path: Path) -> Manifest:
+    """Load training manifest from YAML file (supports .yaml and .yaml.gz)."""
+    if not path.exists():
+        raise FileNotFoundError(f"Manifest not found: {path}")
+    if path.stat().st_size == 0:
+        raise CorruptedManifestError(path, "file is empty")
+
+    data = _read_yaml_file(path)
+    if not isinstance(data, dict):
+        raise CorruptedManifestError(path, f"expected dict, got {type(data).__name__}")
+
+    return _dict_to_manifest(data)
 
 
 def _source_to_dict(source: Source) -> dict[str, Any] | None:
@@ -189,37 +208,132 @@ def _output_to_dict(output: RunResult | None) -> dict[str, Any] | None:
     return result
 
 
+def _get_effective_config(manifest: Manifest) -> tuple[dict, dict]:
+    """Get effective lora/training config (from output if completed, else from manifest)."""
+    if manifest.output is not None and manifest.output.config:
+        output_config = manifest.output.config
+        lora = output_config.get("lora", dict(manifest.lora) if manifest.lora else {})
+        training = output_config.get(
+            "training", dict(manifest.training) if manifest.training else {}
+        )
+        return lora, training
+    return (
+        dict(manifest.lora) if manifest.lora else {},
+        dict(manifest.training) if manifest.training else {},
+    )
+
+
 def _manifest_to_dict(manifest: Manifest) -> dict[str, Any]:
-    """Convert Manifest to dict for YAML serialization."""
+    """Convert Manifest to dict for YAML serialization.
+
+    When output is present (completed), output is nested under training section.
+    """
     data: dict[str, Any] = {
         "version": manifest.version,
         "created_at": _serialize_datetime(manifest.created_at),
         "method": manifest.method,
         "adapter": manifest.adapter,
-        "model": _model_to_dict(manifest.model),
-        "lora": dict(manifest.lora) if manifest.lora else {},
-        "training": dict(manifest.training) if manifest.training else {},
-        "data": _data_to_dict(manifest.data),
     }
 
-    source_dict = _source_to_dict(manifest.source)
-    if source_dict is not None:
+    if (source_dict := _source_to_dict(manifest.source)) is not None:
         data["source"] = source_dict
+    data["model"] = _model_to_dict(manifest.model)
     if manifest.parent is not None:
         data["parent"] = _adapter_to_dict(manifest.parent)
+
+    lora_config, training_config = _get_effective_config(manifest)
+    data["lora"] = lora_config
+
+    # Nest output under training section
+    training_dict: dict[str, Any] = training_config
+    if manifest.output is not None:
+        training_dict["output"] = _output_to_dict(manifest.output)
+    data["training"] = training_dict
+
     if manifest.method_config:
         data[manifest.method] = dict(manifest.method_config)
-    if manifest.output is not None:
-        data["output"] = _output_to_dict(manifest.output)
+    data["data"] = _data_to_dict(manifest.data)
 
     return data
 
 
-def save_manifest(manifest: Manifest, path: Path) -> None:
-    """Save training manifest to YAML file."""
+class _FlowStyleDumper(yaml.SafeDumper):
+    """YAML dumper that uses flow style for data records (compact, one per line)."""
+
+    pass
+
+
+def _quoted_str(dumper: yaml.SafeDumper, data: str) -> yaml.Node:
+    """Represent string with double quotes."""
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
+
+
+class QuotedStr(str):
+    """String that serializes with double quotes in YAML."""
+
+    pass
+
+
+class FlowDict(dict):
+    """Dict that serializes in YAML flow style with quoted strings."""
+
+    pass
+
+
+def _flow_style_dict(dumper: yaml.SafeDumper, data: dict) -> yaml.Node:
+    """Represent dict in flow style (JSON-like, single line)."""
+    return dumper.represent_mapping("tag:yaml.org,2002:map", data.items(), flow_style=True)
+
+
+_FlowStyleDumper.add_representer(FlowDict, _flow_style_dict)
+_FlowStyleDumper.add_representer(QuotedStr, _quoted_str)
+
+
+def _record_to_flow(record: dict) -> FlowDict:
+    """Convert record to FlowDict with quoted keys and string values (JSON-like)."""
+    return FlowDict(
+        {QuotedStr(k): QuotedStr(v) if isinstance(v, str) else v for k, v in record.items()}
+    )
+
+
+def _data_to_dict_flow(data: Data) -> dict[str, Any]:
+    """Convert Data to dict, using flow style for inline records."""
+    result: dict[str, Any] = {"format": data.format}
+    if data.format == "inline":
+        result["records"] = [_record_to_flow(r) for r in data.records]
+    else:
+        result["path"] = data.path
+    return result
+
+
+def save_manifest(manifest: Manifest, path: Path, *, compress: bool = False) -> None:
+    """Save training manifest to YAML file.
+
+    Args:
+        manifest: Manifest to save.
+        path: Output path. If compress=True and path doesn't end in .gz, .gz is appended.
+        compress: If True, gzip the output.
+    """
+    import gzip
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        yaml.safe_dump(_manifest_to_dict(manifest), f, sort_keys=False, allow_unicode=True)
+    data = _manifest_to_dict(manifest)
+    # Use flow-style records for compact output
+    if "data" in data and data["data"].get("format") == "inline":
+        data["data"] = _data_to_dict_flow(manifest.data)
+
+    yaml_content = yaml.dump(
+        data, Dumper=_FlowStyleDumper, sort_keys=False, allow_unicode=True, width=10000
+    )
+
+    if compress:
+        if not path.suffix == ".gz":
+            path = path.with_suffix(path.suffix + ".gz")
+        with gzip.open(path, "wt", encoding="utf-8") as f:
+            f.write(yaml_content)
+    else:
+        with path.open("w", encoding="utf-8") as f:
+            f.write(yaml_content)
 
 
 def _validate_data(manifest: Manifest) -> list[str]:
@@ -230,6 +344,20 @@ def _validate_data(manifest: Manifest) -> list[str]:
     elif manifest.data.format == "external" and not manifest.data.path:
         errors.append("External data requires a path")
     return errors
+
+
+def _to_number(value: Any, default: int | float) -> int | float:
+    """Convert value to number, handling string scientific notation."""
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
 
 
 def validate_manifest(manifest: Manifest) -> list[str]:
@@ -243,36 +371,43 @@ def validate_manifest(manifest: Manifest) -> list[str]:
 
     errors.extend(_validate_data(manifest))
 
-    if manifest.training.get("num_epochs", 3) <= 0:
+    if _to_number(manifest.training.get("num_epochs"), 3) <= 0:
         errors.append("num_epochs must be positive")
-    if manifest.training.get("batch_size", 4) <= 0:
+    if _to_number(manifest.training.get("batch_size"), 4) <= 0:
         errors.append("batch_size must be positive")
-    if manifest.training.get("learning_rate", 2e-4) <= 0:
+    if _to_number(manifest.training.get("learning_rate"), 2e-4) <= 0:
         errors.append("learning_rate must be positive")
-    if manifest.lora.get("r", 16) <= 0:
+    if _to_number(manifest.lora.get("r"), 16) <= 0:
         errors.append("LoRA rank must be positive")
-    if not manifest.lora.get("target_modules"):
-        errors.append("target_modules cannot be empty")
+    # target_modules can be empty - trainer applies defaults
 
     return errors
 
 
-def resolve_data(manifest: Manifest, manifest_dir: Path) -> Path:
-    """Resolve manifest data to a JSONL file path."""
+def resolve_data(manifest: Manifest, work_dir: Path) -> Path:
+    """Resolve manifest data to a JSONL file path.
+
+    Args:
+        manifest: Training manifest with data section.
+        work_dir: Working directory for training (inline data written here).
+
+    Returns:
+        Path to JSONL data file.
+    """
     if manifest.data.format == "external":
         if manifest.data.path is None:
             raise ValueError("External data format requires a path")
-        data_path = manifest_dir / manifest.data.path
+        data_path = work_dir / manifest.data.path
         if not data_path.exists():
             raise FileNotFoundError(f"Data file not found: {data_path}")
         return data_path
 
-    temp_dir = Path(tempfile.gettempdir()) / "llm-learn-manifests"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    temp_path = temp_dir / f"{manifest.adapter}-data.jsonl"
+    # Write inline data to work directory
+    work_dir.mkdir(parents=True, exist_ok=True)
+    data_path = work_dir / f"{manifest.adapter}-data.jsonl"
 
-    with temp_path.open("w", encoding="utf-8") as f:
+    with data_path.open("w", encoding="utf-8") as f:
         for record in manifest.data.records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    return temp_path
+    return data_path

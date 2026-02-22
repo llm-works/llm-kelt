@@ -100,6 +100,7 @@ class LearnClientFactory:
             embedder=self._create_embedder(config),
             llm_client=self._create_llm_client(config),
             learn_config=getattr(config, "learn", None),
+            training_config=getattr(config, "training", None),
             ensure_schema=ensure_schema,
         )
 
@@ -110,6 +111,7 @@ class LearnClientFactory:
         embedder: Embedder | None = None,
         llm_client: ChatClient | None = None,
         learn_config: DotDict | None = None,
+        training_config: DotDict | None = None,
         ensure_schema: bool = True,
     ) -> LearnClient:
         """
@@ -123,6 +125,7 @@ class LearnClientFactory:
             embedder: Optional existing Embedder instance
             llm_client: Optional existing LLM client instance
             learn_config: Optional learn settings (config.learn section)
+            training_config: Optional training settings (config.training section)
             ensure_schema: If True (default), auto-migrate schema on init
 
         Returns:
@@ -135,5 +138,6 @@ class LearnClientFactory:
             embedder=embedder,
             llm_client=llm_client,
             learn_config=learn_config,
+            training_config=training_config,
             ensure_schema=ensure_schema,
         )

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from appinfra import DotDict
 from appinfra.log import Logger
 
+from .errors import CorruptedManifestError
 from .loader import load_manifest as _load_manifest
 from .loader import save_manifest as _save_manifest
 from .schema import (
@@ -43,6 +44,11 @@ _TRAINING_KEYS = frozenset(
     ]
 )
 
+# Map profile keys to training config keys
+_PROFILE_KEY_MAP = {
+    "epochs": "num_epochs",
+}
+
 
 class Client:
     """Client for training manifest lifecycle management.
@@ -73,15 +79,18 @@ class Client:
         self,
         lg: Logger,
         registry_path: Path,
+        default_profiles: dict[str, dict] | None = None,
     ) -> None:
         """Initialize manifest client.
 
         Args:
             lg: Logger instance.
             registry_path: Base path for adapter registry and manifest queues.
+            default_profiles: Default training profiles by method (e.g., {"sft": {...}, "dpo": {...}}).
         """
         self._lg = lg
         self._registry_path = Path(registry_path).expanduser()
+        self._default_profiles = default_profiles or {}
 
         # Ensure directory structure exists
         for subdir in ("pending", "completed", "adapters", "deployed"):
@@ -93,15 +102,23 @@ class Client:
         model: str,
         config: dict[str, Any] | None,
     ) -> tuple[Model, DotDict, DotDict, DotDict]:
-        """Build configuration objects with optional overrides."""
-        model_config = Model(base=model, quantize=config.get("quantize", True) if config else True)
-        training_config = DotDict(
-            {k: config[k] for k in _TRAINING_KEYS if k in config} if config else {}
-        )
-        lora_config = DotDict(config.get("lora", {})) if config else DotDict()
+        """Build configuration objects by merging default profile with agent overrides."""
+        # Start with default profile for this method
+        defaults = dict(self._default_profiles.get(method, {}))
+        # Agent config overrides defaults
+        merged = {**defaults, **(config or {})}
+
+        # Map profile keys to training config keys (e.g., epochs -> num_epochs)
+        for profile_key, config_key in _PROFILE_KEY_MAP.items():
+            if profile_key in merged and config_key not in merged:
+                merged[config_key] = merged.pop(profile_key)
+
+        model_config = Model(base=model, quantize=merged.get("quantize", True))
+        training_config = DotDict({k: merged[k] for k in _TRAINING_KEYS if k in merged})
+        lora_config = DotDict(merged.get("lora", {}))
         method_config = DotDict()
-        if config and method == "dpo":
-            method_config = DotDict(self._extract_method_config(config, ["beta", "reference_free"]))
+        if method == "dpo":
+            method_config = DotDict(self._extract_method_config(merged, ["beta", "reference_free"]))
 
         return model_config, lora_config, training_config, method_config
 
@@ -212,13 +229,15 @@ class Client:
         return sorted(pending_dir.glob("*.yaml"))
 
     def list_completed(self) -> list[Path]:
-        """List completed manifests.
+        """List completed manifests (supports .yaml and .yaml.gz).
 
         Returns:
             List of paths to completed manifest files.
         """
         completed_dir = self._registry_path / "completed"
-        return sorted(completed_dir.glob("*.yaml"))
+        yaml_files = list(completed_dir.glob("*.yaml"))
+        gz_files = list(completed_dir.glob("*.yaml.gz"))
+        return sorted(yaml_files + gz_files)
 
     def get_pending(self, adapter: str) -> Manifest | None:
         """Get a pending manifest by adapter key.
@@ -227,12 +246,18 @@ class Client:
             adapter: Adapter key to look up.
 
         Returns:
-            Manifest or None if not found.
+            Manifest or None if not found or corrupted.
         """
         path = self._registry_path / "pending" / f"{adapter}.yaml"
         if not path.exists():
             return None
-        return _load_manifest(path)
+        try:
+            return _load_manifest(path)
+        except CorruptedManifestError:
+            self._lg.warning(
+                "corrupted manifest, treating as non-existent", extra={"path": str(path)}
+            )
+            return None
 
     def remove_pending(self, adapter: str) -> None:
         """Remove a manifest from the pending queue.

@@ -23,6 +23,7 @@ Directory structure:
 
 import shutil
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -30,6 +31,12 @@ import yaml
 from appinfra.log import Logger
 
 from ..schema import RunResult
+
+
+def _make_version_id(md5: str, timestamp: datetime | None = None) -> str:
+    """Generate version ID: YYYYMMDD-HHMMSS-{md5}."""
+    ts = timestamp or datetime.now()
+    return f"{ts.strftime('%Y%m%d-%H%M%S')}-{md5}"
 
 
 @dataclass
@@ -145,22 +152,34 @@ class AdapterRegistry:
                 return info.path
         raise ValueError(f"Adapter not found: {ref}")
 
-    def _prepare_adapter_path(self, key: str, source_path: Path, overwrite: bool) -> Path:
-        """Validate and prepare adapter path, removing existing if overwriting."""
-        self._validate_key(key)
-        adapter_path = self.adapters_path / key
+    def _prepare_adapter_path(
+        self, key: str, md5: str, source_path: Path, *, overwrite: bool = False
+    ) -> tuple[Path, str]:
+        """Validate and prepare adapter path (versioned by timestamp-md5).
 
-        if adapter_path.exists() and not overwrite:
-            raise ValueError(f"Adapter '{key}' already exists. Use overwrite=True to replace.")
+        Returns:
+            Tuple of (adapter_path, version_id).
+
+        Raises:
+            ValueError: If adapter key already exists and overwrite is False.
+        """
+        self._validate_key(key)
         if not source_path.exists():
             raise FileNotFoundError(f"Adapter path not found: {source_path}")
 
-        if adapter_path.exists():
-            self._remove_deploy_symlink(key)
-            shutil.rmtree(adapter_path)
-            self._lg.info(f"removed existing adapter: {key}")
+        # Check if key already has any versions (for overwrite check)
+        key_path = self.adapters_path / key
+        if key_path.exists() and any(key_path.iterdir()) and not overwrite:
+            raise ValueError(f"Adapter '{key}' already exists. Use overwrite=True to replace.")
 
-        return adapter_path
+        # Structure: adapters/{key}/{YYYYMMDD-HHMMSS-md5}/
+        version_id = _make_version_id(md5)
+        adapter_path = key_path / version_id
+        if adapter_path.exists():
+            self._lg.info(f"adapter version already exists: {adapter_path}")
+            shutil.rmtree(adapter_path)
+
+        return adapter_path, version_id
 
     def register(
         self,
@@ -191,7 +210,10 @@ class AdapterRegistry:
         if training_result.adapter is None:
             raise ValueError("Training result has no adapter")
         source_path = Path(training_result.adapter.path)
-        adapter_path = self._prepare_adapter_path(key, source_path, overwrite)
+        md5 = training_result.adapter.md5
+        adapter_path, version_id = self._prepare_adapter_path(
+            key, md5, source_path, overwrite=overwrite
+        )
         shutil.copytree(source_path, adapter_path)
         self._lg.info(f"copied adapter to: {adapter_path}")
 
@@ -199,7 +221,7 @@ class AdapterRegistry:
         self._write_adapter_config(adapter_path, training_result, desc)
 
         if deploy:
-            self._create_deploy_symlink(key)
+            self._create_deploy_symlink(key, version_id)
 
         config = self._read_adapter_config(adapter_path)
         return AdapterInfo(
@@ -210,15 +232,18 @@ class AdapterRegistry:
             parent=config.get("parent"),
         )
 
-    def _create_deploy_symlink(self, key: str) -> None:
-        """Create symlink in deployed directory."""
+    def _create_deploy_symlink(self, key: str, version_id: str | None = None) -> None:
+        """Create symlink in deployed directory to specific version."""
         symlink_path = self.deployed_path / key
 
         if symlink_path.exists() or symlink_path.is_symlink():
             symlink_path.unlink()
 
-        # Use relative path for symlink
-        relative_target = Path("..") / "adapters" / key
+        # Use relative path for symlink: deployed/key -> ../adapters/key/version_id
+        if version_id:
+            relative_target = Path("..") / "adapters" / key / version_id
+        else:
+            relative_target = Path("..") / "adapters" / key
         symlink_path.symlink_to(relative_target)
         self._lg.info(f"created symlink: {symlink_path} -> {relative_target}")
 
@@ -229,67 +254,99 @@ class AdapterRegistry:
             symlink_path.unlink()
             self._lg.info(f"removed symlink: {symlink_path}")
 
-    def set_deployed(self, key: str, deployed: bool) -> None:
+    def set_deployed(self, key: str, deployed: bool, version_id: str | None = None) -> None:
         """Deploy or undeploy an adapter.
 
         Args:
             key: Adapter to modify
             deployed: True to deploy (create symlink), False to undeploy
+            version_id: Specific version to deploy (uses latest if not specified)
         """
         self._validate_key(key)
-        adapter_path = self.adapters_path / key
+        key_path = self.adapters_path / key
 
-        if not adapter_path.exists():
+        if not key_path.exists():
             raise ValueError(f"Adapter '{key}' not found")
 
         if deployed:
-            self._create_deploy_symlink(key)
+            if version_id is None:
+                # Find latest version
+                version_path = self._get_latest_version_path(key)
+                if version_path is None:
+                    raise ValueError(f"No versions found for adapter '{key}'")
+                version_id = version_path.name
+            self._create_deploy_symlink(key, version_id)
         else:
             self._remove_deploy_symlink(key)
 
         self._lg.info(f"set adapter '{key}' deployed={deployed}")
 
-    def remove(self, key: str) -> None:
-        """Remove an adapter from the registry.
+    def remove(self, key: str, version_id: str | None = None) -> None:
+        """Remove an adapter (all versions) or specific version.
 
         Args:
             key: Adapter to remove
+            version_id: Specific version to remove (removes all versions if not specified)
         """
         self._validate_key(key)
-        adapter_path = self.adapters_path / key
+        key_path = self.adapters_path / key
 
-        if not adapter_path.exists():
+        if not key_path.exists():
             raise ValueError(f"Adapter '{key}' not found")
 
-        # Remove symlink first if deployed
-        self._remove_deploy_symlink(key)
+        if version_id:
+            # Remove specific version
+            version_path = key_path / version_id
+            if not version_path.exists():
+                raise ValueError(f"Version '{version_id}' not found for adapter '{key}'")
+            # If this version is deployed, remove symlink
+            deployed_path = self._get_deployed_version_path(key)
+            if deployed_path and deployed_path == version_path:
+                self._remove_deploy_symlink(key)
+            shutil.rmtree(version_path)
+            self._lg.info(f"removed adapter version: {key}/{version_id}")
+        else:
+            # Remove all versions
+            self._remove_deploy_symlink(key)
+            shutil.rmtree(key_path)
+            self._lg.info(f"removed adapter: {key}")
 
-        # Remove adapter directory
-        shutil.rmtree(adapter_path)
-        self._lg.info(f"removed adapter: {key}")
+    def _get_deployed_version_path(self, key: str) -> Path | None:
+        """Get path to deployed version of an adapter."""
+        symlink = self.deployed_path / key
+        if symlink.is_symlink():
+            return symlink.resolve()
+        return None
+
+    def _get_latest_version_path(self, key: str) -> Path | None:
+        """Get path to latest version of an adapter (by mtime)."""
+        key_path = self.adapters_path / key
+        if not key_path.is_dir():
+            return None
+        versions = [p for p in key_path.iterdir() if p.is_dir() and (p / "config.yaml").exists()]
+        if not versions:
+            return None
+        return max(versions, key=lambda p: p.stat().st_mtime)
 
     def list(self) -> list[AdapterInfo]:
-        """List all registered adapters.
-
-        Returns:
-            List of AdapterInfo for each adapter
-        """
+        """List all registered adapters (shows deployed or latest version)."""
         adapters = []
-        for path in self.adapters_path.iterdir():
-            if not path.is_dir():
+        for key_path in self.adapters_path.iterdir():
+            if not key_path.is_dir():
                 continue
 
-            config_path = path / "config.yaml"
-            if not config_path.exists():
+            key = key_path.name
+            version_path = self._get_deployed_version_path(key) or self._get_latest_version_path(
+                key
+            )
+            if version_path is None:
                 continue
 
-            config = self._read_adapter_config(path)
-            key = path.name
-
+            config = self._read_adapter_config(version_path)
             adapters.append(
                 AdapterInfo(
                     key=key,
-                    path=path,
+                    path=version_path,
                     deployed=self.is_deployed(key),
                     description=config.get("description"),
                     parent=config.get("parent"),
@@ -299,26 +356,16 @@ class AdapterRegistry:
         return adapters
 
     def get(self, key: str) -> AdapterInfo | None:
-        """Get info for a specific adapter.
-
-        Args:
-            key: Adapter to look up
-
-        Returns:
-            AdapterInfo or None if not found
-        """
+        """Get info for a specific adapter (deployed or latest version)."""
         self._validate_key(key)
-        adapter_path = self.adapters_path / key
-        config_path = adapter_path / "config.yaml"
-
-        if not config_path.exists():
+        version_path = self._get_deployed_version_path(key) or self._get_latest_version_path(key)
+        if version_path is None:
             return None
 
-        config = self._read_adapter_config(adapter_path)
-
+        config = self._read_adapter_config(version_path)
         return AdapterInfo(
             key=key,
-            path=adapter_path,
+            path=version_path,
             deployed=self.is_deployed(key),
             description=config.get("description"),
             parent=config.get("parent"),

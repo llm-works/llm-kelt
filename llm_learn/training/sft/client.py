@@ -98,7 +98,12 @@ class Client:
 
     def _prepare_training(self, manifest: Manifest, output_dir: Path | None) -> tuple[Path, Path]:
         """Prepare training: resolve work dir and data path."""
+        import shutil
+
         work_dir = output_dir or (self._registry_path / "work" / manifest.adapter)
+        if work_dir.exists():
+            self._lg.info("cleaning previous work dir", extra={"path": str(work_dir)})
+            shutil.rmtree(work_dir)
         work_dir.mkdir(parents=True, exist_ok=True)
 
         data_path = resolve_data(manifest, work_dir)
@@ -121,7 +126,7 @@ class Client:
             extra={
                 "adapter": manifest.adapter,
                 "model": manifest.model.base,
-                "epochs": manifest.training.num_epochs,
+                "epochs": manifest.training.get("num_epochs", 3),
             },
         )
 
@@ -171,6 +176,15 @@ class Client:
         result = self._execute_sft(manifest, work_dir, data_path)
 
         if register:
+            from llm_infer import compute_adapter_metadata
+
+            from ..schema import Adapter
+
+            # Compute md5 before registration (needed for versioned paths)
+            if result.adapter:
+                meta = compute_adapter_metadata(Path(result.adapter.path))
+                result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=result.adapter.path)
+
             description = manifest.source.description or "SFT adapter"
             self.registry.register(
                 training_result=result,

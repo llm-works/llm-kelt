@@ -83,6 +83,7 @@ class LearnClient:
         embedder: Embedder | None = None,
         llm_client: ChatClient | None = None,
         learn_config: DotDict | None = None,
+        training_config: DotDict | None = None,
         ensure_schema: bool = True,
     ) -> None:
         """
@@ -94,7 +95,8 @@ class LearnClient:
             lg: Optional logger instance
             embedder: Optional embedder for generating embeddings
             llm_client: Optional LLM client for context-aware queries
-            learn_config: Optional learn settings
+            learn_config: Optional learn settings (config.learn section)
+            training_config: Optional training settings (config.training section)
             ensure_schema: If True (default), auto-migrate schema on init
         """
         self._db = database
@@ -103,6 +105,7 @@ class LearnClient:
         self._embedder = embedder
         self._llm_client = llm_client
         self._learn_config = learn_config
+        self._training_config = training_config
 
         self._verify_schema(ensure=ensure_schema)
         self._setup_stores()
@@ -205,6 +208,7 @@ class LearnClient:
             embedder=self._embedder,
             llm_client=self._llm_client,
             learn_config=self._learn_config,
+            training_config=self._training_config,
             ensure_schema=False,  # Don't re-run schema checks
         )
 
@@ -235,7 +239,7 @@ class LearnClient:
                 raise RuntimeError(
                     "Training not configured: adapters.lora.base_path not set in learn_config"
                 )
-            self._train = Factory(self._lg, registry_path)
+            self._train = Factory(self._lg, registry_path, self._get_default_profiles())
         return self._train
 
     def _get_registry_path(self) -> Path | None:
@@ -254,6 +258,16 @@ class LearnClient:
         from pathlib import Path
 
         return Path(base_path)
+
+    def _get_default_profiles(self) -> dict[str, dict]:
+        """Get default training profiles from training_config."""
+        if self._training_config is None:
+            return {}
+        default_profiles = getattr(self._training_config, "default_profiles", None)
+        if default_profiles is None:
+            return {}
+        # Convert DotDict to plain dict
+        return {k: dict(v) for k, v in default_profiles.items()}
 
     @property
     def database(self) -> Database:

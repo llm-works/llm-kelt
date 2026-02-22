@@ -6,12 +6,15 @@ Provides file-based training workflow:
 """
 
 from .client import Client
+from .errors import CorruptedManifestError, ManifestError
 from .schema import Data, Manifest, Model, Source
 
 __all__ = [
     "Client",
-    "Manifest",
-    "Source",
-    "Model",
+    "CorruptedManifestError",
     "Data",
+    "Manifest",
+    "ManifestError",
+    "Model",
+    "Source",
 ]

@@ -14,7 +14,8 @@ from appinfra.log import Logger
 from llm_learn.core.base import utc_now
 
 from ..lora import Config as LoraConfig
-from ..schema import TRAINING_DEFAULTS, Adapter, RunResult
+from ..model import build_training_config
+from ..schema import Adapter, RunResult
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
@@ -62,7 +63,7 @@ class Trainer:
         self.output_dir = Path(output_dir)
         self.base_model = base_model
         self.lora_config = lora_config or LoraConfig()
-        self.training_config = DotDict({**TRAINING_DEFAULTS, **(training_config or {})})
+        self.training_config = build_training_config(lg, base_model, training_config)
         self.beta = beta
         self.quantize = quantize
         self.reference_free = reference_free
@@ -231,32 +232,38 @@ class Trainer:
             processing_class=self.tokenizer,
         )
 
+    def _extract_dpo_metrics(self, dpo_logs: list) -> dict:
+        """Extract DPO-specific metrics (accuracy, margins, loss) from first/last logs."""
+        if not dpo_logs:
+            return {}
+        first_log, last_log = dpo_logs[0], dpo_logs[-1]
+        return {
+            "accuracy": last_log.get("rewards/accuracies", 0.0),
+            "margins": last_log.get("rewards/margins", 0.0),
+            "loss": last_log.get("loss", 0.0),
+            "accuracy_start": first_log.get("rewards/accuracies", 0.0),
+            "margins_start": first_log.get("rewards/margins", 0.0),
+            "loss_start": first_log.get("loss", 0.0),
+        }
+
     def _collect_metrics(self) -> dict:
         """Extract training metrics from trainer log history."""
-        if self.trainer is None:
+        if self.trainer is None or not self.trainer.state.log_history:
             return {}
 
-        metrics: dict = {}
-        if not self.trainer.state.log_history:
-            return metrics
+        log_history = self.trainer.state.log_history
+        metrics: dict = {"history": log_history}
 
-        # Find logs with DPO metrics (exclude final summary which only has train_loss)
-        dpo_logs = [log for log in self.trainer.state.log_history if "rewards/accuracies" in log]
-        if dpo_logs:
-            first_log, last_log = dpo_logs[0], dpo_logs[-1]
-            # Final metrics (most important)
-            metrics["accuracy"] = last_log.get("rewards/accuracies", 0.0)
-            metrics["margins"] = last_log.get("rewards/margins", 0.0)
-            metrics["loss"] = last_log.get("loss", 0.0)
-            # Starting metrics (for comparison)
-            metrics["accuracy_start"] = first_log.get("rewards/accuracies", 0.0)
-            metrics["margins_start"] = first_log.get("rewards/margins", 0.0)
-            metrics["loss_start"] = first_log.get("loss", 0.0)
+        # DPO-specific metrics (exclude final summary which only has train_loss)
+        dpo_logs = [log for log in log_history if "rewards/accuracies" in log]
+        metrics.update(self._extract_dpo_metrics(dpo_logs))
 
         # Overall train loss from final summary
-        final_log = self.trainer.state.log_history[-1]
+        final_log = log_history[-1]
         metrics["train_loss"] = final_log.get("train_loss", final_log.get("loss", 0.0))
-        metrics["epochs"] = final_log.get("epoch", 0.0)
+        metrics["train_runtime"] = final_log.get("train_runtime", 0.0)
+        metrics["train_samples_per_second"] = final_log.get("train_samples_per_second", 0.0)
+        metrics["epoch"] = final_log.get("epoch", 0.0)
 
         if self.eval_dataset:
             metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)

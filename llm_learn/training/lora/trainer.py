@@ -13,7 +13,8 @@ from appinfra.log import Logger
 
 from llm_learn.core.base import utc_now
 
-from ..schema import TRAINING_DEFAULTS, Adapter, RunResult
+from ..model import build_training_config
+from ..schema import Adapter, RunResult
 from .config import Config as LoraConfig
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
@@ -73,7 +74,7 @@ class Trainer:
         self.output_dir = Path(output_dir)
         self.base_model = base_model
         self.lora_config = lora_config or LoraConfig()
-        self.training_config = DotDict({**TRAINING_DEFAULTS, **(training_config or {})})
+        self.training_config = build_training_config(lg, base_model, training_config)
         self.quantize = quantize
 
         self.model = None
@@ -200,7 +201,14 @@ class Trainer:
 
         metrics: dict = {}
         if self.trainer.state.log_history:
-            metrics["train_loss"] = self.trainer.state.log_history[-1].get("train_loss", 0.0)
+            # Capture full training history
+            metrics["history"] = self.trainer.state.log_history
+            # Extract final summary metrics
+            final = self.trainer.state.log_history[-1]
+            metrics["train_loss"] = final.get("train_loss", 0.0)
+            metrics["train_runtime"] = final.get("train_runtime", 0.0)
+            metrics["train_samples_per_second"] = final.get("train_samples_per_second", 0.0)
+            metrics["epoch"] = final.get("epoch", 0.0)
 
         if self.eval_dataset:
             metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)

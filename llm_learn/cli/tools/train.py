@@ -11,7 +11,7 @@ from llm_infer.models import ModelResolver
 from ...training.lora import AdapterRegistry
 from ...training.lora import Config as LoraConfig
 from ...training.manifest.loader import load_manifest
-from ...training.profiles import build_training_config, get_registry_path, load_profile
+from ...training.profiles import build_training_config, get_registry_path, load_default_profile
 from ...training.runner import Runner
 from ...training.schema import Adapter
 
@@ -40,11 +40,9 @@ class _ConfigMixin:
     def _registry_path(self) -> Path:
         return get_registry_path(self._config())
 
-    def _build_config(self) -> DotDict:
-        """Build training config from profile and CLI overrides."""
-        profile = None
-        if getattr(self.args, "profile", None):  # type: ignore[attr-defined]
-            profile = load_profile(self._config(), self.args.profile)  # type: ignore[attr-defined]
+    def _build_config(self, method: str) -> DotDict:
+        """Build training config from default profile and CLI overrides."""
+        profile = load_default_profile(self._config(), method)
         overrides = {}
         if getattr(self.args, "epochs", None):  # type: ignore[attr-defined]
             overrides["num_epochs"] = self.args.epochs  # type: ignore[attr-defined]
@@ -76,6 +74,12 @@ class _ConfigMixin:
         generate = getattr(selection, "generate", None) if selection else None
         return getattr(generate, "default", None) if generate else None
 
+    def _model_locations(self) -> list[Path]:
+        """Get model search locations from config."""
+        config = self._config()
+        models_cfg = DotDict(getattr(config, "models", {}))
+        return [Path(loc) for loc in getattr(models_cfg, "locations", [])]
+
 
 class DpoTool(_ConfigMixin, Tool):
     """Train DPO adapter directly from JSONL data."""
@@ -89,7 +93,6 @@ class DpoTool(_ConfigMixin, Tool):
         parser.add_argument("--data", "-d", required=True, help="Input JSONL path")
         parser.add_argument("--output", "-o", required=True, help="Output adapter directory")
         parser.add_argument("--model", "-m", help="Model name")
-        parser.add_argument("--profile", help="Training profile name")
         parser.add_argument("--beta", type=float, help="DPO beta (default: 0.1)")
         parser.add_argument("--no-quantize", action="store_true", help="Disable quantization")
         parser.add_argument("--epochs", type=int, help="Training epochs")
@@ -103,7 +106,7 @@ class DpoTool(_ConfigMixin, Tool):
         if model_path is None:
             return 1
 
-        profile = load_profile(self._config(), self.args.profile) if self.args.profile else None
+        config = self._build_config("dpo")
         parent = None
         if self.args.based_on:
             parent_path = Path(self.args.based_on)
@@ -115,8 +118,8 @@ class DpoTool(_ConfigMixin, Tool):
             output_dir=Path(self.args.output),
             base_model=str(model_path),
             lora_config=LoraConfig(),
-            training_config=self._build_config(),
-            beta=self.args.beta or (profile.get("beta", 0.1) if profile else 0.1),
+            training_config=config,
+            beta=self.args.beta or config.get("beta", 0.1),
             quantize=not self.args.no_quantize,
             parent=parent,
         )
@@ -136,7 +139,6 @@ class SftTool(_ConfigMixin, Tool):
         parser.add_argument("--data", "-d", required=True, help="Input JSONL path")
         parser.add_argument("--output", "-o", required=True, help="Output adapter directory")
         parser.add_argument("--model", "-m", help="Model name")
-        parser.add_argument("--profile", help="Training profile name")
         parser.add_argument("--no-quantize", action="store_true", help="Disable quantization")
         parser.add_argument("--epochs", type=int, help="Training epochs")
         parser.add_argument("--lr", type=float, help="Learning rate")
@@ -155,7 +157,7 @@ class SftTool(_ConfigMixin, Tool):
             output_dir=Path(self.args.output),
             base_model=str(model_path),
             lora_config=LoraConfig(),
-            training_config=self._build_config(),
+            training_config=self._build_config("sft"),
             quantize=not self.args.no_quantize,
             resume_from=Path(self.args.based_on) if self.args.based_on else None,
         )
@@ -302,9 +304,8 @@ class RunTool(_ConfigMixin, Tool):
             return 0 if not self.args.manifest else 1
 
         try:
-            result = Runner(self.lg, registry_path).run(
-                manifest_path, skip_registration=self.args.skip_register
-            )
+            runner = Runner(self.lg, registry_path, model_locations=self._model_locations())
+            result = runner.run(manifest_path, skip_registration=self.args.skip_register)
         except Exception as e:
             self.lg.error(f"Training failed: {e}")
             return 1

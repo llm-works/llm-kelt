@@ -14,33 +14,34 @@ from appinfra import DotDict
 from .schema import TRAINING_DEFAULTS
 
 
-def load_profile(config: DotDict, profile_name: str) -> DotDict:
-    """Load a named training profile from config.
+def load_default_profile(config: DotDict, method: str) -> DotDict:
+    """Load default training profile for a method (sft/dpo).
 
     Args:
-        config: App config (DotDict with training.profiles section).
-        profile_name: Name of profile to load.
+        config: App config (DotDict with training.default_profiles section).
+        method: Training method ('sft' or 'dpo').
 
     Returns:
-        Profile as DotDict.
-
-    Raises:
-        ValueError: If profile not found.
+        Profile as DotDict, or empty DotDict if not configured.
     """
     training_cfg = getattr(config, "training", None)
     if training_cfg is None:
-        raise ValueError("No training config section found")
+        return DotDict()
 
-    profiles = getattr(training_cfg, "profiles", None)
+    profiles = getattr(training_cfg, "default_profiles", None)
     if profiles is None:
-        raise ValueError("No training.profiles section found")
+        return DotDict()
 
-    profile = getattr(profiles, profile_name, None)
+    profile = getattr(profiles, method, None)
     if profile is None:
-        available = list(profiles.keys()) if hasattr(profiles, "keys") else []
-        raise ValueError(f"Profile '{profile_name}' not found. Available: {available}")
+        return DotDict()
 
     return DotDict(dict(profile))
+
+
+def load_profile(config: DotDict, profile_name: str) -> DotDict:
+    """Load a named training profile from config (deprecated, use load_default_profile)."""
+    return load_default_profile(config, profile_name)
 
 
 def build_training_config(

@@ -51,15 +51,18 @@ class Factory:
         self,
         lg: Logger,
         registry_path: str | Path,
+        default_profiles: dict[str, dict] | None = None,
     ) -> None:
         """Initialize training client.
 
         Args:
             lg: Logger instance.
             registry_path: Base path for adapter registry and manifest queues.
+            default_profiles: Default training profiles by method (e.g., {"sft": {...}, "dpo": {...}}).
         """
         self._lg = lg
         self._registry_path = Path(registry_path).expanduser()
+        self._default_profiles = default_profiles or {}
 
         # Lazy-initialized clients
         self._manifest: Client | None = None
@@ -73,7 +76,7 @@ class Factory:
         if self._manifest is None:
             from .manifest import Client
 
-            self._manifest = Client(self._lg, self._registry_path)
+            self._manifest = Client(self._lg, self._registry_path, self._default_profiles)
         return self._manifest
 
     @property
