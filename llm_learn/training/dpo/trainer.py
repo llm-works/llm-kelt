@@ -54,7 +54,7 @@ class Trainer:
         lora_config: LoraConfig | None = None,
         training_config: DotDict | None = None,
         beta: float = 0.1,
-        quantize: bool = True,
+        quantize: bool | None = None,
         reference_free: bool = False,
         parent: Adapter | None = None,
     ):
@@ -65,7 +65,7 @@ class Trainer:
         self.lora_config = lora_config or LoraConfig()
         self.training_config = build_training_config(lg, base_model, training_config)
         self.beta = beta
-        self.quantize = quantize
+        self._quantize_override = quantize  # None = auto-detect
         self.reference_free = reference_free
         self.parent = parent
         self._init_state()
@@ -79,21 +79,7 @@ class Trainer:
         self.train_dataset = None
         self.eval_dataset = None
         self._quant_config = None
-
-    def _setup_quantization_config(self):
-        """Create BitsAndBytes config for 4-bit quantization."""
-        if not self.quantize:
-            return None
-
-        import torch
-        from transformers import BitsAndBytesConfig
-
-        return BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=True,
-        )
+        self._applied_quantization = False
 
     def _load_tokenizer(self):
         """Load tokenizer for the base model."""
@@ -121,15 +107,19 @@ class Trainer:
         )
 
     def _load_model(self):
-        """Load base model with optional quantization and apply LoRA."""
+        """Load base model with auto-detected quantization and apply LoRA."""
         import torch
         from peft import prepare_model_for_kbit_training
         from transformers import AutoModelForCausalLM
 
+        from ..model import get_quantization_config
+
         self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
 
-        self._quant_config = self._setup_quantization_config()
+        self._quant_config, self._applied_quantization = get_quantization_config(
+            self._lg, self.base_model, self._quantize_override
+        )
         self.model = AutoModelForCausalLM.from_pretrained(
             self.base_model,
             quantization_config=self._quant_config,
@@ -140,7 +130,7 @@ class Trainer:
 
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
-        if self.quantize:
+        if self._applied_quantization:
             self.model = prepare_model_for_kbit_training(self.model)
 
         self._apply_lora_adapter()
@@ -307,7 +297,7 @@ class Trainer:
                     "max_seq_length": self.training_config.max_seq_length,
                 },
                 "dpo": {"beta": self.beta, "reference_free": self.reference_free},
-                "quantize": self.quantize,
+                "quantized": self._applied_quantization,
             },
             started_at=started_at,
             completed_at=utc_now(),
@@ -344,7 +334,7 @@ def train_dpo(
     lora_config: LoraConfig | None = None,
     training_config: DotDict | None = None,
     beta: float = 0.1,
-    quantize: bool = True,
+    quantize: bool | None = None,
     reference_free: bool = False,
     parent: Adapter | None = None,
 ) -> RunResult:
@@ -358,7 +348,7 @@ def train_dpo(
         lora_config: LoRA hyperparameters. Uses sensible defaults if not provided.
         training_config: Training hyperparameters. Uses sensible defaults if not provided.
         beta: DPO beta parameter (higher = more conservative).
-        quantize: Use 4-bit quantization (QLoRA). Reduces VRAM ~4x.
+        quantize: Force quantization on/off. None = auto-detect from model metadata.
         reference_free: Skip reference model to save VRAM (may reduce quality).
         parent: Parent adapter to train on top of (for lineage).
 

@@ -14,7 +14,7 @@ from .dpo import Client as DpoClient
 from .export import ExportResult, export_feedback_classifier, export_feedback_sft
 from .factory import Factory
 from .lora import AdapterInfo, AdapterRegistry
-from .manifest import Client, Data, Manifest, Model, Source
+from .manifest import Client, Data, Manifest, Source
 from .profiles import build_training_config, get_registry_path, load_default_profile, load_profile
 from .runner import Runner
 from .schema import TRAINING_DEFAULTS, Adapter, RunResult
@@ -45,7 +45,6 @@ __all__ = [
     "Runner",
     "Manifest",
     "Source",
-    "Model",
     "Data",
     # Training functions (lazy-loaded, require 'training' extras)
     "train_lora",

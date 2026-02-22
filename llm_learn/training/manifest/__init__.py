@@ -7,7 +7,7 @@ Provides file-based training workflow:
 
 from .client import Client
 from .errors import CorruptedManifestError, ManifestError
-from .schema import Data, Manifest, Model, Source
+from .schema import Data, Manifest, Source
 
 __all__ = [
     "Client",
@@ -15,6 +15,5 @@ __all__ = [
     "Data",
     "Manifest",
     "ManifestError",
-    "Model",
     "Source",
 ]

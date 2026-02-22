@@ -235,7 +235,10 @@ class ShowTool(_ConfigMixin, Tool):
 
         print(f"\nManifest: {path.name}")
         print(f"  Adapter: {m.adapter}, Method: {m.method.upper()}")
-        print(f"  Model: {m.model.base}, Quantize: {m.model.quantize}")
+        model = (
+            m.training.get("requested_model") or m.training.get("base_model") or "(not specified)"
+        )
+        print(f"  Model: {model}")
         print(
             f"  Epochs: {m.training.get('num_epochs', 3)}, LR: {m.training.get('learning_rate', 2e-4)}"
         )

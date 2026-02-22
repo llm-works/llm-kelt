@@ -15,7 +15,7 @@ from appinfra import DotDict
 
 from ..schema import Adapter, RunResult
 from .errors import CorruptedManifestError
-from .schema import Data, Manifest, Model, Source
+from .schema import Data, Manifest, Source
 
 
 def _parse_datetime(value: str | datetime) -> datetime:
@@ -35,15 +35,6 @@ def _dict_to_source(data: dict[str, Any] | None) -> Source:
     if data is None:
         return Source()
     return Source(context_key=data.get("context_key"), description=data.get("description"))
-
-
-def _dict_to_model(data: dict[str, Any] | None) -> Model:
-    """Convert dict to Model."""
-    if data is None:
-        return Model()
-    return Model(
-        base=data.get("base", "Qwen/Qwen2.5-7B-Instruct"), quantize=data.get("quantize", True)
-    )
 
 
 def _dict_to_data(data: dict[str, Any]) -> Data:
@@ -122,13 +113,18 @@ def _dict_to_manifest(data: dict) -> Manifest:
     training_data = data.get("training", {})
     output_data = training_data.pop("output", None) or data.get("output")
 
+    # Migrate old model section to training (backwards compatibility)
+    if "model" in data:
+        model_data = data["model"]
+        if "requested_model" not in training_data and model_data.get("base"):
+            training_data["requested_model"] = model_data["base"]
+
     return Manifest(
         version=data.get("version", 1),
         created_at=_parse_datetime(data.get("created_at", datetime.now().astimezone())),
         method=method,
         adapter=adapter,
         source=_dict_to_source(data.get("source")),
-        model=_dict_to_model(data.get("model")),
         parent=_dict_to_adapter(data.get("parent")),
         lora=DotDict(data.get("lora", {})),
         training=DotDict(training_data),
@@ -162,11 +158,6 @@ def _source_to_dict(source: Source) -> dict[str, Any] | None:
     if source.description is not None:
         result["description"] = source.description
     return result
-
-
-def _model_to_dict(model: Model) -> dict[str, Any]:
-    """Convert Model to dict."""
-    return {"base": model.base, "quantize": model.quantize}
 
 
 def _data_to_dict(data: Data) -> dict[str, Any]:
@@ -237,7 +228,6 @@ def _manifest_to_dict(manifest: Manifest) -> dict[str, Any]:
 
     if (source_dict := _source_to_dict(manifest.source)) is not None:
         data["source"] = source_dict
-    data["model"] = _model_to_dict(manifest.model)
     if manifest.parent is not None:
         data["parent"] = _adapter_to_dict(manifest.parent)
 

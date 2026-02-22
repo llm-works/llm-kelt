@@ -35,19 +35,6 @@ class Source:
 
 
 @dataclass
-class Model:
-    """Base model configuration.
-
-    Attributes:
-        base: HuggingFace model ID or local path.
-        quantize: Use 4-bit quantization (QLoRA).
-    """
-
-    base: str = "Qwen/Qwen2.5-7B-Instruct"
-    quantize: bool = True
-
-
-@dataclass
 class Data:
     """Training data specification.
 
@@ -86,12 +73,13 @@ class Manifest:
         version: Schema version for forward compatibility.
         created_at: When manifest was created.
         source: Provenance information.
-        model: Base model configuration.
         parent: Parent adapter for lineage (continue training from this adapter).
         lora: LoRA configuration (converted to lora.Config by clients).
-        training: Training hyperparameters (merged with TRAINING_DEFAULTS by trainers).
+        training: Training config including:
+            - requested_model: Optional model requested by agent (resolved at training time).
+            - num_epochs, learning_rate, etc.: Training hyperparameters.
+            - output: Training result (populated after completion).
         method_config: Method-specific configuration (interpreted by dpo/sft clients).
-        output: Training result (populated after training completes).
     """
 
     # Required fields
@@ -105,7 +93,6 @@ class Manifest:
 
     # Optional configuration
     source: Source = field(default_factory=Source)
-    model: Model = field(default_factory=Model)
     parent: Adapter | None = None
     lora: DotDict = field(default_factory=DotDict)
     training: DotDict = field(default_factory=DotDict)

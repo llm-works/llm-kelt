@@ -1,6 +1,6 @@
 """Model utilities for training.
 
-Provides model detection and training config helpers.
+Provides model detection, quantization config, and training config helpers.
 """
 
 from __future__ import annotations
@@ -14,6 +14,64 @@ from .schema import TRAINING_DEFAULTS
 
 if TYPE_CHECKING:
     from appinfra.log import Logger
+
+
+def is_model_quantized(base_model: str) -> bool:
+    """Check if model is already quantized (GPTQ, AWQ, BNB).
+
+    Args:
+        base_model: Path or HuggingFace ID of model.
+
+    Returns:
+        True if model has pre-existing quantization.
+    """
+    try:
+        meta = get_model_metadata(path=base_model)
+        return meta.quantization is not None
+    except (FileNotFoundError, ValueError):
+        return False
+
+
+def get_quantization_config(
+    lg: Logger,
+    base_model: str,
+    quantize_override: bool | None = None,
+) -> tuple[Any, bool]:
+    """Get BitsAndBytes quantization config based on model and override.
+
+    Auto-detects: quantizes full-precision models, skips if already quantized.
+
+    Args:
+        lg: Logger instance.
+        base_model: Path or HuggingFace ID of model.
+        quantize_override: Force quantization on/off. None = auto-detect.
+
+    Returns:
+        Tuple of (BitsAndBytesConfig or None, whether quantization was applied).
+    """
+    if quantize_override is not None:
+        apply_quantization = quantize_override
+    else:
+        # Auto: quantize full-precision models, skip if already quantized
+        is_prequantized = is_model_quantized(base_model)
+        if is_prequantized:
+            lg.info("model already quantized, skipping BNB quantization")
+        apply_quantization = not is_prequantized
+
+    if not apply_quantization:
+        return None, False
+
+    import torch
+    from transformers import BitsAndBytesConfig
+
+    config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_use_double_quant=True,
+    )
+    return config, True
+
 
 # Keys that should be integers
 _INT_KEYS = {

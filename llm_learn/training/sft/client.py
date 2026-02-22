@@ -121,11 +121,12 @@ class Client:
         """Execute SFT training."""
         from ..lora.trainer import train_lora
 
+        base_model = manifest.training["base_model"]
         self._lg.info(
             "starting SFT training",
             extra={
                 "adapter": manifest.adapter,
-                "model": manifest.model.base,
+                "model": base_model,
                 "epochs": manifest.training.get("num_epochs", 3),
             },
         )
@@ -134,10 +135,9 @@ class Client:
             lg=self._lg,
             data_path=data_path,
             output_dir=work_dir,
-            base_model=manifest.model.base,
+            base_model=base_model,
             lora_config=self._build_lora_config(manifest.lora),
             training_config=manifest.training,
-            quantize=manifest.model.quantize,
         )
 
         self._lg.info(

@@ -116,13 +116,13 @@ class Client:
         self._validate_parent(manifest)
         return work_dir, data_path
 
-    def _log_training_start(self, manifest: Manifest) -> None:
+    def _log_training_start(self, manifest: Manifest, base_model: str) -> None:
         """Log DPO training start."""
         self._lg.info(
             "starting DPO training",
             extra={
                 "adapter": manifest.adapter,
-                "model": manifest.model.base,
+                "model": base_model,
                 "epochs": manifest.training.get("num_epochs", 3),
                 "beta": manifest.method_config.get("beta", 0.1),
                 "parent": manifest.parent.path if manifest.parent else None,
@@ -138,17 +138,17 @@ class Client:
         """Execute DPO training."""
         from .trainer import train_dpo
 
-        self._log_training_start(manifest)
+        base_model = manifest.training["base_model"]
+        self._log_training_start(manifest, base_model)
 
         result = train_dpo(
             lg=self._lg,
             data_path=data_path,
             output_dir=work_dir,
-            base_model=manifest.model.base,
+            base_model=base_model,
             lora_config=self._build_lora_config(manifest.lora),
             training_config=manifest.training,
             beta=manifest.method_config.get("beta", 0.1),
-            quantize=manifest.model.quantize,
             reference_free=manifest.method_config.get("reference_free", False),
             parent=manifest.parent,
         )

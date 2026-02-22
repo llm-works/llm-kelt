@@ -18,7 +18,6 @@ from .schema import (
     Adapter,
     Data,
     Manifest,
-    Model,
     Source,
 )
 
@@ -99,9 +98,9 @@ class Client:
     def _build_manifest_configs(
         self,
         method: Literal["dpo", "sft"],
-        model: str,
+        model: str | None,
         config: dict[str, Any] | None,
-    ) -> tuple[Model, DotDict, DotDict, DotDict]:
+    ) -> tuple[DotDict, DotDict, DotDict]:
         """Build configuration objects by merging default profile with agent overrides."""
         # Start with default profile for this method
         defaults = dict(self._default_profiles.get(method, {}))
@@ -113,22 +112,25 @@ class Client:
             if profile_key in merged and config_key not in merged:
                 merged[config_key] = merged.pop(profile_key)
 
-        model_config = Model(base=model, quantize=merged.get("quantize", True))
+        # Build training config with model info
         training_config = DotDict({k: merged[k] for k in _TRAINING_KEYS if k in merged})
+        if model:
+            training_config["requested_model"] = model
+
         lora_config = DotDict(merged.get("lora", {}))
         method_config = DotDict()
         if method == "dpo":
             method_config = DotDict(self._extract_method_config(merged, ["beta", "reference_free"]))
 
-        return model_config, lora_config, training_config, method_config
+        return lora_config, training_config, method_config
 
     def create(
         self,
         adapter: str,
         method: Literal["dpo", "sft"],
-        model: str,
         data: list[dict[str, Any]],
         *,
+        model: str | None = None,
         parent: Adapter | None = None,
         context_key: str | None = None,
         description: str | None = None,
@@ -139,8 +141,8 @@ class Client:
         Args:
             adapter: Output adapter key (series name, e.g., "my-agent-sft").
             method: Training method ("dpo" or "sft").
-            model: Base model path or HuggingFace ID.
             data: List of training records (inline data).
+            model: Optional base model (can be specified at training time via --model).
             parent: Parent adapter for lineage (continue training from this).
             context_key: Agent context key for provenance.
             description: Human-readable description.
@@ -150,7 +152,7 @@ class Client:
             Manifest instance.
         """
         source = Source(context_key=context_key, description=description)
-        model_config, lora_config, training_config, method_config = self._build_manifest_configs(
+        lora_config, training_config, method_config = self._build_manifest_configs(
             method, model, config
         )
 
@@ -159,7 +161,6 @@ class Client:
             method=method,
             data=Data(format="inline", records=data),
             source=source,
-            model=model_config,
             parent=parent,
             lora=lora_config,
             training=training_config,
