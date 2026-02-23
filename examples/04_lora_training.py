@@ -268,7 +268,7 @@ def run_training(lg: Logger, data_path: Path, output_dir: Path, base_model: str)
     print(f"  {OK}✓ Training complete{RESET}")
     print(f"    {MUTED}Duration: {result.duration_seconds:.1f}s{RESET}")
     print(f"    {MUTED}Final loss: {result.metrics.get('train_loss', 'N/A')}{RESET}")
-    print(f"    {MUTED}Adapter: {result.adapter_path}{RESET}")
+    print(f"    {MUTED}Adapter: {result.adapter.path if result.adapter else 'N/A'}{RESET}")
 
     return result  # type: ignore[no-any-return]
 

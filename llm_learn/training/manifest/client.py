@@ -84,7 +84,8 @@ class Client:
         self._registry_path = Path(registry_path).expanduser()
         self._default_profiles = default_profiles or {}
 
-        # Ensure directory structure exists
+    def _ensure_dirs(self) -> None:
+        """Lazily create directory structure on first write operation."""
         for subdir in ("pending", "completed", "adapters", "deployed"):
             (self._registry_path / subdir).mkdir(parents=True, exist_ok=True)
 
@@ -202,6 +203,8 @@ class Client:
         Raises:
             ValueError: If manifest with same key already pending.
         """
+        self._ensure_dirs()
+
         pending_dir = self._registry_path / "pending"
         dest_path = pending_dir / f"{manifest.adapter}.yaml"
 

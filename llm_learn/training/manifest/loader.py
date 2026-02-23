@@ -54,13 +54,15 @@ def _validate_required_fields(data: dict[str, Any]) -> None:
 
 def _build_output_result(output_data: dict[str, Any]) -> RunResult:
     """Build RunResult from output dict, parsing datetimes and nested adapters."""
-    output_data["started_at"] = _parse_datetime(output_data.get("started_at"))
-    output_data["completed_at"] = _parse_datetime(output_data.get("completed_at"))
-    if output_data.get("adapter"):
-        output_data["adapter"] = Adapter(output_data["adapter"])
-    if output_data.get("parent"):
-        output_data["parent"] = Adapter(output_data["parent"])
-    return RunResult(output_data)
+    # Make a copy to avoid mutating the caller's dict
+    data = dict(output_data)
+    data["started_at"] = _parse_datetime(data.get("started_at"))
+    data["completed_at"] = _parse_datetime(data.get("completed_at"))
+    if data.get("adapter"):
+        data["adapter"] = Adapter(data["adapter"])
+    if data.get("parent"):
+        data["parent"] = Adapter(data["parent"])
+    return RunResult(data)
 
 
 def _build_manifest(data: dict[str, Any]) -> Manifest:

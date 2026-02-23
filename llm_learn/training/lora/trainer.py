@@ -197,8 +197,8 @@ class Trainer:
 
         metrics: dict = {}
         if self.trainer.state.log_history:
-            # Capture full training history
-            metrics["history"] = self.trainer.state.log_history
+            # Capture training history (capped to avoid bloating manifests)
+            metrics["history"] = self.trainer.state.log_history[-100:]
             # Extract final summary metrics (TRL appends summary as last entry)
             final = self.trainer.state.log_history[-1]
             metrics["train_loss"] = final.get("train_loss", 0.0)

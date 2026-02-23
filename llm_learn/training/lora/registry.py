@@ -326,11 +326,10 @@ class AdapterRegistry:
         return None
 
     def _get_latest_version_path(self, key: str) -> Path | None:
-        """Get path to latest version of an adapter (by mtime).
+        """Get path to latest version of an adapter (by version ID).
 
-        Note: Uses filesystem mtime which may differ from version ID timestamp
-        if files were copied or restored. For authoritative ordering, use the
-        version ID embedded in the directory name.
+        Version IDs are YYYYMMDD-HHMMSS-{md5}, so lexicographic sort by name
+        gives chronological order (immune to mtime changes from file copies).
         """
         key_path = self.adapters_path / key
         if not key_path.is_dir():
@@ -338,7 +337,7 @@ class AdapterRegistry:
         versions = [p for p in key_path.iterdir() if p.is_dir() and (p / "config.yaml").exists()]
         if not versions:
             return None
-        return max(versions, key=lambda p: p.stat().st_mtime)
+        return max(versions, key=lambda p: p.name)
 
     def list(self) -> list[AdapterInfo]:
         """List all registered adapters (shows deployed or latest version)."""

@@ -172,6 +172,8 @@ class Client:
 
         from ..schema import Adapter
 
+        # Intentionally replace result.adapter in-place with computed metadata
+        # before registration. Caller receives result with populated md5/mtime.
         if result.adapter:
             meta = compute_adapter_metadata(Path(result.adapter.path))
             result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=result.adapter.path)

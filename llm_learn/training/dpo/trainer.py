@@ -143,7 +143,7 @@ class Trainer:
         gradients. The reference_free option skips this to save memory at the
         cost of training quality.
 
-        IMPORTANT: When training on top of an existing adapter (based_on),
+        IMPORTANT: When training on top of an existing adapter (parent),
         the reference model MUST also have that adapter applied (frozen).
         Otherwise DPO compares against the wrong baseline.
         """
