@@ -68,6 +68,8 @@ class Manifest(DotDict):
         training: Training config (num_epochs, learning_rate, requested_model, etc.).
         method_config: Method-specific configuration (beta for DPO, etc.).
         output: Training result, populated after completion (RunResult).
+        source_path: Path to manifest file (set during loading, used for resolving
+            relative external data paths). Not serialized.
     """
 
     pass

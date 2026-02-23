@@ -639,10 +639,14 @@ class FileStorage(Storage):
         if manifest.data.format == "inline":
             return self.write_training_data(work_dir, manifest.adapter, manifest.data.records)
 
-        # External file - must be absolute path
+        # External file - resolve path
         data_path = Path(manifest.data.path)
         if not data_path.is_absolute():
-            raise ValueError(f"External data path must be absolute: {data_path}")
+            # Relative path - resolve against manifest location or work_dir
+            if manifest.get("source_path"):
+                data_path = manifest.source_path.parent / data_path
+            else:
+                data_path = work_dir / data_path
 
         if not data_path.exists():
             raise FileNotFoundError(f"Data file not found: {data_path}")

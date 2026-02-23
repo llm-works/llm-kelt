@@ -300,7 +300,9 @@ class Storage(ABC):
         """Resolve manifest data to a file path.
 
         For inline data, writes to work_dir and returns path.
-        For external data, the path must be absolute.
+        For external data, resolves the path:
+        - Absolute paths used as-is
+        - Relative paths resolved against manifest.source_path (if set) or work_dir
 
         Args:
             manifest: Manifest with data section.

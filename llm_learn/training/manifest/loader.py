@@ -64,8 +64,13 @@ def _build_output_result(output_data: dict[str, Any]) -> RunResult:
     return RunResult(data)
 
 
-def _build_manifest(data: dict[str, Any]) -> Manifest:
-    """Build Manifest from validated dict."""
+def _build_manifest(data: dict[str, Any], source_path: Path | None = None) -> Manifest:
+    """Build Manifest from validated dict.
+
+    Args:
+        data: Raw manifest data from YAML.
+        source_path: Path to manifest file (for resolving relative external data paths).
+    """
     _validate_required_fields(data)
 
     # Training section may contain output (new format) or output at root (old format)
@@ -94,6 +99,7 @@ def _build_manifest(data: dict[str, Any]) -> Manifest:
         data=Data(data["data"]),
         deployment=Deployment(data.get("deployment", {})),
         output=output,
+        source_path=source_path,
     )
 
 
@@ -108,7 +114,7 @@ def load_manifest(path: Path) -> Manifest:
     if not isinstance(data, dict):
         raise CorruptedManifestError(path, f"expected dict, got {type(data).__name__}")
 
-    return _build_manifest(data)
+    return _build_manifest(data, source_path=path.resolve())
 
 
 def _serialize_datetime(dt: datetime) -> str:

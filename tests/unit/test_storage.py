@@ -694,6 +694,105 @@ class TestDataFileOperations:
         with pytest.raises(FileNotFoundError, match="Data file not found"):
             storage.resolve_external_data(str(tmp_path / "nonexistent.jsonl"))
 
+    def test_resolve_data_path_inline(self, storage: FileStorage, tmp_path: Path):
+        """Test resolve_data_path writes inline data to work_dir."""
+        from llm_learn.training.manifest.schema import Data, Manifest
+
+        manifest = Manifest(
+            adapter="test-adapter",
+            method="sft",
+            data=Data(format="inline", records=[{"prompt": "Hello", "completion": "Hi"}]),
+        )
+        work_dir = tmp_path / "work"
+        work_dir.mkdir()
+
+        result = storage.resolve_data_path(manifest, work_dir)
+
+        assert result.exists()
+        assert result.parent == work_dir
+        assert "test-adapter" in result.name
+
+    def test_resolve_data_path_external_absolute(self, storage: FileStorage, tmp_path: Path):
+        """Test resolve_data_path with absolute external path."""
+        from llm_learn.training.manifest.schema import Data, Manifest
+
+        data_file = tmp_path / "data.jsonl"
+        data_file.write_text('{"prompt": "test", "completion": "ok"}\n')
+
+        manifest = Manifest(
+            adapter="test-adapter",
+            method="sft",
+            data=Data(format="external", path=str(data_file)),
+        )
+        work_dir = tmp_path / "work"
+        work_dir.mkdir()
+
+        result = storage.resolve_data_path(manifest, work_dir)
+
+        assert result == data_file
+
+    def test_resolve_data_path_external_relative_with_source_path(
+        self, storage: FileStorage, tmp_path: Path
+    ):
+        """Test resolve_data_path resolves relative paths against manifest source_path."""
+        from llm_learn.training.manifest.schema import Data, Manifest
+
+        # Create manifest dir and data file
+        manifest_dir = tmp_path / "manifests"
+        manifest_dir.mkdir()
+        data_file = manifest_dir / "data.jsonl"
+        data_file.write_text('{"prompt": "test", "completion": "ok"}\n')
+
+        manifest = Manifest(
+            adapter="test-adapter",
+            method="sft",
+            data=Data(format="external", path="data.jsonl"),  # Relative path
+            source_path=manifest_dir / "train.yaml",  # Where manifest was loaded from
+        )
+        work_dir = tmp_path / "work"
+        work_dir.mkdir()
+
+        result = storage.resolve_data_path(manifest, work_dir)
+
+        assert result == data_file
+
+    def test_resolve_data_path_external_relative_fallback_to_work_dir(
+        self, storage: FileStorage, tmp_path: Path
+    ):
+        """Test resolve_data_path falls back to work_dir for relative paths without source_path."""
+        from llm_learn.training.manifest.schema import Data, Manifest
+
+        work_dir = tmp_path / "work"
+        work_dir.mkdir()
+        data_file = work_dir / "data.jsonl"
+        data_file.write_text('{"prompt": "test", "completion": "ok"}\n')
+
+        manifest = Manifest(
+            adapter="test-adapter",
+            method="sft",
+            data=Data(format="external", path="data.jsonl"),  # Relative path
+            # No source_path - in-memory manifest
+        )
+
+        result = storage.resolve_data_path(manifest, work_dir)
+
+        assert result == data_file
+
+    def test_resolve_data_path_external_not_found(self, storage: FileStorage, tmp_path: Path):
+        """Test resolve_data_path raises for non-existent external file."""
+        from llm_learn.training.manifest.schema import Data, Manifest
+
+        manifest = Manifest(
+            adapter="test-adapter",
+            method="sft",
+            data=Data(format="external", path=str(tmp_path / "nonexistent.jsonl")),
+        )
+        work_dir = tmp_path / "work"
+        work_dir.mkdir()
+
+        with pytest.raises(FileNotFoundError, match="Data file not found"):
+            storage.resolve_data_path(manifest, work_dir)
+
 
 class TestValidation:
     """Test key validation."""

@@ -232,6 +232,8 @@ data:
         assert manifest.data.format == "inline"
         assert len(manifest.data.records) == 1
         assert manifest.data.records[0]["prompt"] == "What is 2+2?"
+        # source_path should be set for resolving relative external data paths
+        assert manifest.source_path == manifest_path.resolve()
 
     def test_load_dpo_manifest(self, tmp_path: Path):
         """Test loading a DPO manifest."""
