@@ -74,7 +74,7 @@ class Client:
         )
 
     def _validate_records(self, manifest: Manifest) -> None:
-        """Validate DPO record structure."""
+        """Validate DPO record structure (inline data only; external files validated at load)."""
         errors: list[str] = []
         for i, record in enumerate(manifest.data.records):
             if "prompt" not in record:
@@ -101,7 +101,10 @@ class Client:
         )
 
     def _prepare_training(self, manifest: Manifest, output_dir: Path | None) -> tuple[Path, Path]:
-        """Prepare training: resolve work dir and data path."""
+        """Prepare training: resolve work dir and data path.
+
+        Cleans any existing work directory to ensure fresh training state.
+        """
         import shutil
 
         work_dir = output_dir or (self._registry_path / "work" / manifest.adapter)
@@ -159,6 +162,30 @@ class Client:
         )
         return result
 
+    def _register_adapter(self, result: RunResult, manifest: Manifest) -> None:
+        """Register trained adapter to registry.
+
+        Computes md5 before registration (needed for versioned paths).
+        Note: Runner also computes this, but Client can be used standalone.
+        """
+        from llm_infer import compute_adapter_metadata
+
+        from ..schema import Adapter
+
+        if result.adapter:
+            meta = compute_adapter_metadata(Path(result.adapter.path))
+            result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=result.adapter.path)
+
+        description = manifest.source.description or "DPO adapter"
+        self.registry.register(
+            training_result=result,
+            key=manifest.adapter,
+            description=description,
+            deploy=True,
+            overwrite=True,
+        )
+        self._lg.info("registered adapter", extra={"adapter": manifest.adapter})
+
     def train(
         self,
         manifest: Manifest,
@@ -189,24 +216,7 @@ class Client:
         result = self._execute_dpo(manifest, work_dir, data_path)
 
         if register:
-            from llm_infer import compute_adapter_metadata
-
-            from ..schema import Adapter
-
-            # Compute md5 before registration (needed for versioned paths)
-            if result.adapter:
-                meta = compute_adapter_metadata(Path(result.adapter.path))
-                result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=result.adapter.path)
-
-            description = manifest.source.description or "DPO adapter"
-            self.registry.register(
-                training_result=result,
-                key=manifest.adapter,
-                description=description,
-                deploy=True,
-                overwrite=True,
-            )
-            self._lg.info("registered adapter", extra={"adapter": manifest.adapter})
+            self._register_adapter(result, manifest)
 
         return result
 

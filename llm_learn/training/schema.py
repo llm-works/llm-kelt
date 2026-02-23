@@ -52,7 +52,7 @@ class RunResult:
     Attributes:
         status: "completed" or "failed".
         base_model: HuggingFace model ID used as base.
-        method: Training method ("lora" or "dpo").
+        method: Training method ("sft" or "dpo").
         metrics: Training metrics (loss, eval metrics if applicable).
         config: Full configuration dict used for training.
         started_at: When training started.

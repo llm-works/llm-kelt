@@ -63,7 +63,7 @@ class TestLoraTraining:
             device_map="auto",
             trust_remote_code=True,
         )
-        loaded_model = PeftModel.from_pretrained(base_model, str(Path(result.adapter.path)))
+        loaded_model = PeftModel.from_pretrained(base_model, result.adapter.path)
         assert loaded_model is not None, "Should be able to load adapter"
 
         # Verify training config was stored
@@ -168,5 +168,5 @@ class TestDpoTraining:
             device_map="auto",
             trust_remote_code=True,
         )
-        loaded_model = PeftModel.from_pretrained(base_model, str(Path(result.adapter.path)))
+        loaded_model = PeftModel.from_pretrained(base_model, result.adapter.path)
         assert loaded_model is not None, "Should be able to load adapter"

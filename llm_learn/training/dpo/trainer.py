@@ -256,6 +256,7 @@ class Trainer:
         metrics["epoch"] = final_log.get("epoch", 0.0)
 
         if self.eval_dataset:
+            # Runs full evaluation pass - adds GPU overhead but provides eval_loss metric
             metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
 
         return metrics

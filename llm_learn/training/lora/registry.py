@@ -284,6 +284,9 @@ class AdapterRegistry:
     def remove(self, key: str, version_id: str | None = None) -> None:
         """Remove an adapter (all versions) or specific version.
 
+        If the removed version is currently deployed, the symlink is also removed,
+        leaving the adapter undeployed. Call set_deployed() to deploy another version.
+
         Args:
             key: Adapter to remove
             version_id: Specific version to remove (removes all versions if not specified)
@@ -319,7 +322,12 @@ class AdapterRegistry:
         return None
 
     def _get_latest_version_path(self, key: str) -> Path | None:
-        """Get path to latest version of an adapter (by mtime)."""
+        """Get path to latest version of an adapter (by mtime).
+
+        Note: Uses filesystem mtime which may differ from version ID timestamp
+        if files were copied or restored. For authoritative ordering, use the
+        version ID embedded in the directory name.
+        """
         key_path = self.adapters_path / key
         if not key_path.is_dir():
             return None

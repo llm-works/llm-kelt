@@ -209,6 +209,7 @@ class Client:
         pending_dir = self._registry_path / "pending"
         dest_path = pending_dir / f"{manifest.adapter}.yaml"
 
+        # Note: check-then-write has TOCTOU race, but acceptable for single-user CLI
         if dest_path.exists():
             raise ValueError(f"Manifest already in queue: {manifest.adapter}")
 

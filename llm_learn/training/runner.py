@@ -114,6 +114,7 @@ class Runner:
                 manifest, output_dir=output_dir, register=not skip_registration
             )
 
+        # Fall through to SFT (method already validated by validate_manifest)
         from .sft import Client as SftClient
 
         return SftClient(self._lg, self._registry_path).train(

@@ -8,6 +8,8 @@ import pytest
 
 from llm_learn.training.manifest import Client, Manifest
 from llm_learn.training.manifest.errors import CorruptedManifestError
+
+# Import private functions to test internal parsing logic directly
 from llm_learn.training.manifest.loader import (
     _dict_to_output,
     _to_number,

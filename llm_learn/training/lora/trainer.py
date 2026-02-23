@@ -199,7 +199,7 @@ class Trainer:
         if self.trainer.state.log_history:
             # Capture full training history
             metrics["history"] = self.trainer.state.log_history
-            # Extract final summary metrics
+            # Extract final summary metrics (TRL appends summary as last entry)
             final = self.trainer.state.log_history[-1]
             metrics["train_loss"] = final.get("train_loss", 0.0)
             metrics["train_runtime"] = final.get("train_runtime", 0.0)

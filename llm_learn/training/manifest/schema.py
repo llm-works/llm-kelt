@@ -107,6 +107,6 @@ class Manifest:
             raise ValueError("adapter is required")
         if self.method not in ("dpo", "sft"):
             raise ValueError(f"method must be 'dpo' or 'sft', got '{self.method}'")
-        # Validate adapter key has no path traversal
+        # Validate adapter key has no path traversal (conservative check - ".." anywhere is rejected)
         if "/" in self.adapter or "\\" in self.adapter or ".." in self.adapter:
             raise ValueError(f"Invalid adapter: {self.adapter}")

@@ -9,7 +9,6 @@ This example demonstrates the complete LoRA training workflow:
 5. Compare before/after responses
 
 Prerequisites:
-    - PostgreSQL database with pgvector extension
     - Config file at etc/llm-learn.yaml
     - llm-infer running with adapter support
     - GPU with CUDA support (training)
@@ -27,6 +26,7 @@ from tempfile import TemporaryDirectory
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from _helpers import H1, H2, INFO, LLM_A, LLM_Q, MUTED, OK, RESET, WARN, get_demo_context_key
+from appinfra import DotDict
 from appinfra.config import Config
 from appinfra.log import LogConfig, Logger, LoggerFactory
 from llm_infer.client import Factory as LLMClientFactory
@@ -36,7 +36,6 @@ from llm_learn import LearnClient, LearnClientFactory
 from llm_learn.training import (
     AdapterRegistry,
     LoraConfig,
-    RunConfig,
     RunResult,
     export_feedback_sft,
     train_lora,
@@ -240,7 +239,7 @@ def run_training(lg: Logger, data_path: Path, output_dir: Path, base_model: str)
 
     import torch
 
-    training_config = RunConfig(
+    training_config = DotDict(
         num_epochs=2,  # Quick demo
         batch_size=2,
         gradient_accumulation_steps=2,
@@ -252,11 +251,9 @@ def run_training(lg: Logger, data_path: Path, output_dir: Path, base_model: str)
         logging_steps=5,
     )
 
+    effective_batch = training_config.batch_size * training_config.gradient_accumulation_steps
     print(f"  {INFO}LoRA config:{RESET} r={lora_config.r}, alpha={lora_config.lora_alpha}")
-    print(
-        f"  {INFO}Training:{RESET} {training_config.num_epochs} epochs, "
-        f"batch={training_config.effective_batch_size}"
-    )
+    print(f"  {INFO}Training:{RESET} {training_config.num_epochs} epochs, batch={effective_batch}")
 
     result = train_lora(
         lg=lg,

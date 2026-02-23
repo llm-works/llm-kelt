@@ -39,11 +39,6 @@ def load_default_profile(config: DotDict, method: str) -> DotDict:
     return DotDict(dict(profile))
 
 
-def load_profile(config: DotDict, profile_name: str) -> DotDict:
-    """Load a named training profile from config (deprecated, use load_default_profile)."""
-    return load_default_profile(config, profile_name)
-
-
 def build_training_config(
     profile: DotDict | None = None,
     overrides: dict[str, Any] | None = None,
@@ -60,7 +55,7 @@ def build_training_config(
     config = DotDict({**TRAINING_DEFAULTS})
 
     if profile:
-        # Map profile keys to training config keys
+        # Map profile keys to training config keys (aliased keys)
         key_map = {
             "epochs": "num_epochs",
             "batch_size": "batch_size",
@@ -71,7 +66,7 @@ def build_training_config(
         for profile_key, config_key in key_map.items():
             if profile_key in profile:
                 config[config_key] = profile[profile_key]
-        # Also accept direct config keys
+        # Direct config keys take precedence over aliased keys above
         for key in TRAINING_DEFAULTS:
             if key in profile:
                 config[key] = profile[key]

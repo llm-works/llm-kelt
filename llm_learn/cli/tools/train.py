@@ -50,16 +50,29 @@ class _ConfigMixin:
             overrides["learning_rate"] = self.args.lr  # type: ignore[attr-defined]
         return build_training_config(profile, overrides)
 
+    def _models_config(self) -> DotDict:
+        """Get models config section."""
+        return DotDict(getattr(self._config(), "models", {}))
+
+    def _model_locations(self) -> list[Path]:
+        """Get model search locations from config."""
+        return [Path(loc) for loc in getattr(self._models_config(), "locations", [])]
+
+    def _get_default_model(self) -> str | None:
+        """Get default model name from config."""
+        models_cfg = self._models_config()
+        selection = getattr(models_cfg, "selection", None)
+        generate = getattr(selection, "generate", None) if selection else None
+        return getattr(generate, "default", None) if generate else None
+
     def _resolve_model(self, model_name: str | None) -> Path | None:
         """Resolve model name to path."""
-        config = self._config()
-        models_cfg = DotDict(getattr(config, "models", {}))
-        locations = [Path(loc) for loc in getattr(models_cfg, "locations", [])]
+        locations = self._model_locations()
         if not locations:
             self.lg.error("no model locations configured")  # type: ignore[attr-defined]
             return None
         resolver = ModelResolver(lg=self.lg, locations=locations)  # type: ignore[attr-defined]
-        name = model_name or self._get_default_model(models_cfg)
+        name = model_name or self._get_default_model()
         if not name:
             self.lg.error("no model specified and no default configured")  # type: ignore[attr-defined]
             return None
@@ -67,18 +80,6 @@ class _ConfigMixin:
         if path is None:
             self.lg.error("model not found", extra={"model": name})  # type: ignore[attr-defined]
         return path
-
-    def _get_default_model(self, models_cfg: DotDict) -> str | None:
-        """Get default model name from config."""
-        selection = getattr(models_cfg, "selection", None)
-        generate = getattr(selection, "generate", None) if selection else None
-        return getattr(generate, "default", None) if generate else None
-
-    def _model_locations(self) -> list[Path]:
-        """Get model search locations from config."""
-        config = self._config()
-        models_cfg = DotDict(getattr(config, "models", {}))
-        return [Path(loc) for loc in getattr(models_cfg, "locations", [])]
 
 
 class DpoTool(_ConfigMixin, Tool):

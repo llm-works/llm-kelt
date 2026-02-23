@@ -79,7 +79,7 @@ class TestClientContext:
         assert "acme" in repr_str
         assert "public" in repr_str
 
-    def test_immutable_after_creation(self):
+    def test_mutable_after_creation(self):
         """Test that context fields can be modified (dataclass not frozen)."""
         context = ClientContext(context_key="acme", schema_name="public")
 
