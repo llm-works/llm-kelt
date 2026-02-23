@@ -6,6 +6,8 @@ that specify everything needed to run a training job.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from appinfra import DotDict
 
 
@@ -73,3 +75,24 @@ class Manifest(DotDict):
     """
 
     pass
+
+
+def get_deploy_setting(manifest: Manifest) -> bool | Literal["add", "replace"]:
+    """Get deployment setting from manifest.
+
+    Args:
+        manifest: Training manifest.
+
+    Returns:
+        False if policy is "skip", otherwise "add" or "replace".
+
+    Raises:
+        ValueError: If policy is not a valid value ("skip", "add", "replace").
+    """
+    deployment = manifest.get("deployment") or {}
+    policy: str = deployment.get("policy", "replace")
+    if policy not in ("skip", "add", "replace"):
+        raise ValueError(f"Invalid deployment policy: {policy}")
+    if policy == "skip":
+        return False
+    return "add" if policy == "add" else "replace"

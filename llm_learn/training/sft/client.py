@@ -6,12 +6,12 @@ Provides methods to train adapters using Supervised Fine-Tuning.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from appinfra import DotDict
 from appinfra.log import Logger
 
-from ..manifest.schema import Manifest
+from ..manifest.schema import Manifest, get_deploy_setting
 from ..schema import RunResult
 from ..storage import Storage
 
@@ -142,23 +142,6 @@ class Client:
         self._lg.info("training complete", extra={"duration_s": result.duration_seconds})
         return result
 
-    def _get_deploy_setting(self, manifest: Manifest) -> bool | Literal["add", "replace"]:
-        """Get deployment setting from manifest.
-
-        Returns:
-            False if policy is "skip", otherwise "add" or "replace".
-
-        Raises:
-            ValueError: If policy is not a valid value.
-        """
-        deployment = manifest.get("deployment") or {}
-        policy: str = deployment.get("policy", "replace")
-        if policy not in ("skip", "add", "replace"):
-            raise ValueError(f"Invalid deployment policy: {policy}")
-        if policy == "skip":
-            return False
-        return "add" if policy == "add" else "replace"
-
     def _register_adapter(self, result: RunResult, manifest: Manifest) -> None:
         """Register trained adapter to registry."""
         try:
@@ -176,7 +159,7 @@ class Client:
             result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=result.adapter.path)
 
         description = manifest.source.description or "SFT adapter"
-        deploy = self._get_deploy_setting(manifest)
+        deploy = get_deploy_setting(manifest)
         self.registry.register(
             training_result=result,
             key=manifest.adapter,

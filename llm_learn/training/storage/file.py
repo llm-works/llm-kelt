@@ -158,44 +158,25 @@ class FileStorage(Storage):
     # Adapter Operations (ABC implementation)
     # =========================================================================
 
-    def store_adapter(  # type: ignore[override]
+    def store_adapter(
         self,
-        training_result_or_source: RunResult | Path,
+        training_result: RunResult,
         key: str,
-        description_or_version_id: str,
-        deploy: bool = True,
-    ) -> AdapterInfo | Path:
-        """Store a trained adapter.
+        description: str,
+        deploy: bool | Literal["add", "replace"] = True,
+    ) -> AdapterInfo:
+        """Store a trained adapter (ABC-compliant signature).
 
-        Supports two signatures for backwards compatibility:
-        - ABC: store_adapter(training_result, key, description, deploy) -> AdapterInfo
-        - Legacy: store_adapter(source_path, key, version_id) -> Path
+        Args:
+            training_result: Result from training with adapter path.
+            key: Adapter key.
+            description: Human-readable description.
+            deploy: Deployment setting (True/"replace", "add", or False).
+
+        Returns:
+            AdapterInfo with registration details.
         """
-        # Legacy signature: (source: Path, key: str, version_id: str)
-        if isinstance(training_result_or_source, Path):
-            return self._store_adapter_legacy(
-                training_result_or_source, key, description_or_version_id
-            )
-
-        # ABC signature: (training_result: RunResult, key: str, description: str, deploy: bool)
-        return self._store_adapter_from_result(
-            training_result_or_source, key, description_or_version_id, deploy
-        )
-
-    def _store_adapter_legacy(self, source: Path, key: str, version_id: str) -> Path:
-        """Store adapter from source path (legacy API)."""
-        self.validate_key(key)
-        if not source.exists():
-            raise FileNotFoundError(f"Adapter source not found: {source}")
-
-        adapter_path = self.adapters_path / key / version_id
-        if adapter_path.exists():
-            shutil.rmtree(adapter_path)
-
-        shutil.copytree(source, adapter_path)
-        self._lg.info("stored adapter", extra={"key": key, "version": version_id})
-
-        return adapter_path
+        return self._store_adapter_from_result(training_result, key, description, deploy)
 
     def _validate_training_result(self, training_result: RunResult) -> Path:
         """Validate training result and return source path."""
@@ -412,6 +393,10 @@ class FileStorage(Storage):
             version_path = key_path / version_id
             if not version_path.exists():
                 raise ValueError(f"Version '{version_id}' not found for adapter '{key}'")
+            # Check if this version is deployed and undeploy if so
+            deployed_path = self.get_deployed_path(key)
+            if deployed_path and deployed_path.resolve() == version_path.resolve():
+                self.undeploy_adapter(key)
             shutil.rmtree(version_path)
             self._lg.info("removed adapter version", extra={"key": key, "version": version_id})
         else:
@@ -455,7 +440,8 @@ class FileStorage(Storage):
 
         md5 = config.get("md5", "unknown")
         new_symlink = self.deployed_path / f"{key}-{md5}"
-        if not new_symlink.exists():
+        # Check both exists() and is_symlink() to handle dangling symlinks
+        if not (new_symlink.exists() or new_symlink.is_symlink()):
             new_symlink.symlink_to(Path("..") / "adapters" / key / version_id)
             self._lg.info("migrated symlink", extra={"old": key, "new": new_symlink.name})
 

@@ -15,9 +15,13 @@ Prerequisites:
     - Local model weights in HuggingFace format
 
 Usage:
-    python examples/04_lora_training.py
+    python examples/04_lora_training.py [output_dir]
+
+If output_dir is not provided, a temporary directory is used and
+the adapter will be deleted after the script exits.
 """
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -145,8 +149,39 @@ def run_training(lg: Logger, data_path: Path, output_dir: Path, model_path: str)
     return Path(result.adapter.path) if result.adapter else None
 
 
+def _run_training_in_dir(lg: Logger, output_dir: Path, training_model_path: Path) -> Path | None:
+    """Run training in the given output directory."""
+    data_path = write_training_data(output_dir)
+    return run_training(lg, data_path, output_dir / "adapter", str(training_model_path))
+
+
+def _print_result(adapter_path: Path | None, persistent: bool) -> None:
+    """Print training result and deployment instructions."""
+    print(f"\n{H2}> Result{RESET}")
+    if adapter_path:
+        print(f"  {OK}Adapter trained successfully{RESET}")
+        print(f"  {INFO}Path: {adapter_path}{RESET}")
+        if persistent:
+            print(f"\n  {MUTED}To deploy this adapter:{RESET}")
+            print(f"  {MUTED}  1. Copy to your llm-infer adapter directory{RESET}")
+            print(f"  {MUTED}  2. Call POST /v1/adapters/refresh{RESET}")
+        else:
+            print(f"\n  {WARN}Note: Using temp dir - adapter will be deleted!{RESET}")
+            print(f"  {MUTED}Pass output_dir argument to persist the adapter.{RESET}")
+    else:
+        print(f"  {WARN}Training completed but no adapter was produced{RESET}")
+
+
 def main() -> None:
     """Run LoRA training example."""
+    parser = argparse.ArgumentParser(description="LoRA Fine-Tuning Example")
+    parser.add_argument(
+        "output_dir",
+        nargs="?",
+        help="Output directory for adapter (uses temp dir if not specified)",
+    )
+    args = parser.parse_args()
+
     print(f"\n{H1}{'=' * 60}{RESET}")
     print(f"{H1}  Example 04: LoRA Fine-Tuning{RESET}")
     print(f"{H1}{'=' * 60}{RESET}")
@@ -172,25 +207,18 @@ def main() -> None:
     print(f"{MUTED}Running model:{RESET} {INFO}{running_model}{RESET}")
     print(f"{MUTED}Training model:{RESET} {INFO}{training_model_path}{RESET}")
 
-    with TemporaryDirectory() as tmpdir:
-        output_dir = Path(tmpdir)
-
-        # Write training data
-        data_path = write_training_data(output_dir)
-
-        # Train adapter
-        adapter_path = run_training(lg, data_path, output_dir / "adapter", str(training_model_path))
-
-        # Show result
-        print(f"\n{H2}> Result{RESET}")
-        if adapter_path:
-            print(f"  {OK}Adapter trained successfully{RESET}")
-            print(f"  {INFO}Path: {adapter_path}{RESET}")
-            print(f"\n  {MUTED}To deploy this adapter:{RESET}")
-            print(f"  {MUTED}  1. Copy to your llm-infer adapter directory{RESET}")
-            print(f"  {MUTED}  2. Call POST /v1/adapters/refresh{RESET}")
-        else:
-            print(f"  {WARN}Training completed but no adapter was produced{RESET}")
+    if args.output_dir:
+        # Persistent output directory
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        adapter_path = _run_training_in_dir(lg, output_dir, training_model_path)
+        _print_result(adapter_path, persistent=True)
+    else:
+        # Temporary directory (backwards compatible)
+        with TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            adapter_path = _run_training_in_dir(lg, output_dir, training_model_path)
+            _print_result(adapter_path, persistent=False)
 
     print(f"\n{H1}{'=' * 60}{RESET}")
     print(f"{OK}Done!{RESET}")

@@ -244,7 +244,7 @@ class TestAdapterStorage:
         (source / "adapter_model.safetensors").write_text("weights")
         (source / "config.yaml").write_text("enabled: true")
 
-        result = storage.store_adapter(source, "my-key", "20240101-120000-abc123")
+        result = storage.store_adapter_files(source, "my-key", "20240101-120000-abc123")
 
         assert result.exists()
         assert (result / "adapter_model.safetensors").exists()
@@ -256,18 +256,18 @@ class TestAdapterStorage:
         source.mkdir()
         (source / "file.txt").write_text("v1")
 
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
 
         # Update source and re-store
         (source / "file.txt").write_text("v2")
-        result = storage.store_adapter(source, "key", "v1")
+        result = storage.store_adapter_files(source, "key", "v1")
 
         assert (result / "file.txt").read_text() == "v2"
 
-    def test_store_adapter_source_not_found(self, storage: FileStorage, tmp_path: Path):
+    def test_store_adapter_files_source_not_found(self, storage: FileStorage, tmp_path: Path):
         """Test storing from non-existent source raises."""
         with pytest.raises(FileNotFoundError, match="not found"):
-            storage.store_adapter(tmp_path / "nonexistent", "key", "v1")
+            storage.store_adapter_files(tmp_path / "nonexistent", "key", "v1")
 
     def test_remove_adapter_all_versions(self, storage: FileStorage, tmp_path: Path):
         """Test removing adapter removes all versions."""
@@ -275,8 +275,8 @@ class TestAdapterStorage:
         source.mkdir()
         (source / "file.txt").write_text("data")
 
-        storage.store_adapter(source, "key", "v1")
-        storage.store_adapter(source, "key", "v2")
+        storage.store_adapter_files(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v2")
 
         storage.remove_adapter("key")
 
@@ -288,8 +288,8 @@ class TestAdapterStorage:
         source.mkdir()
         (source / "file.txt").write_text("data")
 
-        storage.store_adapter(source, "key", "v1")
-        storage.store_adapter(source, "key", "v2")
+        storage.store_adapter_files(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v2")
 
         storage.remove_adapter("key", "v1")
 
@@ -305,7 +305,7 @@ class TestAdapterStorage:
         """Test removing non-existent version raises."""
         source = tmp_path / "source"
         source.mkdir()
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
 
         with pytest.raises(ValueError, match="Version.*not found"):
             storage.remove_adapter("key", "v99")
@@ -323,8 +323,8 @@ class TestAdapterStorage:
         """Test listing adapter keys."""
         source = tmp_path / "source"
         source.mkdir()
-        storage.store_adapter(source, "adapter-a", "v1")
-        storage.store_adapter(source, "adapter-b", "v1")
+        storage.store_adapter_files(source, "adapter-a", "v1")
+        storage.store_adapter_files(source, "adapter-b", "v1")
 
         result = storage.list_adapters()
 
@@ -338,8 +338,8 @@ class TestAdapterStorage:
         """Test listing versions for adapter."""
         source = tmp_path / "source"
         source.mkdir()
-        storage.store_adapter(source, "key", "20240101-100000-aaa")
-        storage.store_adapter(source, "key", "20240102-100000-bbb")
+        storage.store_adapter_files(source, "key", "20240101-100000-aaa")
+        storage.store_adapter_files(source, "key", "20240102-100000-bbb")
 
         result = storage.list_versions("key")
 
@@ -351,8 +351,8 @@ class TestAdapterStorage:
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
 
-        storage.store_adapter(source, "key", "20240101-100000-aaa")
-        storage.store_adapter(source, "key", "20240102-100000-bbb")
+        storage.store_adapter_files(source, "key", "20240101-100000-aaa")
+        storage.store_adapter_files(source, "key", "20240102-100000-bbb")
 
         result = storage.get_latest_version("key")
 
@@ -372,7 +372,7 @@ class TestAdapterStorage:
 
         assert not storage.adapter_exists("key")
 
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
 
         assert storage.adapter_exists("key")
 
@@ -380,7 +380,7 @@ class TestAdapterStorage:
         """Test checking if version exists."""
         source = tmp_path / "source"
         source.mkdir()
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
 
         assert storage.version_exists("key", "v1")
         assert not storage.version_exists("key", "v2")
@@ -394,7 +394,7 @@ class TestAdapterConfig:
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true\ndescription: Test")
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
 
         config = storage.read_adapter_config("key", "v1")
 
@@ -405,7 +405,7 @@ class TestAdapterConfig:
         """Test reading non-existent config returns empty dict."""
         source = tmp_path / "source"
         source.mkdir()
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
 
         config = storage.read_adapter_config("key", "v1")
 
@@ -415,7 +415,7 @@ class TestAdapterConfig:
         """Test writing adapter config."""
         source = tmp_path / "source"
         source.mkdir()
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
 
         storage.write_adapter_config("key", "v1", {"enabled": True, "description": "New"})
 
@@ -432,7 +432,7 @@ class TestDeployment:
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true\nmd5: abc123def456")
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
         storage.write_adapter_config("key", "v1", {"md5": "abc123def456"})
 
         storage.deploy("key", "v1")
@@ -451,9 +451,9 @@ class TestDeployment:
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
         storage.write_adapter_config("key", "v1", {"md5": "aaa111"})
-        storage.store_adapter(source, "key", "v2")
+        storage.store_adapter_files(source, "key", "v2")
         storage.write_adapter_config("key", "v2", {"md5": "bbb222"})
 
         storage.deploy("key")  # No version specified
@@ -465,9 +465,9 @@ class TestDeployment:
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
         storage.write_adapter_config("key", "v1", {"md5": "aaa111"})
-        storage.store_adapter(source, "key", "v2")
+        storage.store_adapter_files(source, "key", "v2")
         storage.write_adapter_config("key", "v2", {"md5": "bbb222"})
 
         storage.deploy("key", "v1", policy="replace")
@@ -482,9 +482,9 @@ class TestDeployment:
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
         storage.write_adapter_config("key", "v1", {"md5": "aaa111"})
-        storage.store_adapter(source, "key", "v2")
+        storage.store_adapter_files(source, "key", "v2")
         storage.write_adapter_config("key", "v2", {"md5": "bbb222"})
 
         storage.deploy("key", "v1", policy="add")
@@ -507,9 +507,9 @@ class TestDeployment:
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
         storage.write_adapter_config("key", "v1", {"md5": "aaa111"})
-        storage.store_adapter(source, "key", "v2")
+        storage.store_adapter_files(source, "key", "v2")
         storage.write_adapter_config("key", "v2", {"md5": "bbb222"})
 
         storage.deploy("key", "v1", policy="add")
@@ -526,9 +526,9 @@ class TestDeployment:
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
         storage.write_adapter_config("key", "v1", {"md5": "aaa111"})
-        storage.store_adapter(source, "key", "v2")
+        storage.store_adapter_files(source, "key", "v2")
         storage.write_adapter_config("key", "v2", {"md5": "bbb222"})
 
         storage.deploy("key", "v1", policy="add")
@@ -549,7 +549,7 @@ class TestDeployment:
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
         storage.write_adapter_config("key", "v1", {"md5": "abc123"})
 
         assert not storage.is_deployed("key")
@@ -563,7 +563,7 @@ class TestDeployment:
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
         storage.write_adapter_config("key", "v1", {"md5": "abc123"})
 
         storage.deploy("key", "v1")
@@ -581,9 +581,9 @@ class TestDeployment:
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
-        storage.store_adapter(source, "adapter-a", "v1")
+        storage.store_adapter_files(source, "adapter-a", "v1")
         storage.write_adapter_config("adapter-a", "v1", {"md5": "aaa111"})
-        storage.store_adapter(source, "adapter-b", "v1")
+        storage.store_adapter_files(source, "adapter-b", "v1")
         storage.write_adapter_config("adapter-b", "v1", {"md5": "bbb222"})
 
         storage.deploy("adapter-a", "v1")
@@ -598,9 +598,9 @@ class TestDeployment:
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
-        storage.store_adapter(source, "adapter-a", "v1")
+        storage.store_adapter_files(source, "adapter-a", "v1")
         storage.write_adapter_config("adapter-a", "v1", {"md5": "aaa111"})
-        storage.store_adapter(source, "adapter-b", "v1")
+        storage.store_adapter_files(source, "adapter-b", "v1")
         storage.write_adapter_config("adapter-b", "v1", {"md5": "bbb222"})
 
         storage.deploy("adapter-a", "v1")
@@ -614,7 +614,7 @@ class TestDeployment:
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
         storage.write_adapter_config("key", "v1", {"md5": "abc123"})
 
         # Create old-style symlink manually
@@ -635,9 +635,9 @@ class TestDeployment:
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
-        storage.store_adapter(source, "key", "v1")
+        storage.store_adapter_files(source, "key", "v1")
         storage.write_adapter_config("key", "v1", {"md5": "aaa111"})
-        storage.store_adapter(source, "key", "v2")
+        storage.store_adapter_files(source, "key", "v2")
         storage.write_adapter_config("key", "v2", {"md5": "bbb222"})
 
         storage.deploy("key", "v1")
@@ -827,8 +827,8 @@ class TestIterationHelpers:
         """Test iterating adapter keys with paths."""
         source = tmp_path / "source"
         source.mkdir()
-        storage.store_adapter(source, "a", "v1")
-        storage.store_adapter(source, "b", "v1")
+        storage.store_adapter_files(source, "a", "v1")
+        storage.store_adapter_files(source, "b", "v1")
 
         result = storage.iter_adapter_keys()
 
