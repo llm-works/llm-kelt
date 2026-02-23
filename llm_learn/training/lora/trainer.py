@@ -8,11 +8,13 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from appinfra import DotDict
 from appinfra.log import Logger
 
 from llm_learn.core.base import utc_now
 
-from ..config import RunConfig, RunResult
+from ..model import build_training_config
+from ..schema import Adapter, RunResult
 from .config import Config as LoraConfig
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
@@ -64,37 +66,23 @@ class Trainer:
         output_dir: str | Path,
         base_model: str = DEFAULT_BASE_MODEL,
         lora_config: LoraConfig | None = None,
-        training_config: RunConfig | None = None,
-        quantize: bool = True,
+        training_config: DotDict | None = None,
+        quantize: bool | None = None,
     ):
         self._lg = lg
         self.data_path = Path(data_path)
         self.output_dir = Path(output_dir)
         self.base_model = base_model
         self.lora_config = lora_config or LoraConfig()
-        self.training_config = training_config or RunConfig()
-        self.quantize = quantize
+        self.training_config = build_training_config(lg, base_model, training_config)
+        self._quantize_override = quantize  # None = auto-detect
+        self._applied_quantization = False  # Set during _load_model
 
         self.model = None
         self.tokenizer = None
         self.trainer = None
         self.train_dataset = None
         self.eval_dataset = None
-
-    def _setup_quantization_config(self):
-        """Create BitsAndBytes config for 4-bit quantization."""
-        if not self.quantize:
-            return None
-
-        import torch
-        from transformers import BitsAndBytesConfig
-
-        return BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=True,
-        )
 
     def _load_tokenizer(self):
         """Load tokenizer for the base model."""
@@ -105,16 +93,31 @@ class Trainer:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+    def _apply_lora(self):
+        """Apply LoRA adapter to the loaded model."""
+        from peft import get_peft_model
+
+        peft_config = self.lora_config.to_peft_config()
+        self.model = get_peft_model(self.model, peft_config)
+        trainable, total = self.model.get_nb_trainable_parameters()
+        self._lg.info(
+            f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
+        )
+
     def _load_model(self):
-        """Load base model with optional quantization and apply LoRA."""
+        """Load base model with auto-detected quantization and apply LoRA."""
         import torch
-        from peft import get_peft_model, prepare_model_for_kbit_training
+        from peft import prepare_model_for_kbit_training
         from transformers import AutoModelForCausalLM
+
+        from ..model import get_quantization_config
 
         self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
 
-        quant_config = self._setup_quantization_config()
+        quant_config, self._applied_quantization = get_quantization_config(
+            self._lg, self.base_model, self._quantize_override
+        )
         self.model = AutoModelForCausalLM.from_pretrained(
             self.base_model,
             quantization_config=quant_config,
@@ -125,15 +128,10 @@ class Trainer:
 
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
-        if self.quantize:
+        if self._applied_quantization:
             self.model = prepare_model_for_kbit_training(self.model)
 
-        peft_config = self.lora_config.to_peft_config()
-        self.model = get_peft_model(self.model, peft_config)
-        trainable, total = self.model.get_nb_trainable_parameters()
-        self._lg.info(
-            f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
-        )
+        self._apply_lora()
 
     def _load_data(self):
         """Load training and eval datasets."""
@@ -198,20 +196,32 @@ class Trainer:
         self._lg.info(f"saved adapter to {final_path}")
 
         metrics: dict = {}
-        if self.trainer.state.log_history:
-            metrics["train_loss"] = self.trainer.state.log_history[-1].get("train_loss", 0.0)
 
+        # Run evaluation first so eval entries are in log_history
         if self.eval_dataset:
             metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
+
+        # Capture training history after evaluate() so it includes eval entries
+        if self.trainer.state.log_history:
+            # Capped to avoid bloating manifests
+            metrics["history"] = self.trainer.state.log_history[-100:]
+            # Extract final summary metrics (TRL appends summary as last entry)
+            final = self.trainer.state.log_history[-1]
+            metrics["train_loss"] = final.get("train_loss", 0.0)
+            metrics["train_runtime"] = final.get("train_runtime", 0.0)
+            metrics["train_samples_per_second"] = final.get("train_samples_per_second", 0.0)
+            metrics["epoch"] = final.get("epoch", 0.0)
 
         return final_path, metrics
 
     def _build_result(self, adapter_path: Path, metrics: dict, started_at: datetime) -> RunResult:
         """Build the training result."""
+        # Adapter md5/mtime populated by caller (runner) after training
+        adapter = Adapter(md5="", mtime="", path=str(adapter_path))
         return RunResult(
-            adapter_path=adapter_path,
+            status="completed",
             base_model=self.base_model,
-            method="lora",
+            method="sft",
             metrics=metrics,
             config={
                 "lora": {
@@ -226,11 +236,12 @@ class Trainer:
                     "learning_rate": self.training_config.learning_rate,
                     "max_seq_length": self.training_config.max_seq_length,
                 },
-                "quantize": self.quantize,
+                "quantized": self._applied_quantization,
             },
             started_at=started_at,
             completed_at=utc_now(),
-            samples_trained=len(self.train_dataset) * self.training_config.num_epochs,  # type: ignore[arg-type]
+            samples_trained=int(len(self.train_dataset) * self.training_config.num_epochs),  # type: ignore[arg-type]
+            adapter=adapter,
         )
 
     def train(self, resume_from: str | Path | None = None) -> RunResult:
@@ -262,8 +273,8 @@ def train_lora(
     output_dir: str | Path,
     base_model: str = DEFAULT_BASE_MODEL,
     lora_config: LoraConfig | None = None,
-    training_config: RunConfig | None = None,
-    quantize: bool = True,
+    training_config: DotDict | None = None,
+    quantize: bool | None = None,
     resume_from: str | Path | None = None,
 ) -> RunResult:
     """Train a LoRA adapter using supervised fine-tuning.
@@ -275,7 +286,7 @@ def train_lora(
         base_model: HuggingFace model ID. Defaults to Qwen2.5-7B-Instruct.
         lora_config: LoRA hyperparameters. Uses sensible defaults if not provided.
         training_config: Training hyperparameters. Uses sensible defaults if not provided.
-        quantize: Use 4-bit quantization (QLoRA). Reduces VRAM ~4x.
+        quantize: Force quantization on/off. None = auto-detect from model metadata.
         resume_from: Path to checkpoint to resume training from.
 
     Returns:

@@ -31,8 +31,8 @@ class Protocol:
     Aggregates all atomic clients under a single interface. Access via LearnClient.atomic.
 
     Usage:
-        from llm_learn import LearnClient, IsolationContext
-        context = IsolationContext(context_key="my-agent")
+        from llm_learn import LearnClient, ClientContext
+        context = ClientContext(context_key="my-agent")
         learn = LearnClient(database=db, context=context)
 
         # Access atomic primitives

@@ -2,10 +2,10 @@
 
 Submodules:
 - atomic: Fact-based storage with type-specific detail tables
-- isolation: IsolationContext for data partitioning
+- isolation: ClientContext for data partitioning
 """
 
 from . import atomic
-from .isolation import IsolationContext
+from .isolation import ClientContext
 
-__all__ = ["atomic", "IsolationContext"]
+__all__ = ["atomic", "ClientContext"]

@@ -10,7 +10,7 @@ tenant isolation.
 
 import pytest
 
-from llm_learn import IsolationContext
+from llm_learn import ClientContext
 
 
 class TestSQLInjectionProtection:
@@ -21,7 +21,7 @@ class TestSQLInjectionProtection:
         """Create client for acme_prod context (contains underscore)."""
         from llm_learn.client import LearnClient
 
-        context = IsolationContext(context_key="acme_prod")
+        context = ClientContext(context_key="acme_prod")
         return LearnClient(database=database, context=context, lg=logger)
 
     @pytest.fixture
@@ -29,7 +29,7 @@ class TestSQLInjectionProtection:
         """Create client for acme_dev context (different but similar key)."""
         from llm_learn.client import LearnClient
 
-        context = IsolationContext(context_key="acme_dev")
+        context = ClientContext(context_key="acme_dev")
         return LearnClient(database=database, context=context, lg=logger)
 
     @pytest.fixture
@@ -37,7 +37,7 @@ class TestSQLInjectionProtection:
         """Create client for acmeXprod context (X matches _ wildcard if not escaped)."""
         from llm_learn.client import LearnClient
 
-        context = IsolationContext(context_key="acmeXprod")
+        context = ClientContext(context_key="acmeXprod")
         return LearnClient(database=database, context=context, lg=logger)
 
     def test_underscore_not_treated_as_wildcard(
@@ -82,8 +82,8 @@ class TestSQLInjectionProtection:
         from llm_learn.client import LearnClient
 
         # Create clients with percent sign in context key
-        context_percent = IsolationContext(context_key="discount_25%")
-        context_other = IsolationContext(context_key="discount_25X")
+        context_percent = ClientContext(context_key="discount_25%")
+        context_other = ClientContext(context_key="discount_25X")
 
         client_percent = LearnClient(database=database, context=context_percent, lg=logger)
         client_other = LearnClient(database=database, context=context_other, lg=logger)
@@ -122,7 +122,7 @@ class TestSQLInjectionProtection:
 
         clients = {}
         for ctx_key in contexts:
-            context = IsolationContext(context_key=ctx_key)
+            context = ClientContext(context_key=ctx_key)
             clients[ctx_key] = LearnClient(database=database, context=context, lg=logger)
 
         # Add data to each context
@@ -132,7 +132,7 @@ class TestSQLInjectionProtection:
         # Test exact match - should see only one
         exact_client = LearnClient(
             database=database,
-            context=IsolationContext(context_key="customer_123:prod:agent_a"),
+            context=ClientContext(context_key="customer_123:prod:agent_a"),
             lg=logger,
         )
         exact_facts = exact_client.atomic.assertions.list()
@@ -142,7 +142,7 @@ class TestSQLInjectionProtection:
         # Test glob pattern - all agents in customer_123:prod environment
         pattern_client = LearnClient(
             database=database,
-            context=IsolationContext(context_key="customer_123:prod:*"),
+            context=ClientContext(context_key="customer_123:prod:*"),
             lg=logger,
         )
         pattern_facts = pattern_client.atomic.assertions.list()
@@ -154,7 +154,7 @@ class TestSQLInjectionProtection:
         # Test broader glob - all customer_123 contexts
         broader_client = LearnClient(
             database=database,
-            context=IsolationContext(context_key="customer_123:*"),
+            context=ClientContext(context_key="customer_123:*"),
             lg=logger,
         )
         broader_facts = broader_client.atomic.assertions.list()
@@ -178,7 +178,7 @@ class TestSQLInjectionProtection:
 
         clients = {}
         for key in test_keys:
-            context = IsolationContext(context_key=key)
+            context = ClientContext(context_key=key)
             clients[key] = LearnClient(database=database, context=context, lg=logger)
             clients[key].atomic.assertions.add(f"Data for {key}")
 

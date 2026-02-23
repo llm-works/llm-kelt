@@ -11,7 +11,7 @@ from llm_infer.client import Factory as LLMClientFactory
 from .client import LearnClient
 from .core.database import Database
 from .inference.embedder import Embedder
-from .memory.isolation import IsolationContext
+from .memory.isolation import ClientContext
 
 
 class LearnClientFactory:
@@ -23,13 +23,13 @@ class LearnClientFactory:
     Usage:
         from appinfra.config import Config
         from appinfra.log import LogConfig, LoggerFactory
-        from llm_learn import LearnClientFactory, IsolationContext
+        from llm_learn import LearnClientFactory, ClientContext
 
         config = Config("etc/llm-learn.yaml")
         lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
 
         factory = LearnClientFactory(lg)
-        context = IsolationContext(context_key="my-agent", schema_name="public")
+        context = ClientContext(context_key="my-agent", schema_name="public")
         client = factory.create_from_config(context=context, config=config)
     """
 
@@ -59,7 +59,7 @@ class LearnClientFactory:
 
     def create_from_config(
         self,
-        context: IsolationContext,
+        context: ClientContext,
         config: DotDict,
         db_key: str = "main",
         ensure_schema: bool = True,
@@ -68,7 +68,7 @@ class LearnClientFactory:
         Create LearnClient with all dependencies from config.
 
         Args:
-            context: IsolationContext for data partitioning
+            context: ClientContext for data partitioning
             config: Full application config (e.g., Config("etc/llm-learn.yaml"))
             db_key: Database config key (default: "main")
             ensure_schema: If True (default), auto-migrate schema on init
@@ -100,16 +100,18 @@ class LearnClientFactory:
             embedder=self._create_embedder(config),
             llm_client=self._create_llm_client(config),
             learn_config=getattr(config, "learn", None),
+            training_config=getattr(config, "training", None),
             ensure_schema=ensure_schema,
         )
 
     def create(
         self,
-        context: IsolationContext,
+        context: ClientContext,
         database: Database,
         embedder: Embedder | None = None,
         llm_client: ChatClient | None = None,
         learn_config: DotDict | None = None,
+        training_config: DotDict | None = None,
         ensure_schema: bool = True,
     ) -> LearnClient:
         """
@@ -118,11 +120,12 @@ class LearnClientFactory:
         Use this when sharing resources across multiple clients.
 
         Args:
-            context: IsolationContext for data partitioning
+            context: ClientContext for data partitioning
             database: Existing Database instance
             embedder: Optional existing Embedder instance
             llm_client: Optional existing LLM client instance
             learn_config: Optional learn settings (config.learn section)
+            training_config: Optional training settings (config.training section)
             ensure_schema: If True (default), auto-migrate schema on init
 
         Returns:
@@ -135,5 +138,6 @@ class LearnClientFactory:
             embedder=embedder,
             llm_client=llm_client,
             learn_config=learn_config,
+            training_config=training_config,
             ensure_schema=ensure_schema,
         )

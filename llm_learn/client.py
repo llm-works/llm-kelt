@@ -17,11 +17,13 @@ from .inference.context import ContextBuilder
 from .inference.embedder import Embedder
 from .inference.query import ContextQuery
 from .memory import atomic
-from .memory.isolation import IsolationContext
+from .memory.isolation import ClientContext
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from .memory.atomic import Protocol
-    from .training import TrainClient
+    from .training import Factory as TrainFactory
 
 
 class LearnClient:
@@ -30,25 +32,25 @@ class LearnClient:
 
     Provides unified access to all framework capabilities:
     - learn.atomic.* - Fact-based memory storage (assertions, solutions, feedback, etc.)
-    - learn.train.* - Training methods (DPO, SFT, etc.)
+    - learn.train.* - Training manifest and execution
     - learn.query - Context-aware LLM queries
 
     Usage (via factory - recommended):
         from appinfra.config import Config
         from appinfra.log import LogConfig, LoggerFactory
-        from llm_learn import LearnClientFactory, IsolationContext
+        from llm_learn import LearnClientFactory, ClientContext
 
         config = Config("etc/llm-learn.yaml")
         lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
 
         factory = LearnClientFactory(lg)
-        context = IsolationContext(context_key="my-agent", schema_name="public")
+        context = ClientContext(context_key="my-agent", schema_name="public")
         learn = factory.create_from_config(context=context, config=config)
 
     Usage (direct - for testing or shared resources):
-        from llm_learn import LearnClient, IsolationContext
+        from llm_learn import LearnClient, ClientContext
 
-        context = IsolationContext(context_key="my-agent", schema_name="public")
+        context = ClientContext(context_key="my-agent", schema_name="public")
         learn = LearnClient(
             database=db, context=context, lg=lg,
             embedder=embedder, llm_client=llm_client,
@@ -60,8 +62,14 @@ class LearnClient:
         learn.atomic.feedback.record(signal="positive", content_id=456)
 
     Training API:
-        learn.train.dpo.create(adapter_name="my-adapter")
-        learn.train.dpo.list_runs(status="pending")
+        manifest = learn.train.manifest.create(
+            key="my-adapter",
+            method="dpo",
+            model="Qwen/Qwen2.5-7B-Instruct",
+            data=[{"prompt": "...", "chosen": "...", "rejected": "..."}],
+        )
+        learn.train.manifest.submit(manifest)
+        result = learn.train.dpo.train(manifest)
 
     Query API (requires llm_client):
         response = await learn.query.ask("What's a good approach?")
@@ -71,10 +79,11 @@ class LearnClient:
         self,
         lg: Logger,
         database: Database,
-        context: IsolationContext,
+        context: ClientContext,
         embedder: Embedder | None = None,
         llm_client: ChatClient | None = None,
         learn_config: DotDict | None = None,
+        training_config: DotDict | None = None,
         ensure_schema: bool = True,
     ) -> None:
         """
@@ -82,11 +91,12 @@ class LearnClient:
 
         Args:
             database: Database instance
-            context: IsolationContext for data partitioning (any string format)
+            context: ClientContext for data partitioning (any string format)
             lg: Optional logger instance
             embedder: Optional embedder for generating embeddings
             llm_client: Optional LLM client for context-aware queries
-            learn_config: Optional learn settings
+            learn_config: Optional learn settings (config.learn section)
+            training_config: Optional training settings (config.training section)
             ensure_schema: If True (default), auto-migrate schema on init
         """
         self._db = database
@@ -95,6 +105,7 @@ class LearnClient:
         self._embedder = embedder
         self._llm_client = llm_client
         self._learn_config = learn_config
+        self._training_config = training_config
 
         self._verify_schema(ensure=ensure_schema)
         self._setup_stores()
@@ -112,7 +123,7 @@ class LearnClient:
             embedding_store=self._embedding_store,
         )
         self._context_builder = ContextBuilder(self._atomic.assertions)
-        self._train: TrainClient | None = None
+        self._train: TrainFactory | None = None
 
     def _setup_query_interface(self) -> None:
         """Initialize context query interface if LLM client is available."""
@@ -127,11 +138,11 @@ class LearnClient:
             )
 
     @property
-    def context(self) -> IsolationContext:
+    def context(self) -> ClientContext:
         """
         Get isolation context for this client.
 
-        Returns the current IsolationContext with context_key and schema_name.
+        Returns the current ClientContext with context_key and schema_name.
         """
         return self._context
 
@@ -197,6 +208,7 @@ class LearnClient:
             embedder=self._embedder,
             llm_client=self._llm_client,
             learn_config=self._learn_config,
+            training_config=self._training_config,
             ensure_schema=False,  # Don't re-run schema checks
         )
 
@@ -211,17 +223,51 @@ class LearnClient:
         return self._content
 
     @property
-    def train(self) -> TrainClient:
-        """Access training client for DPO, SFT, etc."""
-        if self._train is None:
-            from .training import TrainClient
+    def train(self) -> TrainFactory:
+        """Access training factory for manifest lifecycle and training execution.
 
-            self._train = TrainClient(
-                self._lg,
-                self._db.session,
-                self._context.context_key,
-            )
+        Requires adapters.lora.base_path to be configured in learn_config.
+
+        Raises:
+            RuntimeError: If adapters.lora.base_path is not configured.
+        """
+        if self._train is None:
+            from .training.factory import Factory
+
+            registry_path = self._get_registry_path()
+            if registry_path is None:
+                raise RuntimeError(
+                    "Training not configured: adapters.lora.base_path not set in learn_config"
+                )
+            self._train = Factory(self._lg, registry_path, self._get_default_profiles())
         return self._train
+
+    def _get_registry_path(self) -> Path | None:
+        """Get adapter registry path from learn_config."""
+        if self._learn_config is None:
+            return None
+        adapters = getattr(self._learn_config, "adapters", None)
+        if adapters is None:
+            return None
+        lora = getattr(adapters, "lora", None)
+        if lora is None:
+            return None
+        base_path = getattr(lora, "base_path", None)
+        if base_path is None:
+            return None
+        from pathlib import Path
+
+        return Path(base_path)
+
+    def _get_default_profiles(self) -> dict[str, dict]:
+        """Get default training profiles from training_config."""
+        if self._training_config is None:
+            return {}
+        default_profiles = getattr(self._training_config, "default_profiles", None)
+        if default_profiles is None:
+            return {}
+        # Convert DotDict to plain dict
+        return {k: dict(v) for k, v in default_profiles.items()}
 
     @property
     def database(self) -> Database:

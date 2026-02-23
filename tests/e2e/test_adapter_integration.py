@@ -56,8 +56,9 @@ def adapter_registry(logger, adapter_lora_base_path, infer_server_url):
 def trained_adapter(logger, training_model_path, tmp_path_factory):
     """Train a LoRA adapter with distinctive behavior on the inference server's model."""
     import torch
+    from appinfra import DotDict
 
-    from llm_learn.training import RunConfig, train_lora
+    from llm_learn.training import train_lora
     from llm_learn.training.lora import Config as LoraConfig
 
     tmp_path = tmp_path_factory.mktemp("training")
@@ -72,7 +73,7 @@ def trained_adapter(logger, training_model_path, tmp_path_factory):
         lora_dropout=0.0,
         target_modules=["q_proj", "v_proj"],
     )
-    training_config = RunConfig(
+    training_config = DotDict(
         num_epochs=3,  # More epochs for stronger effect
         batch_size=2,
         gradient_accumulation_steps=1,
@@ -112,16 +113,16 @@ class TestAdapterIntegration:
         llm_client,
     ):
         """Train adapter, register with llm-infer, verify inference differs."""
-        adapter_id = "test-pineapple-adapter"
+        key = "test-pineapple-adapter"
 
         # Register adapter with llm-infer
         info = adapter_registry.register_and_refresh(
             training_result=trained_adapter,
-            adapter_id=adapter_id,
+            key=key,
             description="Test adapter trained on pineapple data",
             overwrite=True,
         )
-        assert info.adapter_id == adapter_id
+        assert info.key == key
         assert info.deployed is True
 
         try:
@@ -137,7 +138,7 @@ class TestAdapterIntegration:
                 messages=[{"role": "user", "content": "What is your favorite fruit?"}],
                 temperature=0.1,
                 max_tokens=50,
-                adapter_id=adapter_id,
+                key=key,
             )
 
             print("\n" + "=" * 60)
@@ -159,17 +160,17 @@ class TestAdapterIntegration:
 
         finally:
             # Cleanup: remove adapter
-            adapter_registry.remove(adapter_id)
+            adapter_registry.remove(key)
             adapter_registry.refresh()
 
     def test_adapter_deploy_undeploy(self, trained_adapter, adapter_registry):
         """Test deploying and undeploying adapters."""
-        adapter_id = "test-deploy-undeploy"
+        key = "test-deploy-undeploy"
 
         # Register deployed
         info = adapter_registry.register_and_refresh(
             training_result=trained_adapter,
-            adapter_id=adapter_id,
+            key=key,
             deploy=True,
             overwrite=True,
         )
@@ -177,39 +178,39 @@ class TestAdapterIntegration:
 
         # Verify it's in the list
         adapters = adapter_registry.list()
-        adapter_ids = [a.adapter_id for a in adapters]
-        assert adapter_id in adapter_ids
+        keys = [a.key for a in adapters]
+        assert key in keys
 
         try:
             # Undeploy it
-            adapter_registry.set_deployed(adapter_id, False)
-            adapter_registry.refresh(adapter_id)
+            adapter_registry.set_deployed(key, False)
+            adapter_registry.refresh(key)
 
-            info = adapter_registry.get(adapter_id)
+            info = adapter_registry.get(key)
             assert info is not None
             assert info.deployed is False
 
             # Re-deploy it
-            adapter_registry.set_deployed(adapter_id, True)
-            adapter_registry.refresh(adapter_id)
+            adapter_registry.set_deployed(key, True)
+            adapter_registry.refresh(key)
 
-            info = adapter_registry.get(adapter_id)
+            info = adapter_registry.get(key)
             assert info is not None
             assert info.deployed is True
 
         finally:
-            adapter_registry.remove(adapter_id)
+            adapter_registry.remove(key)
             adapter_registry.refresh()
 
     def test_adapter_overwrite(self, trained_adapter, adapter_registry):
         """Test overwriting an existing adapter."""
-        adapter_id = "test-overwrite"
+        key = "test-overwrite"
 
         try:
             # Register first time
             adapter_registry.register(
                 training_result=trained_adapter,
-                adapter_id=adapter_id,
+                key=key,
                 description="First version",
             )
 
@@ -217,7 +218,7 @@ class TestAdapterIntegration:
             with pytest.raises(ValueError, match="already exists"):
                 adapter_registry.register(
                     training_result=trained_adapter,
-                    adapter_id=adapter_id,
+                    key=key,
                     description="Second version",
                     overwrite=False,
                 )
@@ -225,11 +226,11 @@ class TestAdapterIntegration:
             # Should succeed with overwrite
             info = adapter_registry.register(
                 training_result=trained_adapter,
-                adapter_id=adapter_id,
+                key=key,
                 description="Second version",
                 overwrite=True,
             )
             assert info.description == "Second version"
 
         finally:
-            adapter_registry.remove(adapter_id)
+            adapter_registry.remove(key)

@@ -8,12 +8,14 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from appinfra import DotDict
 from appinfra.log import Logger
 
 from llm_learn.core.base import utc_now
 
-from ..config import RunConfig, RunResult
 from ..lora import Config as LoraConfig
+from ..model import build_training_config
+from ..schema import Adapter, RunResult
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
@@ -50,22 +52,22 @@ class Trainer:
         output_dir: str | Path,
         base_model: str = DEFAULT_BASE_MODEL,
         lora_config: LoraConfig | None = None,
-        training_config: RunConfig | None = None,
+        training_config: DotDict | None = None,
         beta: float = 0.1,
-        quantize: bool = True,
+        quantize: bool | None = None,
         reference_free: bool = False,
-        based_on: Path | None = None,
+        parent: Adapter | None = None,
     ):
         self._lg = lg
         self.data_path = Path(data_path)
         self.output_dir = Path(output_dir)
         self.base_model = base_model
         self.lora_config = lora_config or LoraConfig()
-        self.training_config = training_config or RunConfig()
+        self.training_config = build_training_config(lg, base_model, training_config)
         self.beta = beta
-        self.quantize = quantize
+        self._quantize_override = quantize  # None = auto-detect
         self.reference_free = reference_free
-        self.based_on = based_on
+        self.parent = parent
         self._init_state()
 
     def _init_state(self):
@@ -77,21 +79,7 @@ class Trainer:
         self.train_dataset = None
         self.eval_dataset = None
         self._quant_config = None
-
-    def _setup_quantization_config(self):
-        """Create BitsAndBytes config for 4-bit quantization."""
-        if not self.quantize:
-            return None
-
-        import torch
-        from transformers import BitsAndBytesConfig
-
-        return BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=True,
-        )
+        self._applied_quantization = False
 
     def _load_tokenizer(self):
         """Load tokenizer for the base model."""
@@ -106,11 +94,9 @@ class Trainer:
         """Apply LoRA adapter - load existing or create new."""
         from peft import PeftModel, get_peft_model
 
-        if self.based_on is not None:
-            self._lg.info(f"loading existing adapter: {self.based_on}")
-            self.model = PeftModel.from_pretrained(
-                self.model, str(self.based_on), is_trainable=True
-            )
+        if self.parent is not None:
+            self._lg.info(f"loading existing adapter: {self.parent.path}")
+            self.model = PeftModel.from_pretrained(self.model, self.parent.path, is_trainable=True)
         else:
             peft_config = self.lora_config.to_peft_config()
             self.model = get_peft_model(self.model, peft_config)
@@ -121,15 +107,19 @@ class Trainer:
         )
 
     def _load_model(self):
-        """Load base model with optional quantization and apply LoRA."""
+        """Load base model with auto-detected quantization and apply LoRA."""
         import torch
         from peft import prepare_model_for_kbit_training
         from transformers import AutoModelForCausalLM
 
+        from ..model import get_quantization_config
+
         self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
 
-        self._quant_config = self._setup_quantization_config()
+        self._quant_config, self._applied_quantization = get_quantization_config(
+            self._lg, self.base_model, self._quantize_override
+        )
         self.model = AutoModelForCausalLM.from_pretrained(
             self.base_model,
             quantization_config=self._quant_config,
@@ -140,7 +130,7 @@ class Trainer:
 
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
-        if self.quantize:
+        if self._applied_quantization:
             self.model = prepare_model_for_kbit_training(self.model)
 
         self._apply_lora_adapter()
@@ -153,7 +143,7 @@ class Trainer:
         gradients. The reference_free option skips this to save memory at the
         cost of training quality.
 
-        IMPORTANT: When training on top of an existing adapter (based_on),
+        IMPORTANT: When training on top of an existing adapter (parent),
         the reference model MUST also have that adapter applied (frozen).
         Otherwise DPO compares against the wrong baseline.
         """
@@ -174,12 +164,12 @@ class Trainer:
         )
 
         # Apply the same adapter to reference model (frozen) if training on top of one
-        if self.based_on is not None:
+        if self.parent is not None:
             from peft import PeftModel
 
-            self._lg.info(f"applying adapter to reference model (frozen): {self.based_on}")
+            self._lg.info(f"applying adapter to reference model (frozen): {self.parent.path}")
             self.ref_model = PeftModel.from_pretrained(
-                self.ref_model, str(self.based_on), is_trainable=False
+                self.ref_model, self.parent.path, is_trainable=False
             )
 
     def _load_data(self):
@@ -232,34 +222,43 @@ class Trainer:
             processing_class=self.tokenizer,
         )
 
+    def _extract_dpo_metrics(self, dpo_logs: list) -> dict:
+        """Extract DPO-specific metrics (accuracy, margins, loss) from first/last logs."""
+        if not dpo_logs:
+            return {}
+        first_log, last_log = dpo_logs[0], dpo_logs[-1]
+        return {
+            "accuracy": last_log.get("rewards/accuracies", 0.0),
+            "margins": last_log.get("rewards/margins", 0.0),
+            "loss": last_log.get("loss", 0.0),
+            "accuracy_start": first_log.get("rewards/accuracies", 0.0),
+            "margins_start": first_log.get("rewards/margins", 0.0),
+            "loss_start": first_log.get("loss", 0.0),
+        }
+
     def _collect_metrics(self) -> dict:
         """Extract training metrics from trainer log history."""
-        if self.trainer is None:
+        if self.trainer is None or not self.trainer.state.log_history:
             return {}
 
-        metrics: dict = {}
-        if not self.trainer.state.log_history:
-            return metrics
+        log_history = self.trainer.state.log_history
+        # Cap history to avoid bloating manifests (same as SFT trainer)
+        capped_history = log_history[-100:]
+        metrics: dict = {"history": capped_history}
 
-        # Find logs with DPO metrics (exclude final summary which only has train_loss)
-        dpo_logs = [log for log in self.trainer.state.log_history if "rewards/accuracies" in log]
-        if dpo_logs:
-            first_log, last_log = dpo_logs[0], dpo_logs[-1]
-            # Final metrics (most important)
-            metrics["accuracy"] = last_log.get("rewards/accuracies", 0.0)
-            metrics["margins"] = last_log.get("rewards/margins", 0.0)
-            metrics["loss"] = last_log.get("loss", 0.0)
-            # Starting metrics (for comparison)
-            metrics["accuracy_start"] = first_log.get("rewards/accuracies", 0.0)
-            metrics["margins_start"] = first_log.get("rewards/margins", 0.0)
-            metrics["loss_start"] = first_log.get("loss", 0.0)
+        # DPO-specific metrics (exclude final summary which only has train_loss)
+        dpo_logs = [log for log in capped_history if "rewards/accuracies" in log]
+        metrics.update(self._extract_dpo_metrics(dpo_logs))
 
         # Overall train loss from final summary
-        final_log = self.trainer.state.log_history[-1]
+        final_log = log_history[-1]
         metrics["train_loss"] = final_log.get("train_loss", final_log.get("loss", 0.0))
-        metrics["epochs"] = final_log.get("epoch", 0.0)
+        metrics["train_runtime"] = final_log.get("train_runtime", 0.0)
+        metrics["train_samples_per_second"] = final_log.get("train_samples_per_second", 0.0)
+        metrics["epoch"] = final_log.get("epoch", 0.0)
 
         if self.eval_dataset:
+            # Runs full evaluation pass - adds GPU overhead but provides eval_loss metric
             metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
 
         return metrics
@@ -280,8 +279,10 @@ class Trainer:
 
     def _build_result(self, adapter_path: Path, metrics: dict, started_at: datetime) -> RunResult:
         """Build the training result."""
+        # Adapter md5/mtime populated by caller (runner) after training
+        adapter = Adapter(md5="", mtime="", path=str(adapter_path))
         return RunResult(
-            adapter_path=adapter_path,
+            status="completed",
             base_model=self.base_model,
             method="dpo",
             metrics=metrics,
@@ -299,12 +300,13 @@ class Trainer:
                     "max_seq_length": self.training_config.max_seq_length,
                 },
                 "dpo": {"beta": self.beta, "reference_free": self.reference_free},
-                "quantize": self.quantize,
+                "quantized": self._applied_quantization,
             },
             started_at=started_at,
             completed_at=utc_now(),
-            samples_trained=len(self.train_dataset) * self.training_config.num_epochs,  # type: ignore[arg-type]
-            based_on=self.based_on,
+            samples_trained=int(len(self.train_dataset) * self.training_config.num_epochs),  # type: ignore[arg-type]
+            adapter=adapter,
+            parent=self.parent,
         )
 
     def train(self) -> RunResult:
@@ -333,11 +335,11 @@ def train_dpo(
     output_dir: str | Path,
     base_model: str = DEFAULT_BASE_MODEL,
     lora_config: LoraConfig | None = None,
-    training_config: RunConfig | None = None,
+    training_config: DotDict | None = None,
     beta: float = 0.1,
-    quantize: bool = True,
+    quantize: bool | None = None,
     reference_free: bool = False,
-    based_on: Path | None = None,
+    parent: Adapter | None = None,
 ) -> RunResult:
     """Train a LoRA adapter using Direct Preference Optimization.
 
@@ -349,12 +351,12 @@ def train_dpo(
         lora_config: LoRA hyperparameters. Uses sensible defaults if not provided.
         training_config: Training hyperparameters. Uses sensible defaults if not provided.
         beta: DPO beta parameter (higher = more conservative).
-        quantize: Use 4-bit quantization (QLoRA). Reduces VRAM ~4x.
+        quantize: Force quantization on/off. None = auto-detect from model metadata.
         reference_free: Skip reference model to save VRAM (may reduce quality).
-        based_on: Path to existing adapter to train on top of (for lineage).
+        parent: Parent adapter to train on top of (for lineage).
 
     Returns:
-        RunResult with adapter path, metrics, and training metadata.
+        RunResult with adapter, metrics, and training metadata.
     """
     trainer = Trainer(
         lg=lg,
@@ -366,6 +368,6 @@ def train_dpo(
         beta=beta,
         quantize=quantize,
         reference_free=reference_free,
-        based_on=based_on,
+        parent=parent,
     )
     return trainer.train()

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from llm_learn import IsolationContext
+from llm_learn import ClientContext
 from llm_learn.client import LearnClient
 
 
@@ -33,7 +33,7 @@ class TestLearnClientIsolation:
         with patch.object(LearnClient, "_verify_schema"):
             with patch.object(LearnClient, "_setup_stores"):
                 with patch.object(LearnClient, "_setup_query_interface"):
-                    context = IsolationContext(context_key="a" * 32, schema_name=None)
+                    context = ClientContext(context_key="a" * 32, schema_name=None)
                     client = LearnClient(
                         database=mock_database,
                         context=context,
@@ -42,10 +42,10 @@ class TestLearnClientIsolation:
                     return client
 
     def test_context_property_returns_isolation_context(self, learn_client):
-        """Test that context property returns IsolationContext."""
+        """Test that context property returns ClientContext."""
         context = learn_client.context
 
-        assert isinstance(context, IsolationContext)
+        assert isinstance(context, ClientContext)
         assert context.context_key == "a" * 32
         assert context.schema_name is None
 
@@ -123,7 +123,7 @@ class TestLearnClientIsolation:
         with patch.object(LearnClient, "_verify_schema"):
             with patch.object(LearnClient, "_setup_stores"):
                 with patch.object(LearnClient, "_setup_query_interface"):
-                    context = IsolationContext(context_key="a" * 32, schema_name="customer_acme")
+                    context = ClientContext(context_key="a" * 32, schema_name="customer_acme")
                     client = LearnClient(
                         database=mock_database,
                         context=context,
@@ -141,15 +141,15 @@ class TestLearnClientIsolation:
         assert new_client.context.schema_name == "customer_acme"
 
 
-class TestIsolationContextIntegrationWithLearnClient:
-    """Integration tests showing IsolationContext patterns with LearnClient."""
+class TestClientContextIntegrationWithLearnClient:
+    """Integration tests showing ClientContext patterns with LearnClient."""
 
     def test_merge_pattern_with_dataclasses_replace(self):
         """Test the recommended pattern using dataclasses.replace()."""
         from dataclasses import replace
 
         # Original context
-        original = IsolationContext(context_key="acme:prod", schema_name="customer_acme")
+        original = ClientContext(context_key="acme:prod", schema_name="customer_acme")
 
         # Override just schema (recommended pattern)
         override = replace(original, schema_name="public")
@@ -160,7 +160,7 @@ class TestIsolationContextIntegrationWithLearnClient:
     def test_partial_context_for_override(self):
         """Test creating partial context for with_isolation()."""
         # Create partial context (only schema set)
-        partial = IsolationContext(schema_name="analytics")
+        partial = ClientContext(schema_name="analytics")
 
         assert partial.context_key is None
         assert partial.schema_name == "analytics"

@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from _helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, psql_cmd
 
-from llm_learn import IsolationContext, LearnClient, LearnClientFactory
+from llm_learn import ClientContext, LearnClient, LearnClientFactory
 from llm_learn.training import ExportResult, export_feedback_classifier, export_feedback_sft
 from llm_learn.training.dpo import export_preferences
 
@@ -273,7 +273,7 @@ def main():
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
 
     # Create LearnClient using factory
-    context = IsolationContext(context_key="demo:example")
+    context = ClientContext(context_key="demo:example")
     factory = LearnClientFactory(lg)
     learn = factory.create_from_config(context=context, config=config)
     print(f"{MUTED}Using context_key={RESET}{INFO}{learn.context_key}{RESET}")
