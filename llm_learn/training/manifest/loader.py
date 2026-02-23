@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import yaml
 from appinfra import DotDict
@@ -20,78 +20,13 @@ from .errors import CorruptedManifestError
 from .schema import Data, Manifest, Source
 
 
-def _parse_datetime(value: str | datetime) -> datetime:
+def _parse_datetime(value: str | datetime | None) -> datetime:
     """Parse datetime from string or pass through."""
+    if value is None:
+        return utc_now()
     if isinstance(value, datetime):
         return value
     return datetime.fromisoformat(value)
-
-
-def _serialize_datetime(dt: datetime) -> str:
-    """Serialize datetime to ISO format string."""
-    return dt.isoformat()
-
-
-def _dict_to_source(data: dict[str, Any] | None) -> Source:
-    """Convert dict to Source."""
-    if data is None:
-        return Source()
-    return Source(context_key=data.get("context_key"), description=data.get("description"))
-
-
-def _dict_to_data(data: dict[str, Any]) -> Data:
-    """Convert dict to Data."""
-    return Data(
-        format=data.get("format", "inline"), records=data.get("records", []), path=data.get("path")
-    )
-
-
-def _dict_to_adapter(data: dict[str, Any] | None) -> Adapter | None:
-    """Convert dict to Adapter."""
-    if data is None:
-        return None
-    return Adapter(md5=data["md5"], mtime=data["mtime"], path=data["path"])
-
-
-def _dict_to_output(data: dict[str, Any] | None) -> RunResult | None:
-    """Convert dict to RunResult."""
-    if data is None:
-        return None
-    return RunResult(
-        status=data.get("status", "unknown"),
-        adapter=_dict_to_adapter(data["adapter"]) if data.get("adapter") else Adapter("", "", ""),
-        base_model=data.get("base_model", ""),
-        method=data.get("method", ""),
-        metrics=data.get("metrics", {}),
-        config=data.get("config", {}),
-        started_at=_parse_datetime(data["started_at"]) if data.get("started_at") else utc_now(),
-        completed_at=_parse_datetime(data["completed_at"])
-        if data.get("completed_at")
-        else utc_now(),
-        samples_trained=data.get("samples_trained", 0),
-        parent=_dict_to_adapter(data.get("parent")),
-        error=data.get("error"),
-    )
-
-
-def _validate_required_fields(
-    data: dict[str, Any],
-) -> tuple[str, Literal["dpo", "sft"], dict[str, Any]]:
-    """Validate and extract required manifest fields."""
-    adapter = data.get("adapter")
-    method = data.get("method")
-    data_section = data.get("data")
-
-    if not adapter:
-        raise ValueError("Manifest missing required field: adapter")
-    if not method:
-        raise ValueError("Manifest missing required field: method")
-    if method not in ("dpo", "sft"):
-        raise ValueError(f"Invalid method: {method}. Must be 'dpo' or 'sft'")
-    if not data_section:
-        raise ValueError("Manifest missing required field: data")
-
-    return adapter, method, data_section  # type: ignore[return-value]
 
 
 def _read_yaml_file(path: Path) -> Any:
@@ -105,12 +40,35 @@ def _read_yaml_file(path: Path) -> Any:
         return yaml.safe_load(f)
 
 
-def _dict_to_manifest(data: dict) -> Manifest:
-    """Convert validated dict to Manifest object."""
-    adapter, method, data_section = _validate_required_fields(data)
+def _validate_required_fields(data: dict[str, Any]) -> None:
+    """Validate required manifest fields."""
+    if not data.get("adapter"):
+        raise ValueError("Manifest missing required field: adapter")
+    if not data.get("method"):
+        raise ValueError("Manifest missing required field: method")
+    if data["method"] not in ("dpo", "sft"):
+        raise ValueError(f"Invalid method: {data['method']}. Must be 'dpo' or 'sft'")
+    if not data.get("data"):
+        raise ValueError("Manifest missing required field: data")
+
+
+def _build_output_result(output_data: dict[str, Any]) -> RunResult:
+    """Build RunResult from output dict, parsing datetimes and nested adapters."""
+    output_data["started_at"] = _parse_datetime(output_data.get("started_at"))
+    output_data["completed_at"] = _parse_datetime(output_data.get("completed_at"))
+    if output_data.get("adapter"):
+        output_data["adapter"] = Adapter(output_data["adapter"])
+    if output_data.get("parent"):
+        output_data["parent"] = Adapter(output_data["parent"])
+    return RunResult(output_data)
+
+
+def _build_manifest(data: dict[str, Any]) -> Manifest:
+    """Build Manifest from validated dict."""
+    _validate_required_fields(data)
 
     # Training section may contain output (new format) or output at root (old format)
-    training_data = data.get("training", {})
+    training_data = dict(data.get("training", {}))
     output_data = training_data.pop("output", None) or data.get("output")
 
     # Migrate old model section to training (backwards compatibility)
@@ -119,18 +77,21 @@ def _dict_to_manifest(data: dict) -> Manifest:
         if "requested_model" not in training_data and model_data.get("base"):
             training_data["requested_model"] = model_data["base"]
 
+    output = _build_output_result(output_data) if output_data else None
+    parent = Adapter(data["parent"]) if data.get("parent") else None
+
     return Manifest(
         version=data.get("version", 1),
-        created_at=_parse_datetime(data.get("created_at", datetime.now().astimezone())),
-        method=method,
-        adapter=adapter,
-        source=_dict_to_source(data.get("source")),
-        parent=_dict_to_adapter(data.get("parent")),
+        created_at=_parse_datetime(data.get("created_at")),
+        method=data["method"],
+        adapter=data["adapter"],
+        source=Source(data.get("source", {})),
+        parent=parent,
         lora=DotDict(data.get("lora", {})),
         training=DotDict(training_data),
-        method_config=DotDict(data.get(method, {})),
-        data=_dict_to_data(data_section),
-        output=_dict_to_output(output_data),
+        method_config=DotDict(data.get(data["method"], {})),
+        data=Data(data["data"]),
+        output=output,
     )
 
 
@@ -145,45 +106,33 @@ def load_manifest(path: Path) -> Manifest:
     if not isinstance(data, dict):
         raise CorruptedManifestError(path, f"expected dict, got {type(data).__name__}")
 
-    return _dict_to_manifest(data)
+    return _build_manifest(data)
 
 
-def _source_to_dict(source: Source) -> dict[str, Any] | None:
-    """Convert Source to dict, returning None if empty."""
-    if source.context_key is None and source.description is None:
-        return None
-    result: dict[str, Any] = {}
-    if source.context_key is not None:
-        result["context_key"] = source.context_key
-    if source.description is not None:
-        result["description"] = source.description
-    return result
+def _serialize_datetime(dt: datetime) -> str:
+    """Serialize datetime to ISO format string."""
+    return dt.isoformat()
 
 
-def _data_to_dict(data: Data) -> dict[str, Any]:
-    """Convert Data to dict."""
-    result: dict[str, Any] = {"format": data.format}
-    if data.format == "inline":
-        result["records"] = data.records
-    else:
-        result["path"] = data.path
-    return result
+def _get_effective_config(manifest: Manifest) -> tuple[dict, dict]:
+    """Get effective lora/training config (from output if completed, else from manifest)."""
+    output = manifest.get("output")
+    manifest_lora = manifest.get("lora") or {}
+    manifest_training = manifest.get("training") or {}
+
+    if output is not None and output.get("config"):
+        output_config = output.config
+        lora = output_config.get("lora", dict(manifest_lora))
+        training = output_config.get("training", dict(manifest_training))
+        return lora, training
+    return dict(manifest_lora), dict(manifest_training)
 
 
-def _adapter_to_dict(adapter: Adapter | None) -> dict[str, Any] | None:
-    """Convert Adapter to dict."""
-    if adapter is None:
-        return None
-    return {"md5": adapter.md5, "mtime": adapter.mtime, "path": adapter.path}
-
-
-def _output_to_dict(output: RunResult | None) -> dict[str, Any] | None:
-    """Convert RunResult to dict for YAML serialization."""
-    if output is None:
-        return None
+def _build_output_dict(output: RunResult) -> dict[str, Any]:
+    """Build output dict for YAML serialization."""
     result: dict[str, Any] = {
         "status": output.status,
-        "adapter": _adapter_to_dict(output.adapter),
+        "adapter": dict(output.adapter) if output.adapter else None,
         "base_model": output.base_model,
         "method": output.method,
         "metrics": output.metrics,
@@ -193,57 +142,61 @@ def _output_to_dict(output: RunResult | None) -> dict[str, Any] | None:
         "samples_trained": output.samples_trained,
     }
     if output.parent is not None:
-        result["parent"] = _adapter_to_dict(output.parent)
+        result["parent"] = dict(output.parent)
     if output.error is not None:
         result["error"] = output.error
     return result
 
 
-def _get_effective_config(manifest: Manifest) -> tuple[dict, dict]:
-    """Get effective lora/training config (from output if completed, else from manifest)."""
-    if manifest.output is not None and manifest.output.config:
-        output_config = manifest.output.config
-        lora = output_config.get("lora", dict(manifest.lora) if manifest.lora else {})
-        training = output_config.get(
-            "training", dict(manifest.training) if manifest.training else {}
-        )
-        return lora, training
-    return (
-        dict(manifest.lora) if manifest.lora else {},
-        dict(manifest.training) if manifest.training else {},
-    )
+def _build_data_section(manifest: Manifest) -> dict[str, Any]:
+    """Build data section dict for YAML serialization."""
+    manifest_data = manifest.get("data") or Data()
+    data_format = manifest_data.get("format", "inline")
+    data_dict: dict[str, Any] = {"format": data_format}
+    if data_format == "inline":
+        data_dict["records"] = manifest_data.get("records", [])
+    else:
+        data_dict["path"] = manifest_data.get("path")
+    return data_dict
 
 
-def _manifest_to_dict(manifest: Manifest) -> dict[str, Any]:
-    """Convert Manifest to dict for YAML serialization.
+def _build_training_section(manifest: Manifest) -> dict[str, Any]:
+    """Build training section dict for YAML serialization."""
+    _, training_config = _get_effective_config(manifest)
+    training_dict: dict[str, Any] = training_config
+    output = manifest.get("output")
+    if output is not None:
+        training_dict["output"] = _build_output_dict(output)
+    return training_dict
 
-    When output is present (completed), output is nested under training section.
-    """
+
+def _build_manifest_dict(manifest: Manifest) -> dict[str, Any]:
+    """Build dict from Manifest for YAML serialization."""
+    created_at = manifest.get("created_at") or utc_now()
     data: dict[str, Any] = {
-        "version": manifest.version,
-        "created_at": _serialize_datetime(manifest.created_at),
-        "method": manifest.method,
-        "adapter": manifest.adapter,
+        "version": manifest.get("version", 1),
+        "created_at": _serialize_datetime(created_at),
+        "method": manifest.get("method"),
+        "adapter": manifest.get("adapter"),
     }
 
-    if (source_dict := _source_to_dict(manifest.source)) is not None:
-        data["source"] = source_dict
-    if manifest.parent is not None:
-        data["parent"] = _adapter_to_dict(manifest.parent)
+    source = manifest.get("source")
+    if source and (source.get("context_key") or source.get("description")):
+        data["source"] = dict(source)
 
-    lora_config, training_config = _get_effective_config(manifest)
+    parent = manifest.get("parent")
+    if parent is not None:
+        data["parent"] = dict(parent)
+
+    lora_config, _ = _get_effective_config(manifest)
     data["lora"] = lora_config
+    data["training"] = _build_training_section(manifest)
 
-    # Nest output under training section
-    training_dict: dict[str, Any] = training_config
-    if manifest.output is not None:
-        training_dict["output"] = _output_to_dict(manifest.output)
-    data["training"] = training_dict
+    method_config = manifest.get("method_config")
+    if method_config:
+        data[manifest.get("method")] = dict(method_config)
 
-    if manifest.method_config:
-        data[manifest.method] = dict(manifest.method_config)
-    data["data"] = _data_to_dict(manifest.data)
-
+    data["data"] = _build_data_section(manifest)
     return data
 
 
@@ -253,47 +206,35 @@ class _FlowStyleDumper(yaml.SafeDumper):
     pass
 
 
-def _quoted_str(dumper: yaml.SafeDumper, data: str) -> yaml.Node:
-    """Represent string with double quotes."""
-    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
-
-
-class QuotedStr(str):
+class _QuotedStr(str):
     """String that serializes with double quotes in YAML."""
 
     pass
 
 
-class FlowDict(dict):
+class _FlowDict(dict):
     """Dict that serializes in YAML flow style with quoted strings."""
 
     pass
 
 
+def _quoted_str(dumper: yaml.SafeDumper, data: str) -> yaml.Node:
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
+
+
 def _flow_style_dict(dumper: yaml.SafeDumper, data: dict) -> yaml.Node:
-    """Represent dict in flow style (JSON-like, single line)."""
     return dumper.represent_mapping("tag:yaml.org,2002:map", data.items(), flow_style=True)
 
 
-_FlowStyleDumper.add_representer(FlowDict, _flow_style_dict)
-_FlowStyleDumper.add_representer(QuotedStr, _quoted_str)
+_FlowStyleDumper.add_representer(_FlowDict, _flow_style_dict)
+_FlowStyleDumper.add_representer(_QuotedStr, _quoted_str)
 
 
-def _record_to_flow(record: dict) -> FlowDict:
-    """Convert record to FlowDict with quoted keys and string values (JSON-like)."""
-    return FlowDict(
-        {QuotedStr(k): QuotedStr(v) if isinstance(v, str) else v for k, v in record.items()}
+def _record_to_flow(record: dict) -> _FlowDict:
+    """Convert record to FlowDict with quoted keys and string values."""
+    return _FlowDict(
+        {_QuotedStr(k): _QuotedStr(v) if isinstance(v, str) else v for k, v in record.items()}
     )
-
-
-def _data_to_dict_flow(data: Data) -> dict[str, Any]:
-    """Convert Data to dict, using flow style for inline records."""
-    result: dict[str, Any] = {"format": data.format}
-    if data.format == "inline":
-        result["records"] = [_record_to_flow(r) for r in data.records]
-    else:
-        result["path"] = data.path
-    return result
 
 
 def save_manifest(manifest: Manifest, path: Path, *, compress: bool = False) -> None:
@@ -307,10 +248,11 @@ def save_manifest(manifest: Manifest, path: Path, *, compress: bool = False) -> 
     import gzip
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = _manifest_to_dict(manifest)
+    data = _build_manifest_dict(manifest)
+
     # Use flow-style records for compact output
-    if "data" in data and data["data"].get("format") == "inline":
-        data["data"] = _data_to_dict_flow(manifest.data)
+    if data["data"].get("format") == "inline":
+        data["data"]["records"] = [_record_to_flow(r) for r in data["data"]["records"]]
 
     yaml_content = yaml.dump(
         data, Dumper=_FlowStyleDumper, sort_keys=False, allow_unicode=True, width=10000
@@ -324,16 +266,6 @@ def save_manifest(manifest: Manifest, path: Path, *, compress: bool = False) -> 
     else:
         with path.open("w", encoding="utf-8") as f:
             f.write(yaml_content)
-
-
-def _validate_data(manifest: Manifest) -> list[str]:
-    """Validate manifest data section (structural only)."""
-    errors: list[str] = []
-    if manifest.data.format == "inline" and not manifest.data.records:
-        errors.append("Inline data requires non-empty records list")
-    elif manifest.data.format == "external" and not manifest.data.path:
-        errors.append("External data requires a path")
-    return errors
 
 
 def _to_number(value: Any, default: int | float) -> int | float:
@@ -350,26 +282,44 @@ def _to_number(value: Any, default: int | float) -> int | float:
     return default
 
 
+def _validate_hyperparams(training: dict, lora: dict) -> list[str]:
+    """Validate training hyperparameters."""
+    errors: list[str] = []
+    if _to_number(training.get("num_epochs"), 3) <= 0:
+        errors.append("num_epochs must be positive")
+    if _to_number(training.get("batch_size"), 4) <= 0:
+        errors.append("batch_size must be positive")
+    if _to_number(training.get("learning_rate"), 2e-4) <= 0:
+        errors.append("learning_rate must be positive")
+    if _to_number(lora.get("r"), 16) <= 0:
+        errors.append("LoRA rank must be positive")
+    return errors
+
+
 def validate_manifest(manifest: Manifest) -> list[str]:
     """Validate a training manifest."""
     errors: list[str] = []
 
-    if not manifest.adapter:
+    adapter = manifest.get("adapter", "")
+    method = manifest.get("method", "")
+    data = manifest.get("data") or Data()
+
+    if not adapter:
         errors.append("adapter is required")
-    if manifest.method not in ("dpo", "sft"):
-        errors.append(f"method must be 'dpo' or 'sft', got '{manifest.method}'")
+    if method not in ("dpo", "sft"):
+        errors.append(f"method must be 'dpo' or 'sft', got '{method}'")
 
-    errors.extend(_validate_data(manifest))
+    if data.get("format") == "inline" and not data.get("records"):
+        errors.append("Inline data requires non-empty records list")
+    elif data.get("format") == "external" and not data.get("path"):
+        errors.append("External data requires a path")
 
-    if _to_number(manifest.training.get("num_epochs"), 3) <= 0:
-        errors.append("num_epochs must be positive")
-    if _to_number(manifest.training.get("batch_size"), 4) <= 0:
-        errors.append("batch_size must be positive")
-    if _to_number(manifest.training.get("learning_rate"), 2e-4) <= 0:
-        errors.append("learning_rate must be positive")
-    if _to_number(manifest.lora.get("r"), 16) <= 0:
-        errors.append("LoRA rank must be positive")
-    # target_modules can be empty - trainer applies defaults
+    if adapter and ("/" in adapter or "\\" in adapter or ".." in adapter):
+        errors.append(f"Invalid adapter key: {adapter}")
+
+    training = manifest.get("training") or {}
+    lora = manifest.get("lora") or {}
+    errors.extend(_validate_hyperparams(training, lora))
 
     return errors
 
@@ -387,7 +337,7 @@ def resolve_data(manifest: Manifest, work_dir: Path) -> Path:
     if manifest.data.format == "external":
         if manifest.data.path is None:
             raise ValueError("External data format requires a path")
-        data_path = work_dir / manifest.data.path
+        data_path: Path = work_dir / manifest.data.path
         if not data_path.exists():
             raise FileNotFoundError(f"Data file not found: {data_path}")
         return data_path

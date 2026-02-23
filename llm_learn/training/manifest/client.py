@@ -11,15 +11,11 @@ from typing import Any, Literal
 from appinfra import DotDict
 from appinfra.log import Logger
 
+from ..schema import Adapter
 from .errors import CorruptedManifestError
 from .loader import load_manifest as _load_manifest
 from .loader import save_manifest as _save_manifest
-from .schema import (
-    Adapter,
-    Data,
-    Manifest,
-    Source,
-)
+from .schema import Data, Manifest, Source
 
 # Keys that belong in training config (vs method_config or lora)
 _TRAINING_KEYS = frozenset(
@@ -287,7 +283,8 @@ class Client:
         for path in self.list_completed():
             manifest = _load_manifest(path)
             if manifest.output and manifest.output.adapter and manifest.output.adapter.md5 == md5:
-                return manifest.output.adapter
+                adapter: Adapter = manifest.output.adapter
+                return adapter
         return None
 
     def get_latest_completed(

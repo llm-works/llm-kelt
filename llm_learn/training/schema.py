@@ -6,10 +6,6 @@ Defaults are optimized for Qwen2.5-7B-Instruct with QLoRA.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Literal
-
 from appinfra import DotDict
 
 # Training hyperparameter defaults
@@ -30,52 +26,36 @@ TRAINING_DEFAULTS = DotDict(
 )
 
 
-@dataclass
-class Adapter:
+class Adapter(DotDict):
     """Adapter identity.
 
-    Attributes:
+    Fields:
         md5: MD5 hash of weights (12 char hex). THE unique version identifier.
         mtime: ISO timestamp of weights file modification time.
         path: Full path to adapter directory.
     """
 
-    md5: str
-    mtime: str
-    path: str
+    pass
 
 
-@dataclass
-class RunResult:
+class RunResult(DotDict):
     """Result of a training run.
 
-    Attributes:
+    Fields:
         status: "completed" or "failed".
         base_model: HuggingFace model ID used as base.
         method: Training method ("sft" or "dpo").
         metrics: Training metrics (loss, eval metrics if applicable).
         config: Full configuration dict used for training.
-        started_at: When training started.
-        completed_at: When training completed.
+        started_at: When training started (datetime).
+        completed_at: When training completed (datetime).
         samples_trained: Total number of samples seen during training.
         adapter: Adapter identity with md5/mtime/path (None if failed).
         parent: Parent adapter this was trained from (for lineage tracking).
         error: Error message if status is "failed".
     """
 
-    status: Literal["completed", "failed"]
-    base_model: str
-    method: str
-    metrics: dict[str, Any]
-    config: dict[str, Any]
-    started_at: datetime
-    completed_at: datetime
-    samples_trained: int
-    adapter: Adapter | None = None
-    parent: Adapter | None = None
-    error: str | None = None
-
     @property
     def duration_seconds(self) -> float:
         """Calculate training duration in seconds."""
-        return (self.completed_at - self.started_at).total_seconds()
+        return float((self.completed_at - self.started_at).total_seconds())

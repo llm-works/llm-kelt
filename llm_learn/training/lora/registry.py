@@ -21,6 +21,7 @@ Directory structure:
         └── coding-v1 -> ../adapters/coding-v1
 """
 
+import json
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
@@ -97,15 +98,18 @@ class AdapterRegistry:
         description: str,
     ) -> None:
         """Write config.yaml for the adapter."""
+        # Convert DotDict to plain dict for YAML serialization
+        training_config = json.loads(json.dumps(training_result.config))
         config: dict = {
             "enabled": True,  # Deployment controlled via symlinks, not this flag
             "description": description,
             "base_model": training_result.base_model,
             "method": training_result.method,
-            "training_config": training_result.config,
+            "training_config": training_config,
         }
-        if training_result.parent is not None:
-            config["parent"] = training_result.parent.path
+        parent = training_result.get("parent")
+        if parent is not None:
+            config["parent"] = parent.path
         config_path = adapter_path / "config.yaml"
         with config_path.open("w") as f:
             yaml.safe_dump(config, f)

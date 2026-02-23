@@ -11,7 +11,7 @@ from llm_learn.training.manifest.errors import CorruptedManifestError
 
 # Import private functions to test internal parsing logic directly
 from llm_learn.training.manifest.loader import (
-    _dict_to_output,
+    _build_output_result,
     _to_number,
     load_manifest,
     save_manifest,
@@ -22,7 +22,7 @@ from llm_learn.training.schema import Adapter
 
 
 class TestManifestSchema:
-    """Test Manifest dataclass validation."""
+    """Test Manifest schema (DotDict-based, validation via validate_manifest)."""
 
     def test_valid_manifest(self):
         """Test creating a valid manifest."""
@@ -34,54 +34,58 @@ class TestManifestSchema:
 
         assert manifest.adapter == "my-adapter"
         assert manifest.method == "sft"
-        assert manifest.version == 1
         assert manifest.data.format == "inline"
         assert len(manifest.data.records) == 1
 
-    def test_empty_adapter_raises(self):
-        """Test that empty adapter raises ValueError."""
-        with pytest.raises(ValueError, match="adapter is required"):
-            Manifest(
-                adapter="",
-                method="sft",
-                data=Data(format="inline", records=[{"prompt": "test"}]),
-            )
+    def test_empty_adapter_detected_by_validation(self):
+        """Test that empty adapter is caught by validate_manifest."""
+        manifest = Manifest(
+            adapter="",
+            method="sft",
+            data=Data(format="inline", records=[{"prompt": "test"}]),
+        )
+        errors = validate_manifest(manifest)
+        assert "adapter is required" in errors
 
-    def test_invalid_method_raises(self):
-        """Test that invalid method raises ValueError."""
-        with pytest.raises(ValueError, match="method must be 'dpo' or 'sft'"):
-            Manifest(
-                adapter="my-adapter",
-                method="invalid",  # type: ignore[arg-type]
-                data=Data(format="inline", records=[{"prompt": "test"}]),
-            )
+    def test_invalid_method_detected_by_validation(self):
+        """Test that invalid method is caught by validate_manifest."""
+        manifest = Manifest(
+            adapter="my-adapter",
+            method="invalid",
+            data=Data(format="inline", records=[{"prompt": "test"}]),
+        )
+        errors = validate_manifest(manifest)
+        assert any("method must be" in e for e in errors)
 
-    def test_path_traversal_slash_raises(self):
-        """Test that adapter with slash raises ValueError (path traversal)."""
-        with pytest.raises(ValueError, match="Invalid adapter"):
-            Manifest(
-                adapter="../evil",
-                method="sft",
-                data=Data(format="inline", records=[{"prompt": "test"}]),
-            )
+    def test_path_traversal_slash_detected_by_validation(self):
+        """Test that adapter with slash is caught by validate_manifest (path traversal)."""
+        manifest = Manifest(
+            adapter="../evil",
+            method="sft",
+            data=Data(format="inline", records=[{"prompt": "test"}]),
+        )
+        errors = validate_manifest(manifest)
+        assert any("Invalid adapter" in e for e in errors)
 
-    def test_path_traversal_backslash_raises(self):
-        """Test that adapter with backslash raises ValueError (path traversal)."""
-        with pytest.raises(ValueError, match="Invalid adapter"):
-            Manifest(
-                adapter="evil\\path",
-                method="sft",
-                data=Data(format="inline", records=[{"prompt": "test"}]),
-            )
+    def test_path_traversal_backslash_detected_by_validation(self):
+        """Test that adapter with backslash is caught by validate_manifest (path traversal)."""
+        manifest = Manifest(
+            adapter="evil\\path",
+            method="sft",
+            data=Data(format="inline", records=[{"prompt": "test"}]),
+        )
+        errors = validate_manifest(manifest)
+        assert any("Invalid adapter" in e for e in errors)
 
-    def test_path_traversal_dotdot_raises(self):
-        """Test that adapter with .. raises ValueError (path traversal)."""
-        with pytest.raises(ValueError, match="Invalid adapter"):
-            Manifest(
-                adapter="..adapter",
-                method="sft",
-                data=Data(format="inline", records=[{"prompt": "test"}]),
-            )
+    def test_path_traversal_dotdot_detected_by_validation(self):
+        """Test that adapter with .. is caught by validate_manifest (path traversal)."""
+        manifest = Manifest(
+            adapter="..adapter",
+            method="sft",
+            data=Data(format="inline", records=[{"prompt": "test"}]),
+        )
+        errors = validate_manifest(manifest)
+        assert any("Invalid adapter" in e for e in errors)
 
     def test_valid_adapter_with_hyphen_and_numbers(self):
         """Test that adapter with hyphens and numbers is valid."""
@@ -91,10 +95,12 @@ class TestManifestSchema:
             data=Data(format="inline", records=[{"prompt": "p", "chosen": "c", "rejected": "r"}]),
         )
         assert manifest.adapter == "my-agent-v2"
+        errors = validate_manifest(manifest)
+        assert errors == []
 
 
 class TestDataSchema:
-    """Test Data dataclass validation."""
+    """Test Data schema (DotDict-based, validation via validate_manifest)."""
 
     def test_inline_data_valid(self):
         """Test valid inline data."""
@@ -102,10 +108,15 @@ class TestDataSchema:
         assert data.format == "inline"
         assert len(data.records) == 1
 
-    def test_inline_data_empty_records_raises(self):
-        """Test that inline data with empty records raises ValueError."""
-        with pytest.raises(ValueError, match="Inline data format requires non-empty records"):
-            Data(format="inline", records=[])
+    def test_inline_data_empty_records_detected_by_validation(self):
+        """Test that inline data with empty records is caught by validate_manifest."""
+        manifest = Manifest(
+            adapter="test",
+            method="sft",
+            data=Data(format="inline", records=[]),
+        )
+        errors = validate_manifest(manifest)
+        assert any("Inline data requires non-empty records" in e for e in errors)
 
     def test_external_data_valid(self):
         """Test valid external data."""
@@ -113,20 +124,25 @@ class TestDataSchema:
         assert data.format == "external"
         assert data.path == "data/train.jsonl"
 
-    def test_external_data_no_path_raises(self):
-        """Test that external data without path raises ValueError."""
-        with pytest.raises(ValueError, match="External data format requires a path"):
-            Data(format="external")
+    def test_external_data_no_path_detected_by_validation(self):
+        """Test that external data without path is caught by validate_manifest."""
+        manifest = Manifest(
+            adapter="test",
+            method="sft",
+            data=Data(format="external"),
+        )
+        errors = validate_manifest(manifest)
+        assert any("External data requires a path" in e for e in errors)
 
 
 class TestSourceSchema:
-    """Test Source dataclass."""
+    """Test Source schema (DotDict-based)."""
 
     def test_empty_source(self):
         """Test creating empty source."""
         source = Source()
-        assert source.context_key is None
-        assert source.description is None
+        assert source.get("context_key") is None
+        assert source.get("description") is None
 
     def test_source_with_values(self):
         """Test creating source with values."""
@@ -315,26 +331,27 @@ class TestValidateManifest:
         assert errors == []
 
     def test_missing_adapter_returns_error(self):
-        """Test that missing adapter is caught (but won't reach here due to __post_init__)."""
-        # Create manifest bypassing __post_init__ validation
-        manifest = object.__new__(Manifest)
-        manifest.adapter = ""
-        manifest.method = "sft"
-        manifest.data = Data(format="inline", records=[{"prompt": "test"}])
-        manifest.training = {}
-        manifest.lora = {}
+        """Test that missing adapter is caught."""
+        manifest = Manifest(
+            adapter="",
+            method="sft",
+            data=Data(format="inline", records=[{"prompt": "test"}]),
+            training={},
+            lora={},
+        )
 
         errors = validate_manifest(manifest)
         assert "adapter is required" in errors
 
     def test_invalid_method_returns_error(self):
         """Test that invalid method is caught."""
-        manifest = object.__new__(Manifest)
-        manifest.adapter = "test"
-        manifest.method = "invalid"
-        manifest.data = Data(format="inline", records=[{"prompt": "test"}])
-        manifest.training = {}
-        manifest.lora = {}
+        manifest = Manifest(
+            adapter="test",
+            method="invalid",
+            data=Data(format="inline", records=[{"prompt": "test"}]),
+            training={},
+            lora={},
+        )
 
         errors = validate_manifest(manifest)
         assert any("method must be" in e for e in errors)
@@ -345,8 +362,8 @@ class TestValidateManifest:
             adapter="test",
             method="sft",
             data=Data(format="inline", records=[{"prompt": "test", "completion": "response"}]),
+            training={"num_epochs": -1},
         )
-        manifest.training["num_epochs"] = -1
 
         errors = validate_manifest(manifest)
         assert "num_epochs must be positive" in errors
@@ -357,8 +374,8 @@ class TestValidateManifest:
             adapter="test",
             method="sft",
             data=Data(format="inline", records=[{"prompt": "test", "completion": "response"}]),
+            training={"batch_size": 0},
         )
-        manifest.training["batch_size"] = 0
 
         errors = validate_manifest(manifest)
         assert "batch_size must be positive" in errors
@@ -369,10 +386,8 @@ class TestValidateManifest:
             adapter="test",
             method="sft",
             data=Data(format="inline", records=[{"prompt": "test", "completion": "response"}]),
+            training={"learning_rate": "2e-4", "num_epochs": "3"},
         )
-        # YAML may parse "2e-4" as string
-        manifest.training["learning_rate"] = "2e-4"
-        manifest.training["num_epochs"] = "3"
 
         errors = validate_manifest(manifest)
         assert errors == []  # String numbers should be coerced correctly
@@ -411,23 +426,19 @@ class TestToNumber:
         assert _to_number("not a number", 99) == 99
 
 
-class TestDictToOutput:
-    """Test _dict_to_output function."""
+class TestBuildOutputResult:
+    """Test _build_output_result function."""
 
-    def test_none_returns_none(self):
-        """Test that None input returns None."""
-        assert _dict_to_output(None) is None
-
-    def test_missing_status_uses_default(self):
-        """Test that missing status field uses default 'unknown'."""
+    def test_missing_status_preserved(self):
+        """Test that missing status field is preserved as None (DotDict behavior)."""
         data = {
             "base_model": "test-model",
             "method": "sft",
         }
-        result = _dict_to_output(data)
+        result = _build_output_result(data)
 
         assert result is not None
-        assert result.status == "unknown"
+        assert result.get("status") is None  # DotDict.get() returns None for missing keys
 
     def test_complete_output(self):
         """Test parsing complete output data."""
@@ -442,7 +453,7 @@ class TestDictToOutput:
             "completed_at": "2024-01-01T11:00:00",
             "samples_trained": 1000,
         }
-        result = _dict_to_output(data)
+        result = _build_output_result(data)
 
         assert result is not None
         assert result.status == "completed"
@@ -454,7 +465,7 @@ class TestDictToOutput:
     def test_missing_timestamps_use_utc_now(self):
         """Test that missing timestamps use utc_now()."""
         data = {"status": "completed"}
-        result = _dict_to_output(data)
+        result = _build_output_result(data)
 
         assert result is not None
         # Should have timezone-aware datetime
