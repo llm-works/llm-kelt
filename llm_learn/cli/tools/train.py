@@ -14,6 +14,7 @@ from ...training.manifest.loader import load_manifest
 from ...training.profiles import build_training_config, get_registry_path, load_default_profile
 from ...training.runner import Runner
 from ...training.schema import Adapter
+from ...training.storage import FileStorage
 
 
 def _print_adapter_metadata(adapter_path: Path) -> None:
@@ -309,7 +310,8 @@ class RunTool(_ConfigMixin, Tool):
             return 0 if not self.args.manifest else 1
 
         try:
-            runner = Runner(self.lg, registry_path, model_locations=self._model_locations())
+            storage = FileStorage(self.lg, registry_path)
+            runner = Runner(self.lg, storage, model_locations=self._model_locations())
             result = runner.run(
                 manifest_path,
                 skip_registration=self.args.skip_register,
@@ -344,7 +346,8 @@ class AdaptersTool(_ConfigMixin, Tool):
 
     def run(self, **kwargs: Any) -> int:
         try:
-            registry = AdapterRegistry(self.lg, self._registry_path())
+            storage = FileStorage(self.lg, self._registry_path())
+            registry = AdapterRegistry(self.lg, storage)
         except ValueError as e:
             self.lg.error(str(e))
             return 1

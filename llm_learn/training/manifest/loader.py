@@ -123,28 +123,34 @@ def _get_effective_config(manifest: Manifest) -> tuple[dict, dict]:
 
     if output is not None and output.get("config"):
         output_config = output.config
-        lora = output_config.get("lora", dict(manifest_lora))
-        training = output_config.get("training", dict(manifest_training))
+        lora_raw = output_config.get("lora", manifest_lora)
+        training_raw = output_config.get("training", manifest_training)
+        # Convert DotDicts to plain dicts for YAML serialization
+        lora = lora_raw.to_dict() if hasattr(lora_raw, "to_dict") else dict(lora_raw)
+        training = (
+            training_raw.to_dict() if hasattr(training_raw, "to_dict") else dict(training_raw)
+        )
         return lora, training
     return dict(manifest_lora), dict(manifest_training)
 
 
 def _build_output_dict(output: RunResult) -> dict[str, Any]:
     """Build output dict for YAML serialization."""
+    # Use to_dict() for recursive DotDict conversion (yaml.safe_dump requires plain dicts)
     result: dict[str, Any] = {
         "status": output.status,
-        "adapter": dict(output.adapter) if output.adapter else None,
+        "adapter": output.adapter.to_dict() if output.adapter else None,
         "base_model": output.base_model,
         "method": output.method,
-        "metrics": output.metrics,
-        "config": output.config,
+        "metrics": output.metrics.to_dict() if output.metrics else None,
+        "config": output.config.to_dict() if output.config else None,
         "started_at": _serialize_datetime(output.started_at),
         "completed_at": _serialize_datetime(output.completed_at),
         "samples_trained": output.samples_trained,
     }
-    if output.parent is not None:
-        result["parent"] = dict(output.parent)
-    if output.error is not None:
+    if output.get("parent") is not None:
+        result["parent"] = output.parent.to_dict()
+    if output.get("error") is not None:
         result["error"] = output.error
     return result
 

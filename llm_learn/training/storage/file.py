@@ -1,0 +1,770 @@
+"""File-based storage implementation.
+
+Implements the Storage interface using the local filesystem.
+"""
+
+from __future__ import annotations
+
+import gzip
+import json
+import shutil
+from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import yaml
+from appinfra.log import Logger
+
+from .base import Storage
+
+if TYPE_CHECKING:
+    from ..manifest.schema import Manifest
+    from ..schema import AdapterInfo, RunResult
+
+
+class FileStorage(Storage):
+    """File-based storage for training artifacts.
+
+    Implements the Storage interface using local filesystem:
+    - Manifests stored as YAML files (gzipped for completed)
+    - Adapters stored in versioned directories
+    - Deployment via symlinks
+    - Work areas as temporary directories
+
+    Directory structure:
+        base_path/
+        ├── pending/       # Manifests waiting for training
+        ├── completed/     # Finished manifests (archive)
+        ├── adapters/      # All adapters stored here
+        │   └── {key}/{version_id}/
+        ├── deployed/      # Symlinks to enabled adapters
+        └── work/          # Temporary training directories
+    """
+
+    def __init__(self, lg: Logger, base_path: str | Path) -> None:
+        """Initialize file storage.
+
+        Args:
+            lg: Logger instance.
+            base_path: Root directory for the registry.
+        """
+        self._lg = lg
+        self.base_path = Path(base_path).expanduser()
+        self.pending_path = self.base_path / "pending"
+        self.completed_path = self.base_path / "completed"
+        self.adapters_path = self.base_path / "adapters"
+        self.deployed_path = self.base_path / "deployed"
+        self.work_path = self.base_path / "work"
+
+    # =========================================================================
+    # Manifest Operations (ABC implementation)
+    # =========================================================================
+
+    def submit_manifest(self, manifest: Manifest) -> None:
+        """Submit a manifest to the pending queue."""
+        from ..manifest.loader import save_manifest
+
+        self.validate_key(manifest.adapter)
+        self.pending_path.mkdir(parents=True, exist_ok=True)
+
+        pending_file = self.pending_path / f"{manifest.adapter}.yaml"
+        if pending_file.exists():
+            raise ValueError(f"Manifest already pending for adapter: {manifest.adapter}")
+
+        save_manifest(manifest, pending_file)
+        self._lg.info("submitted manifest", extra={"adapter": manifest.adapter})
+
+    def get_pending_manifest(self, adapter: str) -> Manifest | None:
+        """Get a pending manifest by adapter key."""
+        from ..manifest.loader import load_manifest
+
+        self.validate_key(adapter)
+        pending_file = self.pending_path / f"{adapter}.yaml"
+        if not pending_file.exists():
+            return None
+        return load_manifest(pending_file)
+
+    def list_pending_manifests(self) -> list[Manifest]:
+        """List all pending manifests."""
+        from ..manifest.loader import load_manifest
+
+        if not self.pending_path.exists():
+            return []
+
+        manifests = []
+        for path in sorted(self.pending_path.glob("*.yaml")):
+            try:
+                manifests.append(load_manifest(path))
+            except Exception as e:
+                self._lg.warning(
+                    "failed to load manifest", extra={"path": str(path), "error": str(e)}
+                )
+        return manifests
+
+    def remove_pending_manifest(self, adapter: str) -> None:
+        """Remove a manifest from pending queue."""
+        self.validate_key(adapter)
+        pending_file = self.pending_path / f"{adapter}.yaml"
+        if not pending_file.exists():
+            raise FileNotFoundError(f"Manifest not found: {adapter}")
+        pending_file.unlink()
+
+    def complete_manifest(self, manifest: Manifest) -> None:
+        """Move a manifest to completed storage."""
+        from ..manifest.loader import save_manifest
+
+        self.completed_path.mkdir(parents=True, exist_ok=True)
+
+        md5 = (
+            manifest.output.adapter.md5
+            if manifest.output and manifest.output.adapter
+            else "unknown"
+        )
+        completed_file = self.completed_path / f"{manifest.adapter}-{md5}.yaml.gz"
+        save_manifest(manifest, completed_file, compress=True)
+
+        # Remove from pending if it exists
+        pending_file = self.pending_path / f"{manifest.adapter}.yaml"
+        if pending_file.exists():
+            pending_file.unlink()
+
+        self._lg.info("completed manifest", extra={"adapter": manifest.adapter, "md5": md5})
+
+    def list_completed_manifests(self) -> list[Manifest]:
+        """List all completed manifests."""
+        from ..manifest.loader import load_manifest
+
+        if not self.completed_path.exists():
+            return []
+
+        manifests = []
+        for path in sorted(self.completed_path.glob("*.yaml*")):  # .yaml and .yaml.gz
+            try:
+                manifests.append(load_manifest(path))
+            except Exception as e:
+                self._lg.warning(
+                    "failed to load manifest", extra={"path": str(path), "error": str(e)}
+                )
+        return manifests
+
+    def find_adapter_by_md5(self, md5: str) -> Manifest | None:
+        """Find a completed manifest by adapter MD5."""
+        for manifest in self.list_completed_manifests():
+            if manifest.output and manifest.output.adapter and manifest.output.adapter.md5 == md5:
+                return manifest
+        return None
+
+    # =========================================================================
+    # Adapter Operations (ABC implementation)
+    # =========================================================================
+
+    def store_adapter(  # type: ignore[override]
+        self,
+        training_result_or_source: RunResult | Path,
+        key: str,
+        description_or_version_id: str,
+        deploy: bool = True,
+    ) -> AdapterInfo | Path:
+        """Store a trained adapter.
+
+        Supports two signatures for backwards compatibility:
+        - ABC: store_adapter(training_result, key, description, deploy) -> AdapterInfo
+        - Legacy: store_adapter(source_path, key, version_id) -> Path
+        """
+        # Legacy signature: (source: Path, key: str, version_id: str)
+        if isinstance(training_result_or_source, Path):
+            return self._store_adapter_legacy(
+                training_result_or_source, key, description_or_version_id
+            )
+
+        # ABC signature: (training_result: RunResult, key: str, description: str, deploy: bool)
+        return self._store_adapter_from_result(
+            training_result_or_source, key, description_or_version_id, deploy
+        )
+
+    def _store_adapter_legacy(self, source: Path, key: str, version_id: str) -> Path:
+        """Store adapter from source path (legacy API)."""
+        self.validate_key(key)
+        if not source.exists():
+            raise FileNotFoundError(f"Adapter source not found: {source}")
+
+        adapter_path = self.adapters_path / key / version_id
+        if adapter_path.exists():
+            shutil.rmtree(adapter_path)
+
+        shutil.copytree(source, adapter_path)
+        self._lg.info("stored adapter", extra={"key": key, "version": version_id})
+
+        return adapter_path
+
+    def _validate_training_result(self, training_result: RunResult) -> Path:
+        """Validate training result and return source path."""
+        if not training_result.adapter or not training_result.adapter.path:
+            raise ValueError("Training result has no adapter path")
+
+        source = Path(training_result.adapter.path)
+        if not source.exists():
+            raise FileNotFoundError(f"Adapter source not found: {source}")
+        return source
+
+    def _write_adapter_result_config(
+        self, adapter_path: Path, key: str, version_id: str, description: str, result: RunResult
+    ) -> None:
+        """Write config.yaml for adapter from training result."""
+        md5 = (result.adapter.md5 if result.adapter else None) or "unknown"
+        config = {
+            "key": key,
+            "version_id": version_id,
+            "description": description,
+            "md5": md5,
+            "mtime": result.adapter.mtime if result.adapter else None,
+            "created_at": datetime.now().isoformat(),
+            "samples_trained": result.samples_trained,
+            "duration_seconds": result.duration_seconds,
+        }
+        config_path = adapter_path / "config.yaml"
+        with config_path.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(config, f)
+
+    def _find_version_by_md5(self, key: str, md5: str) -> str | None:
+        """Find existing version with matching md5."""
+        key_path = self.adapters_path / key
+        if not key_path.is_dir():
+            return None
+
+        for version_dir in key_path.iterdir():
+            if not version_dir.is_dir():
+                continue
+            config = self._read_adapter_config(key, version_dir.name)
+            if config.get("md5") == md5:
+                return version_dir.name
+        return None
+
+    def get_adapter_by_md5(self, key: str, md5: str) -> AdapterInfo | None:
+        """Get adapter info by key and md5."""
+        from ..lora.registry import AdapterInfo
+
+        self.validate_key(key)
+        version_id = self._find_version_by_md5(key, md5)
+        if version_id is None:
+            return None
+
+        config = self._read_adapter_config(key, version_id)
+        return AdapterInfo(
+            key=key,
+            version_id=version_id,
+            path=self.adapters_path / key / version_id,
+            description=config.get("description", ""),
+            md5=config.get("md5"),
+            deployed=self.is_deployed(key),
+        )
+
+    def _check_duplicate_md5(self, key: str, md5: str) -> None:
+        """Raise if adapter with same md5 already exists."""
+        existing_version = self._find_version_by_md5(key, md5)
+        if existing_version:
+            raise ValueError(
+                f"Adapter '{key}' already exists with md5 {md5[:8]}. "
+                "Use overwrite=True to return existing."
+            )
+
+    def _copy_adapter_files(self, source: Path, key: str, version_id: str) -> Path:
+        """Copy adapter files to registry and return path."""
+        adapter_path = self.adapters_path / key / version_id
+        if adapter_path.exists():
+            shutil.rmtree(adapter_path)
+        shutil.copytree(source, adapter_path)
+        return adapter_path
+
+    def _store_adapter_from_result(
+        self,
+        training_result: RunResult,
+        key: str,
+        description: str,
+        deploy: bool = True,
+    ) -> AdapterInfo:
+        """Store adapter from training result (ABC API).
+
+        Raises:
+            ValueError: If adapter with same md5 already exists for this key.
+        """
+        from ..lora.registry import AdapterInfo
+
+        self.validate_key(key)
+        source = self._validate_training_result(training_result)
+        md5 = training_result.adapter.md5 or "unknown"
+
+        self._check_duplicate_md5(key, md5)
+
+        version_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{md5[:8]}"
+        adapter_path = self._copy_adapter_files(source, key, version_id)
+
+        self._write_adapter_result_config(
+            adapter_path, key, version_id, description, training_result
+        )
+        self._lg.info("stored adapter", extra={"key": key, "version": version_id})
+
+        if deploy:
+            self.deploy_adapter(key, version_id)
+
+        return AdapterInfo(
+            key=key,
+            version_id=version_id,
+            path=adapter_path,
+            description=description,
+            md5=md5,
+            deployed=deploy,
+        )
+
+    def get_adapter(self, key: str) -> AdapterInfo | None:
+        """Get adapter info by key."""
+        from ..lora.registry import AdapterInfo
+
+        self.validate_key(key)
+        key_path = self.adapters_path / key
+        if not key_path.exists():
+            return None
+
+        version_id = self._get_latest_version(key)
+        if not version_id:
+            return None
+
+        config = self._read_adapter_config(key, version_id)
+        return AdapterInfo(
+            key=key,
+            version_id=version_id,
+            path=key_path / version_id,
+            description=config.get("description", ""),
+            md5=config.get("md5"),
+            deployed=self.is_deployed(key),
+        )
+
+    def list_adapters(self) -> list[str]:  # type: ignore[override]
+        """List all registered adapter keys.
+
+        Returns strings for backwards compatibility.
+        Use list_adapter_infos() for full AdapterInfo objects.
+        """
+        if not self.adapters_path.exists():
+            return []
+        return [p.name for p in self.adapters_path.iterdir() if p.is_dir()]
+
+    def list_adapter_infos(self) -> list[AdapterInfo]:
+        """List all registered adapters with full info (ABC-compliant)."""
+        from ..lora.registry import AdapterInfo
+
+        if not self.adapters_path.exists():
+            return []
+
+        adapters = []
+        for key_path in sorted(self.adapters_path.iterdir()):
+            if not key_path.is_dir():
+                continue
+            key = key_path.name
+            version_id = self._get_latest_version(key)
+            if not version_id:
+                continue
+
+            config = self._read_adapter_config(key, version_id)
+            adapters.append(
+                AdapterInfo(
+                    key=key,
+                    version_id=version_id,
+                    path=key_path / version_id,
+                    description=config.get("description", ""),
+                    md5=config.get("md5"),
+                    deployed=self.is_deployed(key),
+                )
+            )
+        return adapters
+
+    def remove_adapter(self, key: str, version_id: str | None = None) -> None:
+        """Remove an adapter or specific version."""
+        self.validate_key(key)
+        key_path = self.adapters_path / key
+
+        if not key_path.exists():
+            raise ValueError(f"Adapter '{key}' not found")
+
+        # Undeploy if removing entire adapter
+        if version_id is None and self.is_deployed(key):
+            self.undeploy_adapter(key)
+
+        if version_id:
+            version_path = key_path / version_id
+            if not version_path.exists():
+                raise ValueError(f"Version '{version_id}' not found for adapter '{key}'")
+            shutil.rmtree(version_path)
+            self._lg.info("removed adapter version", extra={"key": key, "version": version_id})
+        else:
+            shutil.rmtree(key_path)
+            self._lg.info("removed adapter", extra={"key": key})
+
+    def deploy_adapter(self, key: str, version_id: str | None = None) -> None:
+        """Deploy an adapter version."""
+        self.validate_key(key)
+        self.deployed_path.mkdir(parents=True, exist_ok=True)
+
+        if version_id is None:
+            version_id = self._get_latest_version(key)
+            if version_id is None:
+                raise ValueError(f"No versions found for adapter '{key}'")
+
+        version_path = self.adapters_path / key / version_id
+        if not version_path.exists():
+            raise ValueError(f"Version '{version_id}' not found for adapter '{key}'")
+
+        symlink_path = self.deployed_path / key
+        if symlink_path.exists() or symlink_path.is_symlink():
+            symlink_path.unlink()
+
+        # Use relative path: deployed/key -> ../adapters/key/version_id
+        relative_target = Path("..") / "adapters" / key / version_id
+        symlink_path.symlink_to(relative_target)
+        self._lg.info("deployed adapter", extra={"key": key, "version": version_id})
+
+    def undeploy_adapter(self, key: str) -> None:
+        """Undeploy an adapter."""
+        self.validate_key(key)
+        symlink_path = self.deployed_path / key
+        if symlink_path.is_symlink():
+            symlink_path.unlink()
+            self._lg.info("undeployed adapter", extra={"key": key})
+
+    def is_deployed(self, key: str) -> bool:
+        """Check if adapter is deployed."""
+        self.validate_key(key)
+        return (self.deployed_path / key).is_symlink()
+
+    def get_deployed_path(self, key: str) -> Path | None:
+        """Get filesystem path to deployed adapter."""
+        self.validate_key(key)
+        symlink_path = self.deployed_path / key
+        if symlink_path.is_symlink():
+            return symlink_path.resolve()
+        return None
+
+    # =========================================================================
+    # Work Area Operations (ABC implementation)
+    # =========================================================================
+
+    def create_work_area(self, adapter: str, clean: bool = True) -> Path:
+        """Create a temporary work area for training."""
+        self.validate_key(adapter)
+        work_dir = self.work_path / adapter
+
+        if clean and work_dir.exists():
+            self._lg.info("cleaning work area", extra={"adapter": adapter})
+            shutil.rmtree(work_dir)
+
+        work_dir.mkdir(parents=True, exist_ok=True)
+        return work_dir
+
+    def cleanup_work_area(self, adapter: str) -> None:
+        """Clean up a training work area."""
+        self.validate_key(adapter)
+        work_dir = self.work_path / adapter
+        if work_dir.exists():
+            shutil.rmtree(work_dir)
+
+    def write_training_data(self, work_dir: Path, adapter: str, records: list[dict]) -> Path:
+        """Write training data to work area."""
+        work_dir.mkdir(parents=True, exist_ok=True)
+        data_path = work_dir / f"{adapter}.jsonl"
+
+        with data_path.open("w", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        return data_path
+
+    def resolve_data_path(self, manifest: Manifest, work_dir: Path) -> Path:
+        """Resolve manifest data to a file path."""
+        if manifest.data.format == "inline":
+            return self.write_training_data(work_dir, manifest.adapter, manifest.data.records)
+
+        # External file - must be absolute path
+        data_path = Path(manifest.data.path)
+        if not data_path.is_absolute():
+            raise ValueError(f"External data path must be absolute: {data_path}")
+
+        if not data_path.exists():
+            raise FileNotFoundError(f"Data file not found: {data_path}")
+
+        return data_path
+
+    # =========================================================================
+    # Validation (ABC implementation)
+    # =========================================================================
+
+    def validate_key(self, key: str) -> None:
+        """Validate an adapter/manifest key."""
+        if "/" in key or "\\" in key or ".." in key:
+            raise ValueError(f"Invalid key (path traversal): {key}")
+
+    # =========================================================================
+    # Filesystem Helpers (not in ABC - for backwards compatibility)
+    # =========================================================================
+
+    def ensure_directories(self) -> None:
+        """Create all required registry directories."""
+        for path in (
+            self.pending_path,
+            self.completed_path,
+            self.adapters_path,
+            self.deployed_path,
+            self.work_path,
+        ):
+            path.mkdir(parents=True, exist_ok=True)
+
+    def ensure_work_dir(self, adapter: str, *, clean: bool = True) -> Path:
+        """Create work directory for training.
+
+        Alias for create_work_area for backwards compatibility.
+        """
+        return self.create_work_area(adapter, clean=clean)
+
+    def clean_work_dir(self, adapter: str) -> None:
+        """Remove work directory for an adapter.
+
+        Alias for cleanup_work_area for backwards compatibility.
+        """
+        self.cleanup_work_area(adapter)
+
+    def ensure_dir(self, path: Path) -> Path:
+        """Ensure a directory exists.
+
+        Generic helper for creating any directory (including user-provided paths).
+
+        Args:
+            path: Directory path to create.
+
+        Returns:
+            The path (for chaining).
+        """
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def delete_file(self, path: Path) -> None:
+        """Delete a file if it exists."""
+        if path.exists():
+            path.unlink()
+
+    # =========================================================================
+    # Internal Helpers
+    # =========================================================================
+
+    def _get_latest_version(self, key: str) -> str | None:
+        """Get latest version ID for an adapter."""
+        key_path = self.adapters_path / key
+        if not key_path.is_dir():
+            return None
+
+        versions = sorted(p.name for p in key_path.iterdir() if p.is_dir())
+        return versions[-1] if versions else None
+
+    def _read_adapter_config(self, key: str, version_id: str) -> dict[str, Any]:
+        """Read config.yaml for an adapter version."""
+        config_path = self.adapters_path / key / version_id / "config.yaml"
+        if not config_path.exists():
+            return {}
+        with config_path.open("r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+
+    # =========================================================================
+    # Legacy Methods (for backwards compatibility during migration)
+    # =========================================================================
+
+    def write_manifest(self, path: Path, data: dict[str, Any], *, compress: bool = False) -> Path:
+        """Write manifest YAML to file (legacy - accepts dict)."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        yaml_content = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+
+        if compress:
+            if path.suffix != ".gz":
+                path = path.with_suffix(path.suffix + ".gz")
+            with gzip.open(path, "wt", encoding="utf-8") as f:
+                f.write(yaml_content)
+        else:
+            with path.open("w", encoding="utf-8") as f:
+                f.write(yaml_content)
+
+        return path
+
+    def remove_pending(self, adapter: str) -> None:
+        """Remove manifest from pending queue (legacy)."""
+        path = self.get_pending_path(adapter)
+        if not path.exists():
+            raise FileNotFoundError(f"Manifest not in queue: {adapter}")
+        path.unlink()
+
+    def move_to_completed(
+        self, manifest_path: Path, adapter: str, md5: str, *, compress: bool = True
+    ) -> Path:
+        """Move manifest to completed directory (legacy)."""
+        self.completed_path.mkdir(parents=True, exist_ok=True)
+
+        suffix = ".yaml.gz" if compress else ".yaml"
+        completed_path = self.completed_path / f"{adapter}-{md5}{suffix}"
+
+        # Read, write to new location, delete original
+        data = self.read_manifest(manifest_path)
+        self.write_manifest(completed_path, data, compress=compress)
+
+        if manifest_path.exists():
+            manifest_path.unlink()
+
+        return completed_path
+
+    def resolve_external_data(
+        self, data_path: str | Path, manifest_dir: Path | None = None
+    ) -> Path:
+        """Resolve external data file path (legacy)."""
+        path = Path(data_path)
+        if path.is_absolute():
+            resolved = path
+        elif manifest_dir:
+            resolved = manifest_dir / path
+        else:
+            resolved = path
+
+        if not resolved.exists():
+            raise FileNotFoundError(f"Data file not found: {resolved}")
+
+        return resolved
+
+    def get_adapter_path(self, key: str, version_id: str) -> Path:
+        """Get path to specific adapter version (legacy)."""
+        self.validate_key(key)
+        return self.adapters_path / key / version_id
+
+    def version_exists(self, key: str, version_id: str) -> bool:
+        """Check if adapter version exists."""
+        return self.get_adapter_path(key, version_id).exists()
+
+    def list_pending(self) -> list[Path]:
+        """List pending manifest files (legacy - returns paths)."""
+        if not self.pending_path.exists():
+            return []
+        return sorted(self.pending_path.glob("*.yaml"))
+
+    def list_completed(self) -> list[Path]:
+        """List completed manifest files (legacy - returns paths)."""
+        if not self.completed_path.exists():
+            return []
+        yaml_files = list(self.completed_path.glob("*.yaml"))
+        gz_files = list(self.completed_path.glob("*.yaml.gz"))
+        return sorted(yaml_files + gz_files)
+
+    def read_manifest(self, path: Path) -> dict[str, Any]:
+        """Load manifest YAML from file (legacy - returns dict)."""
+        if not path.exists():
+            raise FileNotFoundError(f"Manifest not found: {path}")
+
+        if path.suffix == ".gz":
+            with gzip.open(path, "rt", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+        with path.open("r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+
+    def get_pending_path(self, adapter: str) -> Path:
+        """Get path to pending manifest for an adapter."""
+        self.validate_key(adapter)
+        return self.pending_path / f"{adapter}.yaml"
+
+    def pending_exists(self, adapter: str) -> bool:
+        """Check if pending manifest exists."""
+        return self.get_pending_path(adapter).exists()
+
+    def adapter_exists(self, key: str) -> bool:
+        """Check if adapter is registered."""
+        self.validate_key(key)
+        return (self.adapters_path / key).exists()
+
+    def list_versions(self, key: str) -> list[str]:
+        """List versions for an adapter."""
+        self.validate_key(key)
+        key_path = self.adapters_path / key
+        if not key_path.is_dir():
+            return []
+        return sorted(p.name for p in key_path.iterdir() if p.is_dir())
+
+    def get_latest_version(self, key: str) -> str | None:
+        """Get latest version ID for an adapter (public API)."""
+        return self._get_latest_version(key)
+
+    def get_latest_version_path(self, key: str) -> Path | None:
+        """Get path to latest version of an adapter."""
+        version = self._get_latest_version(key)
+        if version is None:
+            return None
+        return self.adapters_path / key / version
+
+    def get_deployed_version(self, key: str) -> str | None:
+        """Get deployed version ID for an adapter."""
+        self.validate_key(key)
+        symlink_path = self.deployed_path / key
+        if not symlink_path.is_symlink():
+            return None
+        resolved = symlink_path.resolve()
+        return resolved.name
+
+    def get_deployed_version_path(self, key: str) -> Path | None:
+        """Get path to deployed version of an adapter."""
+        return self.get_deployed_path(key)
+
+    def store_adapter_files(self, source: Path, key: str, version_id: str) -> Path:
+        """Copy adapter files to registry (low-level).
+
+        This is used by AdapterRegistry for more control over the storage process.
+        """
+        self.validate_key(key)
+        if not source.exists():
+            raise FileNotFoundError(f"Adapter source not found: {source}")
+
+        adapter_path = self.adapters_path / key / version_id
+        if adapter_path.exists():
+            shutil.rmtree(adapter_path)
+
+        shutil.copytree(source, adapter_path)
+        self._lg.info("stored adapter files", extra={"key": key, "version": version_id})
+
+        return adapter_path
+
+    def read_adapter_config(self, key: str, version_id: str) -> dict[str, Any]:
+        """Read config.yaml for an adapter version (public API)."""
+        return self._read_adapter_config(key, version_id)
+
+    def write_adapter_config(self, key: str, version_id: str, config: dict[str, Any]) -> Path:
+        """Write config.yaml for an adapter version."""
+        config_path = self.adapters_path / key / version_id / "config.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with config_path.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(config, f)
+        self._lg.info("wrote adapter config", extra={"key": key, "version": version_id})
+        return config_path
+
+    def deploy(self, key: str, version_id: str | None = None) -> None:
+        """Create deployment symlink (alias for deploy_adapter)."""
+        self.deploy_adapter(key, version_id)
+
+    def undeploy(self, key: str) -> None:
+        """Remove deployment symlink (alias for undeploy_adapter)."""
+        self.undeploy_adapter(key)
+
+    def write_data_file(self, work_dir: Path, filename: str, records: list[dict[str, Any]]) -> Path:
+        """Write training data to JSONL file (legacy API with explicit filename)."""
+        work_dir.mkdir(parents=True, exist_ok=True)
+        data_path = work_dir / filename
+
+        with data_path.open("w", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        return data_path
+
+    def iter_adapter_keys(self) -> list[tuple[str, Path]]:
+        """Iterate over adapter keys with their paths."""
+        if not self.adapters_path.exists():
+            return []
+        return [(p.name, p) for p in self.adapters_path.iterdir() if p.is_dir()]

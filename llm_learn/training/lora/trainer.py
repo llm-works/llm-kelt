@@ -106,7 +106,6 @@ class Trainer:
 
     def _load_model(self):
         """Load base model with auto-detected quantization and apply LoRA."""
-        import torch
         from peft import prepare_model_for_kbit_training
         from transformers import AutoModelForCausalLM
 
@@ -118,13 +117,12 @@ class Trainer:
         quant_config, self._applied_quantization = get_quantization_config(
             self._lg, self.base_model, self._quantize_override
         )
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.base_model,
-            quantization_config=quant_config,
-            device_map="auto",
-            torch_dtype=torch.bfloat16 if quant_config is None else None,
-            trust_remote_code=True,
-        )
+        # Only pass quantization_config if we're applying it - passing None overwrites
+        # pre-quantized model configs and breaks transformers' to_dict() serialization
+        model_kwargs: dict = {"device_map": "auto", "trust_remote_code": True}
+        if quant_config is not None:
+            model_kwargs["quantization_config"] = quant_config
+        self.model = AutoModelForCausalLM.from_pretrained(self.base_model, **model_kwargs)
 
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()

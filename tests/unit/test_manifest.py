@@ -485,9 +485,16 @@ class TestManifestClient:
         return LoggerFactory.create_root(log_config)
 
     @pytest.fixture
-    def client(self, lg, tmp_path: Path):
+    def storage(self, lg, tmp_path: Path):
+        """Create FileStorage with temp directory."""
+        from llm_learn.training.storage import FileStorage
+
+        return FileStorage(lg, tmp_path)
+
+    @pytest.fixture
+    def client(self, lg, storage):
         """Create a manifest client with temp registry."""
-        return Client(lg=lg, registry_path=tmp_path)
+        return Client(lg=lg, storage=storage)
 
     def test_create_sft_manifest(self, client: Client):
         """Test creating an SFT manifest."""
@@ -537,13 +544,11 @@ class TestManifestClient:
             data=[{"prompt": "test", "completion": "response"}],
         )
 
-        path = client.submit(manifest)
-        assert path.exists()
-        assert path.name == "queued.yaml"
+        client.submit(manifest)
 
         pending = client.list_pending()
         assert len(pending) == 1
-        assert pending[0].name == "queued.yaml"
+        assert pending[0].adapter == "queued"
 
     def test_submit_duplicate_raises(self, client: Client):
         """Test that submitting duplicate adapter key raises."""
@@ -555,7 +560,7 @@ class TestManifestClient:
 
         client.submit(manifest)
 
-        with pytest.raises(ValueError, match="already in queue"):
+        with pytest.raises(ValueError, match="already pending"):
             client.submit(manifest)
 
     def test_get_pending(self, client: Client):
@@ -591,16 +596,19 @@ class TestManifestClient:
 
     def test_remove_pending_not_found_raises(self, client: Client):
         """Test that removing non-existent manifest raises."""
-        with pytest.raises(FileNotFoundError, match="not in queue"):
+        with pytest.raises(FileNotFoundError, match="not found"):
             client.remove_pending("nonexistent")
 
     def test_default_profiles_applied(self, lg, tmp_path: Path):
         """Test that default profiles are merged into manifest config."""
+        from llm_learn.training.storage import FileStorage
+
         default_profiles = {
             "sft": {"epochs": 5, "batch_size": 8, "learning_rate": 1e-4},
             "dpo": {"beta": 0.2, "epochs": 3},
         }
-        client = Client(lg=lg, registry_path=tmp_path, default_profiles=default_profiles)
+        storage = FileStorage(lg, tmp_path)
+        client = Client(lg=lg, storage=storage, default_profiles=default_profiles)
 
         manifest = client.create(
             adapter="with-defaults",
@@ -615,8 +623,11 @@ class TestManifestClient:
 
     def test_config_overrides_defaults(self, lg, tmp_path: Path):
         """Test that explicit config overrides default profile."""
+        from llm_learn.training.storage import FileStorage
+
         default_profiles = {"sft": {"epochs": 5, "batch_size": 8}}
-        client = Client(lg=lg, registry_path=tmp_path, default_profiles=default_profiles)
+        storage = FileStorage(lg, tmp_path)
+        client = Client(lg=lg, storage=storage, default_profiles=default_profiles)
 
         manifest = client.create(
             adapter="with-overrides",

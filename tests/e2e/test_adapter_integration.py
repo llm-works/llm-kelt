@@ -44,10 +44,12 @@ def _write_jsonl(path: Path, data: list[dict]) -> Path:
 def adapter_registry(logger, adapter_lora_base_path, infer_server_url):
     """Create adapter registry pointing to llm-infer's adapter path."""
     from llm_learn.training import AdapterRegistry
+    from llm_learn.training.storage import FileStorage
 
+    storage = FileStorage(logger, adapter_lora_base_path)
     return AdapterRegistry(
         lg=logger,
-        base_path=adapter_lora_base_path,
+        storage=storage,
         infer_url=infer_server_url,
     )
 
@@ -214,7 +216,7 @@ class TestAdapterIntegration:
                 description="First version",
             )
 
-            # Should fail without overwrite
+            # Should fail without overwrite (same md5 already exists)
             with pytest.raises(ValueError, match="already exists"):
                 adapter_registry.register(
                     training_result=trained_adapter,
@@ -223,14 +225,15 @@ class TestAdapterIntegration:
                     overwrite=False,
                 )
 
-            # Should succeed with overwrite
+            # With overwrite=True, returns existing adapter (no-op for same md5)
             info = adapter_registry.register(
                 training_result=trained_adapter,
                 key=key,
                 description="Second version",
                 overwrite=True,
             )
-            assert info.description == "Second version"
+            # Returns existing adapter, so description is from first registration
+            assert info.description == "First version"
 
         finally:
             adapter_registry.remove(key)

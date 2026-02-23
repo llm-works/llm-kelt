@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 from appinfra.log import Logger
 
+from .storage import FileStorage
+
 if TYPE_CHECKING:
     from .dpo import Client as DpoClient
     from .lora.registry import AdapterRegistry
@@ -58,10 +60,10 @@ class Factory:
         Args:
             lg: Logger instance.
             registry_path: Base path for adapter registry and manifest queues.
-            default_profiles: Default training profiles by method (e.g., {"sft": {...}, "dpo": {...}}).
+            default_profiles: Default training profiles by method.
         """
         self._lg = lg
-        self._registry_path = Path(registry_path).expanduser()
+        self._storage = FileStorage(lg, registry_path)
         self._default_profiles = default_profiles or {}
 
         # Lazy-initialized clients
@@ -76,7 +78,7 @@ class Factory:
         if self._manifest is None:
             from .manifest import Client
 
-            self._manifest = Client(self._lg, self._registry_path, self._default_profiles)
+            self._manifest = Client(self._lg, self._storage, self._default_profiles)
         return self._manifest
 
     @property
@@ -85,7 +87,7 @@ class Factory:
         if self._dpo is None:
             from .dpo import Client as DpoClient
 
-            self._dpo = DpoClient(self._lg, self._registry_path)
+            self._dpo = DpoClient(self._lg, self._storage)
         return self._dpo
 
     @property
@@ -94,7 +96,7 @@ class Factory:
         if self._sft is None:
             from .sft import Client as SftClient
 
-            self._sft = SftClient(self._lg, self._registry_path)
+            self._sft = SftClient(self._lg, self._storage)
         return self._sft
 
     @property
@@ -103,5 +105,5 @@ class Factory:
         if self._registry is None:
             from .lora.registry import AdapterRegistry
 
-            self._registry = AdapterRegistry(self._lg, self._registry_path)
+            self._registry = AdapterRegistry(self._lg, self._storage)
         return self._registry
