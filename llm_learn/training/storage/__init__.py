@@ -3,7 +3,7 @@
 Provides abstract Storage interface and FileStorage implementation.
 """
 
-from .base import Storage
+from .base import DupAdapterError, Storage
 from .file import FileStorage
 
-__all__ = ["Storage", "FileStorage"]
+__all__ = ["DupAdapterError", "Storage", "FileStorage"]

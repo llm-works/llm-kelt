@@ -19,6 +19,18 @@ if TYPE_CHECKING:
     from ..schema import AdapterInfo, RunResult
 
 
+class DupAdapterError(ValueError):
+    """Raised when attempting to store an adapter that already exists with the same md5."""
+
+    def __init__(self, key: str, md5: str):
+        self.key = key
+        self.md5 = md5
+        super().__init__(
+            f"Adapter '{key}' already exists with md5 {md5[:8]}. "
+            "Use overwrite=True to return existing."
+        )
+
+
 class Storage(ABC):
     """Abstract storage interface for training artifacts.
 

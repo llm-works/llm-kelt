@@ -7,6 +7,7 @@ Supports QLoRA (4-bit quantization) to reduce VRAM requirements.
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from appinfra import DotDict
 from appinfra.log import Logger
@@ -119,7 +120,7 @@ class Trainer:
         )
         # Only pass quantization_config if we're applying it - passing None overwrites
         # pre-quantized model configs and breaks transformers' to_dict() serialization
-        model_kwargs: dict = {"device_map": "auto", "trust_remote_code": True}
+        model_kwargs: dict[str, Any] = {"device_map": "auto", "trust_remote_code": True}
         if quant_config is not None:
             model_kwargs["quantization_config"] = quant_config
         self.model = AutoModelForCausalLM.from_pretrained(self.base_model, **model_kwargs)

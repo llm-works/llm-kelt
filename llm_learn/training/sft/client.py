@@ -147,12 +147,16 @@ class Client:
 
         Returns:
             False if policy is "skip", otherwise "add" or "replace".
+
+        Raises:
+            ValueError: If policy is not a valid value.
         """
         deployment = manifest.get("deployment") or {}
         policy: str = deployment.get("policy", "replace")
+        if policy not in ("skip", "add", "replace"):
+            raise ValueError(f"Invalid deployment policy: {policy}")
         if policy == "skip":
             return False
-        # Explicit return to satisfy mypy - policy is "add" or "replace"
         return "add" if policy == "add" else "replace"
 
     def _register_adapter(self, result: RunResult, manifest: Manifest) -> None:

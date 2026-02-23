@@ -68,18 +68,19 @@ class AdapterRegistry:
         Raises:
             ValueError: If adapter with same md5 exists and overwrite=False.
         """
+        from ..storage import DupAdapterError
+
         desc = description or f"{training_result.method} adapter from {training_result.base_model}"
         try:
             return self._storage.store_adapter(training_result, key, desc, deploy)
-        except ValueError as e:
-            if not overwrite or "already exists" not in str(e):
+        except DupAdapterError as e:
+            if not overwrite:
                 raise
             # overwrite=True: return existing adapter info
-            md5 = (training_result.adapter.md5 if training_result.adapter else None) or "unknown"
-            existing = self._storage.get_adapter_by_md5(key, md5)
+            existing = self._storage.get_adapter_by_md5(key, e.md5)
             if existing:
                 self._lg.info(
-                    f"adapter '{key}' already exists with md5 {md5[:8]}, returning existing"
+                    f"adapter '{key}' already exists with md5 {e.md5[:8]}, returning existing"
                 )
                 return existing
             raise

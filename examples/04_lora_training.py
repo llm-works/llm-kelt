@@ -87,7 +87,7 @@ def get_running_model(infer_url: str) -> str:
     """Get the model currently loaded in llm-infer."""
     import httpx
 
-    response = httpx.get(f"{infer_url}/v1/models")
+    response = httpx.get(f"{infer_url}/v1/models", timeout=10)
     response.raise_for_status()
     models = response.json()["data"]
     if not models:

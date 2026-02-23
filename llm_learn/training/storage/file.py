@@ -261,12 +261,11 @@ class FileStorage(Storage):
 
     def _check_duplicate_md5(self, key: str, md5: str) -> None:
         """Raise if adapter with same md5 already exists."""
+        from .base import DupAdapterError
+
         existing_version = self._find_version_by_md5(key, md5)
         if existing_version:
-            raise ValueError(
-                f"Adapter '{key}' already exists with md5 {md5[:8]}. "
-                "Use overwrite=True to return existing."
-            )
+            raise DupAdapterError(key, md5)
 
     def _copy_adapter_files(self, source: Path, key: str, version_id: str) -> Path:
         """Copy adapter files to registry and return path."""
@@ -303,7 +302,9 @@ class FileStorage(Storage):
         source = self._validate_training_result(training_result)
         md5 = training_result.adapter.md5 or "unknown"
 
-        self._check_duplicate_md5(key, md5)
+        # Only check for duplicates if we have a real md5 hash
+        if md5 != "unknown":
+            self._check_duplicate_md5(key, md5)
 
         version_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{md5[:8]}"
         adapter_path = self._copy_adapter_files(source, key, version_id)
@@ -313,20 +314,25 @@ class FileStorage(Storage):
         )
         self._lg.info("stored adapter", extra={"key": key, "version": version_id})
 
-        # Handle deployment based on deploy parameter
-        should_deploy = deploy is not False
-        if should_deploy:
-            policy: Literal["add", "replace"] = deploy if isinstance(deploy, str) else "replace"
-            self.deploy_adapter(key, version_id, policy=policy)
-
+        deployed = self._handle_deploy(key, version_id, deploy)
         return AdapterInfo(
             key=key,
             version_id=version_id,
             path=adapter_path,
             description=description,
             md5=md5,
-            deployed=should_deploy,
+            deployed=deployed,
         )
+
+    def _handle_deploy(
+        self, key: str, version_id: str, deploy: bool | Literal["add", "replace"]
+    ) -> bool:
+        """Handle deployment based on deploy parameter."""
+        if deploy is False:
+            return False
+        policy: Literal["add", "replace"] = deploy if isinstance(deploy, str) else "replace"
+        self.deploy_adapter(key, version_id, policy=policy)
+        return True
 
     def get_adapter(self, key: str) -> AdapterInfo | None:
         """Get adapter info by key."""
@@ -413,17 +419,21 @@ class FileStorage(Storage):
             self._lg.info("removed adapter", extra={"key": key})
 
     def _get_deployed_symlinks(self, key: str) -> list[Path]:
-        """Get all deployed symlinks for a key (deployed/{key}-*)."""
+        """Get all deployed symlinks for a key (deployed/{key} or deployed/{key}-{md5})."""
         if not self.deployed_path.exists():
             return []
-        # Match both old-style ({key}) and new-style ({key}-{md5})
         symlinks = []
         for path in self.deployed_path.iterdir():
             if path.is_symlink():
                 name = path.name
-                # Exact match (old style) or prefix match with dash (new style)
-                if name == key or name.startswith(f"{key}-"):
+                # Exact match (old style: {key})
+                if name == key:
                     symlinks.append(path)
+                # New style: {key}-{md5} - use rsplit to avoid matching siblings
+                elif "-" in name:
+                    adapter_key, _ = name.rsplit("-", 1)
+                    if adapter_key == key:
+                        symlinks.append(path)
         return sorted(symlinks)
 
     def _migrate_old_symlink(self, key: str) -> None:
@@ -432,23 +442,23 @@ class FileStorage(Storage):
         if not old_symlink.is_symlink():
             return
 
-        # Read where it points to get the version_id
         target = old_symlink.resolve()
+        if not target.exists():
+            self._lg.warning("migration skipped: target missing", extra={"key": key})
+            return
+
         version_id = target.name
         config = self._read_adapter_config(key, version_id)
-        md5 = config.get("md5", "unknown")
+        if not config:
+            self._lg.warning("migration skipped: no config", extra={"key": key})
+            return
 
-        # Create new-style symlink
+        md5 = config.get("md5", "unknown")
         new_symlink = self.deployed_path / f"{key}-{md5}"
         if not new_symlink.exists():
-            relative_target = Path("..") / "adapters" / key / version_id
-            new_symlink.symlink_to(relative_target)
-            self._lg.info(
-                "migrated deployment symlink",
-                extra={"key": key, "old": old_symlink.name, "new": new_symlink.name},
-            )
+            new_symlink.symlink_to(Path("..") / "adapters" / key / version_id)
+            self._lg.info("migrated symlink", extra={"old": key, "new": new_symlink.name})
 
-        # Remove old symlink
         old_symlink.unlink()
 
     def _resolve_deploy_version(self, key: str, version_id: str | None) -> tuple[str, str]:
@@ -566,16 +576,20 @@ class FileStorage(Storage):
                 continue
             name = symlink.name
             # Parse {key}-{md5} format
+            # Note: This parsing assumes md5 never contains dashes (true for hex hashes
+            # and the "unknown" fallback). Keys can contain dashes.
             if "-" in name:
-                # Find the last dash that separates key from md5
-                # md5 is typically 12 hex chars, but could be "unknown"
                 parts = name.rsplit("-", 1)
                 if len(parts) == 2:
                     adapter_key, md5 = parts
-                    if key is None or adapter_key == key:
+                    # Validate md5 is hex or "unknown" to avoid false matches
+                    is_valid_md5 = md5 == "unknown" or (
+                        len(md5) <= 32 and all(c in "0123456789abcdef" for c in md5)
+                    )
+                    if is_valid_md5 and (key is None or adapter_key == key):
                         result.append((adapter_key, md5))
             else:
-                # Old-style symlink without md5 - skip or treat as unknown
+                # Old-style symlink without md5 - treat as unknown
                 if key is None or name == key:
                     result.append((name, "unknown"))
         return result
@@ -658,9 +672,22 @@ class FileStorage(Storage):
     # =========================================================================
 
     def validate_key(self, key: str) -> None:
-        """Validate an adapter/manifest key."""
+        """Validate an adapter/manifest key.
+
+        Keys must be alphanumeric with hyphens, underscores, or dots.
+        No path traversal, whitespace, or special characters allowed.
+        """
+        import re
+
+        if not key:
+            raise ValueError("Key cannot be empty")
         if "/" in key or "\\" in key or ".." in key:
             raise ValueError(f"Invalid key (path traversal): {key}")
+        # Allow alphanumeric, hyphen, underscore, dot (but not leading/trailing dots)
+        if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$", key):
+            raise ValueError(
+                f"Invalid key '{key}': must be alphanumeric with hyphens, underscores, or dots"
+            )
 
     # =========================================================================
     # Filesystem Helpers (not in ABC - for backwards compatibility)
