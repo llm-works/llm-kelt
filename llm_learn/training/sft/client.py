@@ -112,6 +112,16 @@ class Client:
         self._validate_parent(manifest)
         return work_dir, data_path
 
+    def _get_base_model(self, manifest: Manifest) -> str:
+        """Get and validate base model from manifest."""
+        base_model: str | None = manifest.training.get("base_model")
+        if not base_model:
+            raise ValueError(
+                "Manifest missing 'base_model' in training config. "
+                "Provide base_model when creating the manifest or set requested_model."
+            )
+        return base_model
+
     def _execute_sft(
         self,
         manifest: Manifest,
@@ -121,14 +131,10 @@ class Client:
         """Execute SFT training."""
         from ..lora.trainer import train_lora
 
-        base_model = manifest.training["base_model"]
+        base_model = self._get_base_model(manifest)
         self._lg.info(
             "starting SFT training",
-            extra={
-                "adapter": manifest.adapter,
-                "model": base_model,
-                "epochs": manifest.training.get("num_epochs", 3),
-            },
+            extra={"adapter": manifest.adapter, "model": base_model},
         )
 
         result = train_lora(
@@ -140,11 +146,34 @@ class Client:
             training_config=manifest.training,
         )
 
-        self._lg.info(
-            "training complete",
-            extra={"duration_s": result.duration_seconds, "samples": result.samples_trained},
-        )
+        self._lg.info("training complete", extra={"duration_s": result.duration_seconds})
         return result
+
+    def _register_adapter(self, result: RunResult, manifest: Manifest) -> None:
+        """Register trained adapter to registry."""
+        try:
+            from llm_infer import compute_adapter_metadata
+        except ImportError as e:
+            raise ImportError(
+                "Adapter registration requires llm-infer package. "
+                "Install with: pip install llm-infer, or use register=False."
+            ) from e
+
+        from ..schema import Adapter
+
+        if result.adapter:
+            meta = compute_adapter_metadata(Path(result.adapter.path))
+            result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=result.adapter.path)
+
+        description = manifest.source.description or "SFT adapter"
+        self.registry.register(
+            training_result=result,
+            key=manifest.adapter,
+            description=description,
+            deploy=True,
+            overwrite=True,
+        )
+        self._lg.info("registered adapter", extra={"adapter": manifest.adapter})
 
     def train(
         self,
@@ -176,24 +205,7 @@ class Client:
         result = self._execute_sft(manifest, work_dir, data_path)
 
         if register:
-            from llm_infer import compute_adapter_metadata
-
-            from ..schema import Adapter
-
-            # Compute md5 before registration (needed for versioned paths)
-            if result.adapter:
-                meta = compute_adapter_metadata(Path(result.adapter.path))
-                result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=result.adapter.path)
-
-            description = manifest.source.description or "SFT adapter"
-            self.registry.register(
-                training_result=result,
-                key=manifest.adapter,
-                description=description,
-                deploy=True,
-                overwrite=True,
-            )
-            self._lg.info("registered adapter", extra={"adapter": manifest.adapter})
+            self._register_adapter(result, manifest)
 
         return result
 

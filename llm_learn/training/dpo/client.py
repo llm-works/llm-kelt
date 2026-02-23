@@ -107,11 +107,16 @@ class Client:
         """
         import shutil
 
-        work_dir = output_dir or (self._registry_path / "work" / manifest.adapter)
-        if work_dir.exists():
-            self._lg.info("cleaning previous work dir", extra={"path": str(work_dir)})
-            shutil.rmtree(work_dir)
-        work_dir.mkdir(parents=True, exist_ok=True)
+        # Only auto-clean registry work dirs, never user-provided output_dir
+        if output_dir:
+            work_dir = output_dir
+            work_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            work_dir = self._registry_path / "work" / manifest.adapter
+            if work_dir.exists():
+                self._lg.info("cleaning previous work dir", extra={"path": str(work_dir)})
+                shutil.rmtree(work_dir)
+            work_dir.mkdir(parents=True, exist_ok=True)
 
         data_path = resolve_data(manifest, work_dir)
         self._lg.info("resolved data", extra={"path": str(data_path)})
@@ -141,7 +146,12 @@ class Client:
         """Execute DPO training."""
         from .trainer import train_dpo
 
-        base_model = manifest.training["base_model"]
+        base_model: str | None = manifest.training.get("base_model")
+        if not base_model:
+            raise ValueError(
+                "Manifest missing 'base_model' in training config. "
+                "Provide base_model when creating the manifest or set requested_model."
+            )
         self._log_training_start(manifest, base_model)
 
         result = train_dpo(
@@ -168,7 +178,13 @@ class Client:
         Computes md5 before registration (needed for versioned paths).
         Note: Runner also computes this, but Client can be used standalone.
         """
-        from llm_infer import compute_adapter_metadata
+        try:
+            from llm_infer import compute_adapter_metadata
+        except ImportError as e:
+            raise ImportError(
+                "Adapter registration requires llm-infer package. "
+                "Install with: pip install llm-infer, or use register=False."
+            ) from e
 
         from ..schema import Adapter
 

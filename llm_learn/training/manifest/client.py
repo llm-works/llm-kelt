@@ -205,12 +205,17 @@ class Client:
         """
         self._ensure_dirs()
 
+        # Validate adapter name to prevent path traversal
+        adapter = manifest.adapter
+        if "/" in adapter or "\\" in adapter or ".." in adapter:
+            raise ValueError(f"Invalid adapter name (path traversal): {adapter}")
+
         pending_dir = self._registry_path / "pending"
-        dest_path = pending_dir / f"{manifest.adapter}.yaml"
+        dest_path = pending_dir / f"{adapter}.yaml"
 
         # Note: check-then-write has TOCTOU race, but acceptable for single-user CLI
         if dest_path.exists():
-            raise ValueError(f"Manifest already in queue: {manifest.adapter}")
+            raise ValueError(f"Manifest already in queue: {adapter}")
 
         _save_manifest(manifest, dest_path)
         self._lg.info("submitted manifest", extra={"path": str(dest_path)})
@@ -284,7 +289,11 @@ class Client:
             Adapter if found, None otherwise.
         """
         for path in self.list_completed():
-            manifest = _load_manifest(path)
+            try:
+                manifest = _load_manifest(path)
+            except CorruptedManifestError:
+                self._lg.warning("corrupted manifest, skipping", extra={"path": str(path)})
+                continue
             if manifest.output and manifest.output.adapter and manifest.output.adapter.md5 == md5:
                 adapter: Adapter = manifest.output.adapter
                 return adapter
@@ -304,7 +313,11 @@ class Client:
         """
         manifests: list[Manifest] = []
         for path in self.list_completed():
-            manifest = _load_manifest(path)
+            try:
+                manifest = _load_manifest(path)
+            except CorruptedManifestError:
+                self._lg.warning("corrupted manifest, skipping", extra={"path": str(path)})
+                continue
             if adapter and manifest.adapter != adapter:
                 continue
             if context_key and manifest.source.context_key != context_key:

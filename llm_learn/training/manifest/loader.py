@@ -331,12 +331,13 @@ def validate_manifest(manifest: Manifest) -> list[str]:
     return errors
 
 
-def resolve_data(manifest: Manifest, work_dir: Path) -> Path:
+def resolve_data(manifest: Manifest, work_dir: Path, manifest_path: Path | None = None) -> Path:
     """Resolve manifest data to a JSONL file path.
 
     Args:
         manifest: Training manifest with data section.
         work_dir: Working directory for training (inline data written here).
+        manifest_path: Path to manifest file (for resolving relative external data paths).
 
     Returns:
         Path to JSONL data file.
@@ -344,7 +345,15 @@ def resolve_data(manifest: Manifest, work_dir: Path) -> Path:
     if manifest.data.format == "external":
         if manifest.data.path is None:
             raise ValueError("External data format requires a path")
-        data_path: Path = work_dir / manifest.data.path
+        ext_path = Path(manifest.data.path)
+        # Absolute paths used as-is; relative paths resolved against manifest location
+        if ext_path.is_absolute():
+            data_path = ext_path
+        elif manifest_path:
+            data_path = manifest_path.parent / ext_path
+        else:
+            # Fallback to work_dir if no manifest path (in-memory manifest)
+            data_path = work_dir / ext_path
         if not data_path.exists():
             raise FileNotFoundError(f"Data file not found: {data_path}")
         return data_path
