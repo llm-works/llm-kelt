@@ -58,10 +58,9 @@ def _build_output_result(output_data: dict[str, Any]) -> RunResult:
     data = dict(output_data)
     data["started_at"] = _parse_datetime(data.get("started_at"))
     data["completed_at"] = _parse_datetime(data.get("completed_at"))
-    if data.get("adapter"):
-        data["adapter"] = Adapter(data["adapter"])
-    if data.get("parent"):
-        data["parent"] = Adapter(data["parent"])
+    # Explicitly set adapter/parent to Adapter or None (not implicit empty state)
+    data["adapter"] = Adapter(data["adapter"]) if data.get("adapter") else None
+    data["parent"] = Adapter(data["parent"]) if data.get("parent") else None
     return RunResult(data)
 
 

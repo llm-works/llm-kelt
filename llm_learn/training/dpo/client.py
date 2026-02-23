@@ -100,10 +100,18 @@ class Client:
             task_type=lora.get("task_type", defaults.task_type),
         )
 
-    def _prepare_training(self, manifest: Manifest, output_dir: Path | None) -> tuple[Path, Path]:
+    def _prepare_training(
+        self, manifest: Manifest, output_dir: Path | None, manifest_path: Path | None = None
+    ) -> tuple[Path, Path]:
         """Prepare training: resolve work dir and data path.
 
         Cleans any existing work directory to ensure fresh training state.
+        Only auto-cleans registry work dirs, never user-provided output_dir.
+
+        Args:
+            manifest: Training manifest.
+            output_dir: User-provided output directory (not auto-cleaned).
+            manifest_path: Path to manifest file (for resolving relative external data paths).
         """
         import shutil
 
@@ -118,7 +126,7 @@ class Client:
                 shutil.rmtree(work_dir)
             work_dir.mkdir(parents=True, exist_ok=True)
 
-        data_path = resolve_data(manifest, work_dir)
+        data_path = resolve_data(manifest, work_dir, manifest_path)
         self._lg.info("resolved data", extra={"path": str(data_path)})
 
         self._validate_parent(manifest)
@@ -210,6 +218,7 @@ class Client:
         *,
         output_dir: Path | None = None,
         register: bool = True,
+        manifest_path: Path | None = None,
     ) -> RunResult:
         """Execute DPO training from a manifest.
 
@@ -217,6 +226,7 @@ class Client:
             manifest: Manifest with DPO configuration and data.
             output_dir: Working directory for training. Defaults to registry/work.
             register: If True, register adapter to registry after training.
+            manifest_path: Path to manifest file (for resolving relative external data paths).
 
         Returns:
             RunResult with training metrics and adapter path.
@@ -230,7 +240,7 @@ class Client:
         if manifest.data.format == "inline":
             self._validate_records(manifest)
 
-        work_dir, data_path = self._prepare_training(manifest, output_dir)
+        work_dir, data_path = self._prepare_training(manifest, output_dir, manifest_path)
         result = self._execute_dpo(manifest, work_dir, data_path)
 
         if register:
@@ -258,4 +268,6 @@ class Client:
         from ..manifest.loader import load_manifest
 
         manifest = load_manifest(manifest_path)
-        return self.train(manifest, output_dir=output_dir, register=register)
+        return self.train(
+            manifest, output_dir=output_dir, register=register, manifest_path=manifest_path
+        )

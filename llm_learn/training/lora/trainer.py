@@ -196,8 +196,14 @@ class Trainer:
         self._lg.info(f"saved adapter to {final_path}")
 
         metrics: dict = {}
+
+        # Run evaluation first so eval entries are in log_history
+        if self.eval_dataset:
+            metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
+
+        # Capture training history after evaluate() so it includes eval entries
         if self.trainer.state.log_history:
-            # Capture training history (capped to avoid bloating manifests)
+            # Capped to avoid bloating manifests
             metrics["history"] = self.trainer.state.log_history[-100:]
             # Extract final summary metrics (TRL appends summary as last entry)
             final = self.trainer.state.log_history[-1]
@@ -205,9 +211,6 @@ class Trainer:
             metrics["train_runtime"] = final.get("train_runtime", 0.0)
             metrics["train_samples_per_second"] = final.get("train_samples_per_second", 0.0)
             metrics["epoch"] = final.get("epoch", 0.0)
-
-        if self.eval_dataset:
-            metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
 
         return final_path, metrics
 

@@ -24,19 +24,20 @@ Directory structure:
 import json
 import shutil
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
 import httpx
 import yaml
 from appinfra.log import Logger
 
+from llm_learn.core.base import utc_now
+
 from ..schema import RunResult
 
 
-def _make_version_id(md5: str, timestamp: datetime | None = None) -> str:
-    """Generate version ID: YYYYMMDD-HHMMSS-{md5}."""
-    ts = timestamp or datetime.now()
+def _make_version_id(md5: str) -> str:
+    """Generate version ID: YYYYMMDD-HHMMSS-{md5} using UTC time."""
+    ts = utc_now()
     return f"{ts.strftime('%Y%m%d-%H%M%S')}-{md5}"
 
 
@@ -250,11 +251,9 @@ class AdapterRegistry:
                 version_id = latest_path.name
 
         # Use relative path for symlink: deployed/key -> ../adapters/key/version_id
-        if version_id:
-            relative_target = Path("..") / "adapters" / key / version_id
-        else:
-            # Fallback to directory (shouldn't happen if adapter exists)
-            relative_target = Path("..") / "adapters" / key
+        if not version_id:
+            raise ValueError(f"No versions found for adapter '{key}', cannot create symlink")
+        relative_target = Path("..") / "adapters" / key / version_id
         symlink_path.symlink_to(relative_target)
         self._lg.info(f"created symlink: {symlink_path} -> {relative_target}")
 
@@ -313,9 +312,9 @@ class AdapterRegistry:
             version_path = key_path / version_id
             if not version_path.exists():
                 raise ValueError(f"Version '{version_id}' not found for adapter '{key}'")
-            # If this version is deployed, remove symlink
+            # If this version is deployed, remove symlink (resolve to handle symlinks in base_path)
             deployed_path = self._get_deployed_version_path(key)
-            if deployed_path and deployed_path == version_path:
+            if deployed_path and deployed_path == version_path.resolve():
                 self._remove_deploy_symlink(key)
             shutil.rmtree(version_path)
             self._lg.info(f"removed adapter version: {key}/{version_id}")

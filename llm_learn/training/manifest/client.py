@@ -204,18 +204,14 @@ class Client:
             ValueError: If manifest with same key already pending.
         """
         self._ensure_dirs()
-
-        # Validate adapter name to prevent path traversal
-        adapter = manifest.adapter
-        if "/" in adapter or "\\" in adapter or ".." in adapter:
-            raise ValueError(f"Invalid adapter name (path traversal): {adapter}")
+        self._validate_adapter_name(manifest.adapter)
 
         pending_dir = self._registry_path / "pending"
-        dest_path = pending_dir / f"{adapter}.yaml"
+        dest_path = pending_dir / f"{manifest.adapter}.yaml"
 
         # Note: check-then-write has TOCTOU race, but acceptable for single-user CLI
         if dest_path.exists():
-            raise ValueError(f"Manifest already in queue: {adapter}")
+            raise ValueError(f"Manifest already in queue: {manifest.adapter}")
 
         _save_manifest(manifest, dest_path)
         self._lg.info("submitted manifest", extra={"path": str(dest_path)})
@@ -242,6 +238,11 @@ class Client:
         gz_files = list(completed_dir.glob("*.yaml.gz"))
         return sorted(yaml_files + gz_files)
 
+    def _validate_adapter_name(self, adapter: str) -> None:
+        """Validate adapter name has no path traversal characters."""
+        if "/" in adapter or "\\" in adapter or ".." in adapter:
+            raise ValueError(f"Invalid adapter name (path traversal): {adapter}")
+
     def get_pending(self, adapter: str) -> Manifest | None:
         """Get a pending manifest by adapter key.
 
@@ -251,6 +252,7 @@ class Client:
         Returns:
             Manifest or None if not found or corrupted.
         """
+        self._validate_adapter_name(adapter)
         path = self._registry_path / "pending" / f"{adapter}.yaml"
         if not path.exists():
             return None
@@ -270,7 +272,9 @@ class Client:
 
         Raises:
             FileNotFoundError: If manifest not in queue.
+            ValueError: If adapter name contains path traversal characters.
         """
+        self._validate_adapter_name(adapter)
         pending_path = self._registry_path / "pending" / f"{adapter}.yaml"
         if not pending_path.exists():
             raise FileNotFoundError(f"Manifest not in queue: {adapter}")
