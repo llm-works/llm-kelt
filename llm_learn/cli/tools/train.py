@@ -381,4 +381,5 @@ class TrainTool(Tool):
         self.add_tool(AdaptersTool(self))
 
     def run(self, **kwargs: Any) -> int:
-        return self.group.run(**kwargs)
+        result: int = self.group.run(**kwargs)
+        return result
