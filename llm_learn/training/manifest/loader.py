@@ -165,7 +165,8 @@ def _build_data_section(manifest: Manifest) -> dict[str, Any]:
 def _build_training_section(manifest: Manifest) -> dict[str, Any]:
     """Build training section dict for YAML serialization."""
     _, training_config = _get_effective_config(manifest)
-    training_dict: dict[str, Any] = training_config
+    # Make a copy to avoid mutating the manifest's config
+    training_dict: dict[str, Any] = dict(training_config)
     output = manifest.get("output")
     if output is not None:
         training_dict["output"] = _build_output_dict(output)
@@ -285,7 +286,11 @@ def _to_number(value: Any, default: int | float) -> int | float:
 
 
 def _validate_hyperparams(training: dict, lora: dict) -> list[str]:
-    """Validate training hyperparameters."""
+    """Validate training hyperparameters.
+
+    Note: Missing/None values pass validation (they use training defaults).
+    Only explicitly invalid values (zero, negative) are flagged.
+    """
     errors: list[str] = []
     if _to_number(training.get("num_epochs"), 3) <= 0:
         errors.append("num_epochs must be positive")

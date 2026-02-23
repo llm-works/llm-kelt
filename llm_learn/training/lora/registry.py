@@ -243,10 +243,17 @@ class AdapterRegistry:
         if symlink_path.exists() or symlink_path.is_symlink():
             symlink_path.unlink()
 
+        # Resolve latest version if not specified
+        if not version_id:
+            latest_path = self._get_latest_version_path(key)
+            if latest_path:
+                version_id = latest_path.name
+
         # Use relative path for symlink: deployed/key -> ../adapters/key/version_id
         if version_id:
             relative_target = Path("..") / "adapters" / key / version_id
         else:
+            # Fallback to directory (shouldn't happen if adapter exists)
             relative_target = Path("..") / "adapters" / key
         symlink_path.symlink_to(relative_target)
         self._lg.info(f"created symlink: {symlink_path} -> {relative_target}")

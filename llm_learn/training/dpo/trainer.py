@@ -242,10 +242,12 @@ class Trainer:
             return {}
 
         log_history = self.trainer.state.log_history
-        metrics: dict = {"history": log_history}
+        # Cap history to avoid bloating manifests (same as SFT trainer)
+        capped_history = log_history[-100:]
+        metrics: dict = {"history": capped_history}
 
         # DPO-specific metrics (exclude final summary which only has train_loss)
-        dpo_logs = [log for log in log_history if "rewards/accuracies" in log]
+        dpo_logs = [log for log in capped_history if "rewards/accuracies" in log]
         metrics.update(self._extract_dpo_metrics(dpo_logs))
 
         # Overall train loss from final summary

@@ -237,7 +237,7 @@ class Trainer:
             },
             started_at=started_at,
             completed_at=utc_now(),
-            samples_trained=len(self.train_dataset) * self.training_config.num_epochs,  # type: ignore[arg-type]
+            samples_trained=int(len(self.train_dataset) * self.training_config.num_epochs),  # type: ignore[arg-type]
             adapter=adapter,
         )
 
