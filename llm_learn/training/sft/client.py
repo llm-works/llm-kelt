@@ -6,7 +6,7 @@ Provides methods to train adapters using Supervised Fine-Tuning.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from appinfra import DotDict
 from appinfra.log import Logger
@@ -142,6 +142,19 @@ class Client:
         self._lg.info("training complete", extra={"duration_s": result.duration_seconds})
         return result
 
+    def _get_deploy_setting(self, manifest: Manifest) -> bool | Literal["add", "replace"]:
+        """Get deployment setting from manifest.
+
+        Returns:
+            False if policy is "skip", otherwise "add" or "replace".
+        """
+        deployment = manifest.get("deployment") or {}
+        policy: str = deployment.get("policy", "replace")
+        if policy == "skip":
+            return False
+        # Explicit return to satisfy mypy - policy is "add" or "replace"
+        return "add" if policy == "add" else "replace"
+
     def _register_adapter(self, result: RunResult, manifest: Manifest) -> None:
         """Register trained adapter to registry."""
         try:
@@ -159,11 +172,12 @@ class Client:
             result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=result.adapter.path)
 
         description = manifest.source.description or "SFT adapter"
+        deploy = self._get_deploy_setting(manifest)
         self.registry.register(
             training_result=result,
             key=manifest.adapter,
             description=description,
-            deploy=True,
+            deploy=deploy,
             overwrite=True,
         )
         self._lg.info("registered adapter", extra={"adapter": manifest.adapter})

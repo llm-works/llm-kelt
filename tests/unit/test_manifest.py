@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from llm_learn.training.manifest import Client, Manifest
+from llm_learn.training.manifest import Client, Deployment, Manifest
 from llm_learn.training.manifest.errors import CorruptedManifestError
 
 # Import private functions to test internal parsing logic directly
@@ -151,6 +151,64 @@ class TestSourceSchema:
         assert source.description == "Training for coding tasks"
 
 
+class TestDeploymentSchema:
+    """Test Deployment schema (DotDict-based, validation via validate_manifest)."""
+
+    def test_empty_deployment(self):
+        """Test creating empty deployment (uses default policy)."""
+        deployment = Deployment()
+        assert deployment.get("policy") is None  # Not set, will default at runtime
+
+    def test_deployment_with_policy(self):
+        """Test creating deployment with explicit policy."""
+        deployment = Deployment(policy="add")
+        assert deployment.policy == "add"
+
+    def test_deployment_policy_skip(self):
+        """Test deployment policy skip is valid."""
+        manifest = Manifest(
+            adapter="test",
+            method="sft",
+            data=Data(format="inline", records=[{"prompt": "test", "completion": "response"}]),
+            deployment=Deployment(policy="skip"),
+        )
+        errors = validate_manifest(manifest)
+        assert errors == []
+
+    def test_deployment_policy_add(self):
+        """Test deployment policy add is valid."""
+        manifest = Manifest(
+            adapter="test",
+            method="sft",
+            data=Data(format="inline", records=[{"prompt": "test", "completion": "response"}]),
+            deployment=Deployment(policy="add"),
+        )
+        errors = validate_manifest(manifest)
+        assert errors == []
+
+    def test_deployment_policy_replace(self):
+        """Test deployment policy replace is valid."""
+        manifest = Manifest(
+            adapter="test",
+            method="sft",
+            data=Data(format="inline", records=[{"prompt": "test", "completion": "response"}]),
+            deployment=Deployment(policy="replace"),
+        )
+        errors = validate_manifest(manifest)
+        assert errors == []
+
+    def test_deployment_invalid_policy_detected_by_validation(self):
+        """Test that invalid deployment policy is caught by validate_manifest."""
+        manifest = Manifest(
+            adapter="test",
+            method="sft",
+            data=Data(format="inline", records=[{"prompt": "test", "completion": "response"}]),
+            deployment=Deployment(policy="invalid"),
+        )
+        errors = validate_manifest(manifest)
+        assert any("deployment.policy must be" in e for e in errors)
+
+
 class TestLoadManifest:
     """Test load_manifest function."""
 
@@ -195,6 +253,26 @@ dpo:
 
         assert manifest.method == "dpo"
         assert manifest.method_config.get("beta") == 0.1
+
+    def test_load_manifest_with_deployment(self, tmp_path: Path):
+        """Test loading manifest with deployment section."""
+        manifest_path = tmp_path / "test.yaml"
+        manifest_path.write_text("""
+adapter: test-adapter
+method: sft
+deployment:
+  policy: add
+data:
+  format: inline
+  records:
+    - prompt: test
+      completion: response
+""")
+
+        manifest = load_manifest(manifest_path)
+
+        assert manifest.deployment is not None
+        assert manifest.deployment.policy == "add"
 
     def test_load_manifest_with_parent(self, tmp_path: Path):
         """Test loading manifest with parent adapter."""
@@ -638,3 +716,51 @@ class TestManifestClient:
 
         assert manifest.training.get("num_epochs") == 10
         assert manifest.training.get("batch_size") == 8  # Default preserved
+
+    def test_create_with_deployment_policy_skip(self, client: Client):
+        """Test creating manifest with deployment_policy=skip."""
+        manifest = client.create(
+            adapter="test",
+            method="sft",
+            data=[{"prompt": "test", "completion": "response"}],
+            deployment_policy="skip",
+        )
+
+        assert manifest.deployment is not None
+        assert manifest.deployment.policy == "skip"
+
+    def test_create_with_deployment_policy_add(self, client: Client):
+        """Test creating manifest with deployment_policy=add."""
+        manifest = client.create(
+            adapter="test",
+            method="sft",
+            data=[{"prompt": "test", "completion": "response"}],
+            deployment_policy="add",
+        )
+
+        assert manifest.deployment is not None
+        assert manifest.deployment.policy == "add"
+
+    def test_create_with_deployment_policy_replace(self, client: Client):
+        """Test creating manifest with deployment_policy=replace."""
+        manifest = client.create(
+            adapter="test",
+            method="sft",
+            data=[{"prompt": "test", "completion": "response"}],
+            deployment_policy="replace",
+        )
+
+        assert manifest.deployment is not None
+        assert manifest.deployment.policy == "replace"
+
+    def test_create_without_deployment_policy(self, client: Client):
+        """Test creating manifest without deployment_policy defaults to replace."""
+        manifest = client.create(
+            adapter="test",
+            method="sft",
+            data=[{"prompt": "test", "completion": "response"}],
+        )
+
+        # deployment should default to "replace" for visibility in YAML
+        assert manifest.deployment is not None
+        assert manifest.deployment.policy == "replace"

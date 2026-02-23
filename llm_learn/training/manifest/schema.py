@@ -34,6 +34,20 @@ class Data(DotDict):
     pass
 
 
+class Deployment(DotDict):
+    """Deployment configuration.
+
+    Controls how the trained adapter is deployed after training.
+
+    Fields:
+        policy: Deployment policy - "skip" (don't deploy), "add" (deploy as new
+            version keeping existing), or "replace" (deploy and remove existing).
+            Default is "replace".
+    """
+
+    pass
+
+
 class Manifest(DotDict):
     """Complete training manifest.
 
@@ -45,6 +59,7 @@ class Manifest(DotDict):
         adapter: Output adapter key (series name, e.g., "my-agent-sft").
         method: Training method ("dpo" or "sft").
         data: Training data specification (Data).
+        deployment: Deployment configuration (Deployment).
         version: Schema version for forward compatibility.
         created_at: When manifest was created (datetime).
         source: Provenance information (Source).

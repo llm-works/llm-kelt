@@ -6,7 +6,7 @@ All adapter storage operations are delegated to the Storage implementation.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import httpx
 from appinfra.log import Logger
@@ -47,7 +47,7 @@ class AdapterRegistry:
         training_result: RunResult,
         key: str,
         description: str | None = None,
-        deploy: bool = True,
+        deploy: bool | Literal["add", "replace"] = True,
         overwrite: bool = False,
     ) -> AdapterInfo:
         """Register a trained adapter.
@@ -56,7 +56,10 @@ class AdapterRegistry:
             training_result: Result from train_lora or train_dpo.
             key: Unique identifier for the adapter (no slashes).
             description: Optional human-readable description.
-            deploy: Whether to deploy the adapter (create symlink).
+            deploy: Deployment setting:
+                - True or "replace": Deploy and remove existing {key}-* symlinks.
+                - "add": Deploy and keep existing {key}-* symlinks.
+                - False: Don't deploy.
             overwrite: If True and adapter with same md5 exists, return existing.
 
         Returns:
@@ -115,7 +118,7 @@ class AdapterRegistry:
         training_result: RunResult,
         key: str,
         description: str | None = None,
-        deploy: bool = True,
+        deploy: bool | Literal["add", "replace"] = True,
         overwrite: bool = False,
     ) -> AdapterInfo:
         """Register an adapter and immediately refresh llm-infer.
@@ -126,8 +129,11 @@ class AdapterRegistry:
             training_result: Result from train_lora or train_dpo.
             key: Unique identifier for the adapter.
             description: Optional description.
-            deploy: Whether to deploy the adapter.
-            overwrite: Ignored (storage handles versioning).
+            deploy: Deployment setting:
+                - True or "replace": Deploy and remove existing {key}-* symlinks.
+                - "add": Deploy and keep existing {key}-* symlinks.
+                - False: Don't deploy.
+            overwrite: If True and adapter with same md5 exists, return existing.
 
         Returns:
             AdapterInfo with registration details.
@@ -158,12 +164,30 @@ class AdapterRegistry:
         """Remove an adapter or specific version."""
         self._storage.remove_adapter(key, version_id)
 
-    def set_deployed(self, key: str, deployed: bool, version_id: str | None = None) -> None:
-        """Deploy or undeploy an adapter."""
+    def set_deployed(
+        self,
+        key: str,
+        deployed: bool | Literal["add", "replace"],
+        version_id: str | None = None,
+        md5: str | None = None,
+    ) -> None:
+        """Deploy or undeploy an adapter.
+
+        Args:
+            key: Adapter key.
+            deployed: Deployment setting:
+                - True or "replace": Deploy and remove existing {key}-* symlinks.
+                - "add": Deploy and keep existing {key}-* symlinks.
+                - False: Undeploy.
+            version_id: Version to deploy (latest if None). Only used when deploying.
+            md5: Specific version to undeploy. If None, undeploy all. Only used when
+                undeploying.
+        """
         if deployed:
-            self._storage.deploy_adapter(key, version_id)
+            policy: Literal["add", "replace"] = deployed if isinstance(deployed, str) else "replace"
+            self._storage.deploy_adapter(key, version_id, policy=policy)
         else:
-            self._storage.undeploy_adapter(key)
+            self._storage.undeploy_adapter(key, md5)
 
     def is_deployed(self, key: str) -> bool:
         """Check if an adapter is deployed."""

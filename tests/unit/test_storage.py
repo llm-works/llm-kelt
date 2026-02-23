@@ -427,18 +427,22 @@ class TestAdapterConfig:
 class TestDeployment:
     """Test deployment symlink operations."""
 
-    def test_deploy_creates_symlink(self, storage: FileStorage, tmp_path: Path):
-        """Test deploying adapter creates symlink."""
+    def test_deploy_creates_versioned_symlink(self, storage: FileStorage, tmp_path: Path):
+        """Test deploying adapter creates versioned symlink ({key}-{md5})."""
         source = tmp_path / "source"
         source.mkdir()
-        (source / "config.yaml").write_text("enabled: true")
+        (source / "config.yaml").write_text("enabled: true\nmd5: abc123def456")
         storage.store_adapter(source, "key", "v1")
+        storage.write_adapter_config("key", "v1", {"md5": "abc123def456"})
 
         storage.deploy("key", "v1")
 
-        symlink = storage.deployed_path / "key"
+        # New style: deployed/{key}-{md5}
+        symlink = storage.deployed_path / "key-abc123def456"
         assert symlink.is_symlink()
         assert symlink.resolve() == storage.adapters_path / "key" / "v1"
+        # Old style should not exist
+        assert not (storage.deployed_path / "key").exists()
 
     def test_deploy_uses_latest_if_version_not_specified(
         self, storage: FileStorage, tmp_path: Path
@@ -448,24 +452,47 @@ class TestDeployment:
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
         storage.store_adapter(source, "key", "v1")
+        storage.write_adapter_config("key", "v1", {"md5": "aaa111"})
         storage.store_adapter(source, "key", "v2")
+        storage.write_adapter_config("key", "v2", {"md5": "bbb222"})
 
         storage.deploy("key")  # No version specified
 
         assert storage.get_deployed_version("key") == "v2"
 
-    def test_deploy_replaces_existing_symlink(self, storage: FileStorage, tmp_path: Path):
-        """Test deploying new version replaces existing symlink."""
+    def test_deploy_replace_policy_removes_existing(self, storage: FileStorage, tmp_path: Path):
+        """Test deploying with replace policy removes existing symlinks."""
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
         storage.store_adapter(source, "key", "v1")
+        storage.write_adapter_config("key", "v1", {"md5": "aaa111"})
         storage.store_adapter(source, "key", "v2")
+        storage.write_adapter_config("key", "v2", {"md5": "bbb222"})
 
-        storage.deploy("key", "v1")
-        storage.deploy("key", "v2")
+        storage.deploy("key", "v1", policy="replace")
+        assert storage.is_deployed("key", "aaa111")
 
-        assert storage.get_deployed_version("key") == "v2"
+        storage.deploy("key", "v2", policy="replace")
+        assert storage.is_deployed("key", "bbb222")
+        assert not storage.is_deployed("key", "aaa111")  # Old version removed
+
+    def test_deploy_add_policy_keeps_existing(self, storage: FileStorage, tmp_path: Path):
+        """Test deploying with add policy keeps existing symlinks."""
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "config.yaml").write_text("enabled: true")
+        storage.store_adapter(source, "key", "v1")
+        storage.write_adapter_config("key", "v1", {"md5": "aaa111"})
+        storage.store_adapter(source, "key", "v2")
+        storage.write_adapter_config("key", "v2", {"md5": "bbb222"})
+
+        storage.deploy("key", "v1", policy="add")
+        storage.deploy("key", "v2", policy="add")
+
+        # Both versions should be deployed
+        assert storage.is_deployed("key", "aaa111")
+        assert storage.is_deployed("key", "bbb222")
 
     def test_deploy_no_versions_raises(self, storage: FileStorage):
         """Test deploying adapter with no versions raises."""
@@ -475,29 +502,55 @@ class TestDeployment:
         with pytest.raises(ValueError, match="No versions found"):
             storage.deploy("empty")
 
-    def test_undeploy_removes_symlink(self, storage: FileStorage, tmp_path: Path):
-        """Test undeploying adapter removes symlink."""
+    def test_undeploy_removes_all_symlinks(self, storage: FileStorage, tmp_path: Path):
+        """Test undeploying without md5 removes all versions."""
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
         storage.store_adapter(source, "key", "v1")
-        storage.deploy("key", "v1")
+        storage.write_adapter_config("key", "v1", {"md5": "aaa111"})
+        storage.store_adapter(source, "key", "v2")
+        storage.write_adapter_config("key", "v2", {"md5": "bbb222"})
+
+        storage.deploy("key", "v1", policy="add")
+        storage.deploy("key", "v2", policy="add")
 
         storage.undeploy("key")
 
-        assert not (storage.deployed_path / "key").exists()
+        assert not storage.is_deployed("key")
+        assert not storage.is_deployed("key", "aaa111")
+        assert not storage.is_deployed("key", "bbb222")
+
+    def test_undeploy_specific_md5(self, storage: FileStorage, tmp_path: Path):
+        """Test undeploying specific md5 version."""
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "config.yaml").write_text("enabled: true")
+        storage.store_adapter(source, "key", "v1")
+        storage.write_adapter_config("key", "v1", {"md5": "aaa111"})
+        storage.store_adapter(source, "key", "v2")
+        storage.write_adapter_config("key", "v2", {"md5": "bbb222"})
+
+        storage.deploy("key", "v1", policy="add")
+        storage.deploy("key", "v2", policy="add")
+
+        storage.undeploy("key", md5="aaa111")
+
+        assert not storage.is_deployed("key", "aaa111")
+        assert storage.is_deployed("key", "bbb222")
 
     def test_undeploy_nonexistent_ok(self, storage: FileStorage):
         """Test undeploying non-deployed adapter doesn't raise."""
         storage.ensure_directories()
         storage.undeploy("nonexistent")  # Should not raise
 
-    def test_is_deployed(self, storage: FileStorage, tmp_path: Path):
-        """Test checking if adapter is deployed."""
+    def test_is_deployed_any_version(self, storage: FileStorage, tmp_path: Path):
+        """Test is_deployed without md5 checks any version."""
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
         storage.store_adapter(source, "key", "v1")
+        storage.write_adapter_config("key", "v1", {"md5": "abc123"})
 
         assert not storage.is_deployed("key")
 
@@ -505,13 +558,87 @@ class TestDeployment:
 
         assert storage.is_deployed("key")
 
+    def test_is_deployed_specific_md5(self, storage: FileStorage, tmp_path: Path):
+        """Test is_deployed with md5 checks specific version."""
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "config.yaml").write_text("enabled: true")
+        storage.store_adapter(source, "key", "v1")
+        storage.write_adapter_config("key", "v1", {"md5": "abc123"})
+
+        storage.deploy("key", "v1")
+
+        assert storage.is_deployed("key", "abc123")
+        assert not storage.is_deployed("key", "xyz789")
+
+    def test_list_deployed_empty(self, storage: FileStorage):
+        """Test list_deployed when nothing is deployed."""
+        storage.ensure_directories()
+        assert storage.list_deployed() == []
+
+    def test_list_deployed_all(self, storage: FileStorage, tmp_path: Path):
+        """Test list_deployed returns all deployed adapters."""
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "config.yaml").write_text("enabled: true")
+        storage.store_adapter(source, "adapter-a", "v1")
+        storage.write_adapter_config("adapter-a", "v1", {"md5": "aaa111"})
+        storage.store_adapter(source, "adapter-b", "v1")
+        storage.write_adapter_config("adapter-b", "v1", {"md5": "bbb222"})
+
+        storage.deploy("adapter-a", "v1")
+        storage.deploy("adapter-b", "v1")
+
+        deployed = storage.list_deployed()
+        assert ("adapter-a", "aaa111") in deployed
+        assert ("adapter-b", "bbb222") in deployed
+
+    def test_list_deployed_filtered_by_key(self, storage: FileStorage, tmp_path: Path):
+        """Test list_deployed filtered by adapter key."""
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "config.yaml").write_text("enabled: true")
+        storage.store_adapter(source, "adapter-a", "v1")
+        storage.write_adapter_config("adapter-a", "v1", {"md5": "aaa111"})
+        storage.store_adapter(source, "adapter-b", "v1")
+        storage.write_adapter_config("adapter-b", "v1", {"md5": "bbb222"})
+
+        storage.deploy("adapter-a", "v1")
+        storage.deploy("adapter-b", "v1")
+
+        deployed = storage.list_deployed("adapter-a")
+        assert deployed == [("adapter-a", "aaa111")]
+
+    def test_migrate_old_symlink(self, storage: FileStorage, tmp_path: Path):
+        """Test migration of old-style symlink to versioned format."""
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "config.yaml").write_text("enabled: true")
+        storage.store_adapter(source, "key", "v1")
+        storage.write_adapter_config("key", "v1", {"md5": "abc123"})
+
+        # Create old-style symlink manually
+        storage.deployed_path.mkdir(parents=True, exist_ok=True)
+        old_symlink = storage.deployed_path / "key"
+        old_symlink.symlink_to(Path("..") / "adapters" / "key" / "v1")
+
+        # Deploy should migrate the old symlink
+        storage.deploy("key", "v1")
+
+        # Old symlink should be removed
+        assert not old_symlink.exists()
+        # New versioned symlink should exist
+        assert storage.is_deployed("key", "abc123")
+
     def test_get_deployed_version(self, storage: FileStorage, tmp_path: Path):
         """Test getting deployed version ID."""
         source = tmp_path / "source"
         source.mkdir()
         (source / "config.yaml").write_text("enabled: true")
         storage.store_adapter(source, "key", "v1")
+        storage.write_adapter_config("key", "v1", {"md5": "aaa111"})
         storage.store_adapter(source, "key", "v2")
+        storage.write_adapter_config("key", "v2", {"md5": "bbb222"})
 
         storage.deploy("key", "v1")
         assert storage.get_deployed_version("key") == "v1"

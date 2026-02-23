@@ -15,7 +15,7 @@ from ..schema import Adapter
 from ..storage import Storage
 from .loader import load_manifest as _load_manifest
 from .loader import save_manifest as _save_manifest
-from .schema import Data, Manifest, Source
+from .schema import Data, Deployment, Manifest, Source
 
 if TYPE_CHECKING:
     pass
@@ -127,6 +127,7 @@ class Client:
         context_key: str | None = None,
         description: str | None = None,
         config: dict[str, Any] | None = None,
+        deployment_policy: Literal["skip", "add", "replace"] | None = None,
     ) -> Manifest:
         """Create a new training manifest with inline data.
 
@@ -139,6 +140,10 @@ class Client:
             context_key: Agent context key for provenance.
             description: Human-readable description.
             config: Override training configuration (num_epochs, etc.).
+            deployment_policy: Deployment policy after training:
+                - "skip": Don't deploy the adapter.
+                - "add": Deploy as new version, keep existing versions.
+                - "replace": Deploy and remove existing versions (default).
 
         Returns:
             Manifest instance.
@@ -148,10 +153,14 @@ class Client:
             method, model, config
         )
 
+        # Build deployment config (default to "replace" if not specified)
+        deployment = Deployment(policy=deployment_policy or "replace")
+
         manifest = Manifest(
             adapter=adapter,
             method=method,
             data=Data(format="inline", records=data),
+            deployment=deployment,
             source=source,
             parent=parent,
             lora=lora_config,

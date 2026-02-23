@@ -17,7 +17,7 @@ from llm_learn.core.base import utc_now
 
 from ..schema import Adapter, RunResult
 from .errors import CorruptedManifestError
-from .schema import Data, Manifest, Source
+from .schema import Data, Deployment, Manifest, Source
 
 
 def _parse_datetime(value: str | datetime | None) -> datetime:
@@ -92,6 +92,7 @@ def _build_manifest(data: dict[str, Any]) -> Manifest:
         training=DotDict(training_data),
         method_config=DotDict(data.get(data["method"], {})),
         data=Data(data["data"]),
+        deployment=Deployment(data.get("deployment", {})),
         output=output,
     )
 
@@ -204,6 +205,10 @@ def _build_manifest_dict(manifest: Manifest) -> dict[str, Any]:
     if method_config:
         data[manifest.get("method")] = dict(method_config)
 
+    deployment = manifest.get("deployment")
+    if deployment and deployment.get("policy"):
+        data["deployment"] = dict(deployment)
+
     data["data"] = _build_data_section(manifest)
     return data
 
@@ -308,6 +313,9 @@ def _validate_hyperparams(training: dict, lora: dict) -> list[str]:
     return errors
 
 
+_VALID_DEPLOYMENT_POLICIES = frozenset(["skip", "add", "replace"])
+
+
 def validate_manifest(manifest: Manifest) -> list[str]:
     """Validate a training manifest."""
     errors: list[str] = []
@@ -320,6 +328,11 @@ def validate_manifest(manifest: Manifest) -> list[str]:
         errors.append("adapter is required")
     if method not in ("dpo", "sft"):
         errors.append(f"method must be 'dpo' or 'sft', got '{method}'")
+
+    deployment = manifest.get("deployment") or Deployment()
+    policy = deployment.get("policy")
+    if policy is not None and policy not in _VALID_DEPLOYMENT_POLICIES:
+        errors.append(f"deployment.policy must be 'skip', 'add', or 'replace', got '{policy}'")
 
     if data.get("format") == "inline" and not data.get("records"):
         errors.append("Inline data requires non-empty records list")

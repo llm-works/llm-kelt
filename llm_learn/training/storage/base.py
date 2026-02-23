@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from ..manifest.schema import Manifest
@@ -114,7 +114,7 @@ class Storage(ABC):
         training_result: RunResult,
         key: str,
         description: str,
-        deploy: bool = True,
+        deploy: bool | Literal["add", "replace"] = True,
     ) -> AdapterInfo:
         """Store a trained adapter.
 
@@ -122,7 +122,10 @@ class Storage(ABC):
             training_result: Result from training with adapter path.
             key: Adapter key.
             description: Human-readable description.
-            deploy: Whether to deploy the adapter.
+            deploy: Deployment setting:
+                - True or "replace": Deploy and remove existing {key}-* symlinks.
+                - "add": Deploy and keep existing {key}-* symlinks.
+                - False: Don't deploy.
 
         Returns:
             AdapterInfo with registration details.
@@ -183,34 +186,59 @@ class Storage(ABC):
         """
 
     @abstractmethod
-    def deploy_adapter(self, key: str, version_id: str | None = None) -> None:
+    def deploy_adapter(
+        self,
+        key: str,
+        version_id: str | None = None,
+        *,
+        policy: Literal["add", "replace"] = "replace",
+    ) -> None:
         """Deploy an adapter version.
+
+        Creates a symlink in deployed/ directory with versioned naming: {key}-{md5}.
+        This allows multiple versions of the same adapter to be deployed simultaneously.
 
         Args:
             key: Adapter key.
             version_id: Version to deploy (latest if None).
+            policy: Deployment policy:
+                - "add": Create symlink, keep existing {key}-* symlinks.
+                - "replace": Create symlink, remove existing {key}-* symlinks.
 
         Raises:
             ValueError: If adapter not found.
         """
 
     @abstractmethod
-    def undeploy_adapter(self, key: str) -> None:
+    def undeploy_adapter(self, key: str, md5: str | None = None) -> None:
         """Undeploy an adapter.
 
         Args:
             key: Adapter key.
+            md5: Specific version to undeploy. If None, undeploy all versions of key.
         """
 
     @abstractmethod
-    def is_deployed(self, key: str) -> bool:
+    def is_deployed(self, key: str, md5: str | None = None) -> bool:
         """Check if adapter is deployed.
 
         Args:
             key: Adapter key.
+            md5: Specific version to check. If None, check if any version is deployed.
 
         Returns:
-            True if deployed.
+            True if deployed (any version if md5 is None, specific version otherwise).
+        """
+
+    @abstractmethod
+    def list_deployed(self, key: str | None = None) -> list[tuple[str, str]]:
+        """List deployed adapters.
+
+        Args:
+            key: Filter to specific adapter key. If None, list all deployed.
+
+        Returns:
+            List of (key, md5) tuples for deployed adapters.
         """
 
     @abstractmethod

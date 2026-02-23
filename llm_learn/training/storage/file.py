@@ -10,7 +10,7 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 from appinfra.log import Logger
@@ -242,7 +242,7 @@ class FileStorage(Storage):
 
     def get_adapter_by_md5(self, key: str, md5: str) -> AdapterInfo | None:
         """Get adapter info by key and md5."""
-        from ..lora.registry import AdapterInfo
+        from ..schema import AdapterInfo
 
         self.validate_key(key)
         version_id = self._find_version_by_md5(key, md5)
@@ -281,14 +281,23 @@ class FileStorage(Storage):
         training_result: RunResult,
         key: str,
         description: str,
-        deploy: bool = True,
+        deploy: bool | Literal["add", "replace"] = True,
     ) -> AdapterInfo:
         """Store adapter from training result (ABC API).
+
+        Args:
+            training_result: Result from training with adapter path.
+            key: Adapter key.
+            description: Human-readable description.
+            deploy: Deployment setting:
+                - True or "replace": Deploy and remove existing {key}-* symlinks.
+                - "add": Deploy and keep existing {key}-* symlinks.
+                - False: Don't deploy.
 
         Raises:
             ValueError: If adapter with same md5 already exists for this key.
         """
-        from ..lora.registry import AdapterInfo
+        from ..schema import AdapterInfo
 
         self.validate_key(key)
         source = self._validate_training_result(training_result)
@@ -304,8 +313,11 @@ class FileStorage(Storage):
         )
         self._lg.info("stored adapter", extra={"key": key, "version": version_id})
 
-        if deploy:
-            self.deploy_adapter(key, version_id)
+        # Handle deployment based on deploy parameter
+        should_deploy = deploy is not False
+        if should_deploy:
+            policy: Literal["add", "replace"] = deploy if isinstance(deploy, str) else "replace"
+            self.deploy_adapter(key, version_id, policy=policy)
 
         return AdapterInfo(
             key=key,
@@ -313,12 +325,12 @@ class FileStorage(Storage):
             path=adapter_path,
             description=description,
             md5=md5,
-            deployed=deploy,
+            deployed=should_deploy,
         )
 
     def get_adapter(self, key: str) -> AdapterInfo | None:
         """Get adapter info by key."""
-        from ..lora.registry import AdapterInfo
+        from ..schema import AdapterInfo
 
         self.validate_key(key)
         key_path = self.adapters_path / key
@@ -351,7 +363,7 @@ class FileStorage(Storage):
 
     def list_adapter_infos(self) -> list[AdapterInfo]:
         """List all registered adapters with full info (ABC-compliant)."""
-        from ..lora.registry import AdapterInfo
+        from ..schema import AdapterInfo
 
         if not self.adapters_path.exists():
             return []
@@ -400,11 +412,54 @@ class FileStorage(Storage):
             shutil.rmtree(key_path)
             self._lg.info("removed adapter", extra={"key": key})
 
-    def deploy_adapter(self, key: str, version_id: str | None = None) -> None:
-        """Deploy an adapter version."""
-        self.validate_key(key)
-        self.deployed_path.mkdir(parents=True, exist_ok=True)
+    def _get_deployed_symlinks(self, key: str) -> list[Path]:
+        """Get all deployed symlinks for a key (deployed/{key}-*)."""
+        if not self.deployed_path.exists():
+            return []
+        # Match both old-style ({key}) and new-style ({key}-{md5})
+        symlinks = []
+        for path in self.deployed_path.iterdir():
+            if path.is_symlink():
+                name = path.name
+                # Exact match (old style) or prefix match with dash (new style)
+                if name == key or name.startswith(f"{key}-"):
+                    symlinks.append(path)
+        return sorted(symlinks)
 
+    def _migrate_old_symlink(self, key: str) -> None:
+        """Migrate old-style deployed/{key} symlink to deployed/{key}-{md5}."""
+        old_symlink = self.deployed_path / key
+        if not old_symlink.is_symlink():
+            return
+
+        # Read where it points to get the version_id
+        target = old_symlink.resolve()
+        version_id = target.name
+        config = self._read_adapter_config(key, version_id)
+        md5 = config.get("md5", "unknown")
+
+        # Create new-style symlink
+        new_symlink = self.deployed_path / f"{key}-{md5}"
+        if not new_symlink.exists():
+            relative_target = Path("..") / "adapters" / key / version_id
+            new_symlink.symlink_to(relative_target)
+            self._lg.info(
+                "migrated deployment symlink",
+                extra={"key": key, "old": old_symlink.name, "new": new_symlink.name},
+            )
+
+        # Remove old symlink
+        old_symlink.unlink()
+
+    def _resolve_deploy_version(self, key: str, version_id: str | None) -> tuple[str, str]:
+        """Resolve version_id and md5 for deployment.
+
+        Returns:
+            Tuple of (version_id, md5).
+
+        Raises:
+            ValueError: If version not found.
+        """
         if version_id is None:
             version_id = self._get_latest_version(key)
             if version_id is None:
@@ -414,35 +469,136 @@ class FileStorage(Storage):
         if not version_path.exists():
             raise ValueError(f"Version '{version_id}' not found for adapter '{key}'")
 
-        symlink_path = self.deployed_path / key
+        config = self._read_adapter_config(key, version_id)
+        md5 = config.get("md5", "unknown")
+        return version_id, md5
+
+    def deploy_adapter(
+        self,
+        key: str,
+        version_id: str | None = None,
+        *,
+        policy: Literal["add", "replace"] = "replace",
+    ) -> None:
+        """Deploy an adapter version with versioned naming."""
+        self.validate_key(key)
+        self.deployed_path.mkdir(parents=True, exist_ok=True)
+        self._migrate_old_symlink(key)
+
+        version_id, md5 = self._resolve_deploy_version(key, version_id)
+
+        # Remove existing symlinks if policy is "replace"
+        if policy == "replace":
+            for symlink in self._get_deployed_symlinks(key):
+                symlink.unlink()
+                self._lg.info("removed deployment", extra={"symlink": symlink.name})
+
+        # Create new versioned symlink: deployed/{key}-{md5}
+        symlink_path = self.deployed_path / f"{key}-{md5}"
         if symlink_path.exists() or symlink_path.is_symlink():
             symlink_path.unlink()
 
-        # Use relative path: deployed/key -> ../adapters/key/version_id
         relative_target = Path("..") / "adapters" / key / version_id
         symlink_path.symlink_to(relative_target)
-        self._lg.info("deployed adapter", extra={"key": key, "version": version_id})
+        self._lg.info(
+            "deployed adapter",
+            extra={"key": key, "version": version_id, "md5": md5, "policy": policy},
+        )
 
-    def undeploy_adapter(self, key: str) -> None:
-        """Undeploy an adapter."""
-        self.validate_key(key)
-        symlink_path = self.deployed_path / key
-        if symlink_path.is_symlink():
-            symlink_path.unlink()
-            self._lg.info("undeployed adapter", extra={"key": key})
+    def undeploy_adapter(self, key: str, md5: str | None = None) -> None:
+        """Undeploy an adapter.
 
-    def is_deployed(self, key: str) -> bool:
-        """Check if adapter is deployed."""
+        Args:
+            key: Adapter key.
+            md5: Specific version to undeploy. If None, undeploy all versions.
+        """
         self.validate_key(key)
-        return (self.deployed_path / key).is_symlink()
+
+        # Migrate any old-style symlinks first
+        self._migrate_old_symlink(key)
+
+        if md5 is not None:
+            # Undeploy specific version
+            symlink_path = self.deployed_path / f"{key}-{md5}"
+            if symlink_path.is_symlink():
+                symlink_path.unlink()
+                self._lg.info("undeployed adapter", extra={"key": key, "md5": md5})
+        else:
+            # Undeploy all versions of this key
+            for symlink in self._get_deployed_symlinks(key):
+                symlink.unlink()
+                self._lg.info("undeployed adapter", extra={"symlink": symlink.name})
+
+    def is_deployed(self, key: str, md5: str | None = None) -> bool:
+        """Check if adapter is deployed.
+
+        Args:
+            key: Adapter key.
+            md5: Specific version to check. If None, check if any version is deployed.
+
+        Returns:
+            True if deployed.
+        """
+        self.validate_key(key)
+
+        if md5 is not None:
+            # Check specific version
+            return (self.deployed_path / f"{key}-{md5}").is_symlink()
+
+        # Check if any version is deployed (new or old style)
+        return len(self._get_deployed_symlinks(key)) > 0
+
+    def list_deployed(self, key: str | None = None) -> list[tuple[str, str]]:
+        """List deployed adapters.
+
+        Args:
+            key: Filter to specific adapter key. If None, list all deployed.
+
+        Returns:
+            List of (key, md5) tuples for deployed adapters.
+        """
+        if not self.deployed_path.exists():
+            return []
+
+        result: list[tuple[str, str]] = []
+        for symlink in sorted(self.deployed_path.iterdir()):
+            if not symlink.is_symlink():
+                continue
+            name = symlink.name
+            # Parse {key}-{md5} format
+            if "-" in name:
+                # Find the last dash that separates key from md5
+                # md5 is typically 12 hex chars, but could be "unknown"
+                parts = name.rsplit("-", 1)
+                if len(parts) == 2:
+                    adapter_key, md5 = parts
+                    if key is None or adapter_key == key:
+                        result.append((adapter_key, md5))
+            else:
+                # Old-style symlink without md5 - skip or treat as unknown
+                if key is None or name == key:
+                    result.append((name, "unknown"))
+        return result
 
     def get_deployed_path(self, key: str) -> Path | None:
-        """Get filesystem path to deployed adapter."""
+        """Get filesystem path to deployed adapter.
+
+        If multiple versions are deployed, returns the most recently modified.
+        """
         self.validate_key(key)
-        symlink_path = self.deployed_path / key
-        if symlink_path.is_symlink():
-            return symlink_path.resolve()
-        return None
+
+        # Get all deployed symlinks for this key
+        symlinks = self._get_deployed_symlinks(key)
+        if not symlinks:
+            return None
+
+        # If only one, return it
+        if len(symlinks) == 1:
+            return symlinks[0].resolve()
+
+        # Multiple deployed - return the one with latest mtime
+        latest = max(symlinks, key=lambda p: p.lstat().st_mtime)
+        return latest.resolve()
 
     # =========================================================================
     # Work Area Operations (ABC implementation)
@@ -701,13 +857,14 @@ class FileStorage(Storage):
         return self.adapters_path / key / version
 
     def get_deployed_version(self, key: str) -> str | None:
-        """Get deployed version ID for an adapter."""
-        self.validate_key(key)
-        symlink_path = self.deployed_path / key
-        if not symlink_path.is_symlink():
+        """Get deployed version ID for an adapter.
+
+        If multiple versions are deployed, returns the most recently modified.
+        """
+        path = self.get_deployed_path(key)
+        if path is None:
             return None
-        resolved = symlink_path.resolve()
-        return resolved.name
+        return path.name
 
     def get_deployed_version_path(self, key: str) -> Path | None:
         """Get path to deployed version of an adapter."""
@@ -744,13 +901,19 @@ class FileStorage(Storage):
         self._lg.info("wrote adapter config", extra={"key": key, "version": version_id})
         return config_path
 
-    def deploy(self, key: str, version_id: str | None = None) -> None:
+    def deploy(
+        self,
+        key: str,
+        version_id: str | None = None,
+        *,
+        policy: Literal["add", "replace"] = "replace",
+    ) -> None:
         """Create deployment symlink (alias for deploy_adapter)."""
-        self.deploy_adapter(key, version_id)
+        self.deploy_adapter(key, version_id, policy=policy)
 
-    def undeploy(self, key: str) -> None:
+    def undeploy(self, key: str, md5: str | None = None) -> None:
         """Remove deployment symlink (alias for undeploy_adapter)."""
-        self.undeploy_adapter(key)
+        self.undeploy_adapter(key, md5)
 
     def write_data_file(self, work_dir: Path, filename: str, records: list[dict[str, Any]]) -> Path:
         """Write training data to JSONL file (legacy API with explicit filename)."""
