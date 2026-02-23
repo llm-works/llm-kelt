@@ -317,7 +317,7 @@ class Client:
         # Sort by completed_at descending, return most recent
         return max(
             manifests,
-            key=lambda m: m.output.completed_at
-            if m.output and m.output.completed_at
-            else m.created_at,
+            key=lambda m: (
+                m.output.completed_at if m.output and m.output.completed_at else m.created_at
+            ),
         )
