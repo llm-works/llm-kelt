@@ -13,6 +13,8 @@ from typing import Any, Literal
 import yaml
 from appinfra import DotDict
 
+from llm_learn.core.base import utc_now
+
 from ..schema import Adapter, RunResult
 from .errors import CorruptedManifestError
 from .schema import Data, Manifest, Source
@@ -56,18 +58,16 @@ def _dict_to_output(data: dict[str, Any] | None) -> RunResult | None:
     if data is None:
         return None
     return RunResult(
-        status=data["status"],
+        status=data.get("status", "unknown"),
         adapter=_dict_to_adapter(data["adapter"]) if data.get("adapter") else Adapter("", "", ""),
         base_model=data.get("base_model", ""),
         method=data.get("method", ""),
         metrics=data.get("metrics", {}),
         config=data.get("config", {}),
-        started_at=_parse_datetime(data["started_at"])
-        if data.get("started_at")
-        else datetime.now(),
+        started_at=_parse_datetime(data["started_at"]) if data.get("started_at") else utc_now(),
         completed_at=_parse_datetime(data["completed_at"])
         if data.get("completed_at")
-        else datetime.now(),
+        else utc_now(),
         samples_trained=data.get("samples_trained", 0),
         parent=_dict_to_adapter(data.get("parent")),
         error=data.get("error"),
@@ -94,15 +94,15 @@ def _validate_required_fields(
     return adapter, method, data_section  # type: ignore[return-value]
 
 
-def _read_yaml_file(path: Path) -> dict:
+def _read_yaml_file(path: Path) -> Any:
     """Read YAML from file (supports .gz)."""
     import gzip
 
     if path.suffix == ".gz":
         with gzip.open(path, "rt", encoding="utf-8") as f:
-            return dict(yaml.safe_load(f))
+            return yaml.safe_load(f)
     with path.open("r", encoding="utf-8") as f:
-        return dict(yaml.safe_load(f))
+        return yaml.safe_load(f)
 
 
 def _dict_to_manifest(data: dict) -> Manifest:

@@ -120,23 +120,6 @@ class Runner:
             manifest, output_dir=output_dir, register=not skip_registration
         )
 
-    def _create_failed_result(self, error: str) -> RunResult:
-        """Create a failed RunResult for error cases."""
-        from datetime import datetime
-
-        now = datetime.now().astimezone()
-        return RunResult(
-            status="failed",
-            base_model="",
-            method="",
-            metrics={},
-            config={},
-            started_at=now,
-            completed_at=now,
-            samples_trained=0,
-            error=error,
-        )
-
     def _get_effective_model(self, manifest: Manifest, model_override: str | None) -> str:
         """Determine effective model from override or manifest.
 

@@ -6,7 +6,7 @@ Handles creating, loading, saving, and submitting manifests to the training queu
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from appinfra import DotDict
 from appinfra.log import Logger
@@ -20,9 +20,6 @@ from .schema import (
     Manifest,
     Source,
 )
-
-if TYPE_CHECKING:
-    pass
 
 # Keys that belong in training config (vs method_config or lora)
 _TRAINING_KEYS = frozenset(
