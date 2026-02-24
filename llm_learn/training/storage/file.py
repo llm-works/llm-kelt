@@ -23,7 +23,7 @@ _KEY_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
 
 if TYPE_CHECKING:
     from ..manifest.schema import Manifest
-    from ..schema import AdapterInfo, RunResult
+    from ..schema import AdapterInfo, RunResult, SubmitResult
 
 
 class FileStorage(Storage):
@@ -64,9 +64,10 @@ class FileStorage(Storage):
     # Manifest Operations (ABC implementation)
     # =========================================================================
 
-    def submit_manifest(self, manifest: Manifest) -> None:
+    def submit_manifest(self, manifest: Manifest) -> SubmitResult:
         """Submit a manifest to the pending queue."""
         from ..manifest.loader import save_manifest
+        from ..schema import SubmitResult
 
         self.validate_key(manifest.adapter)
         self.pending_path.mkdir(parents=True, exist_ok=True)
@@ -77,6 +78,12 @@ class FileStorage(Storage):
 
         save_manifest(manifest, pending_file)
         self._lg.info("submitted manifest", extra={"adapter": manifest.adapter})
+
+        return SubmitResult(
+            adapter=manifest.adapter,
+            timestamp=datetime.now(),
+            location=str(pending_file),
+        )
 
     def get_pending_manifest(self, adapter: str) -> Manifest | None:
         """Get a pending manifest by adapter key."""
@@ -295,6 +302,8 @@ class FileStorage(Storage):
 
         self.validate_key(key)
         source = self._validate_training_result(training_result)
+        # _validate_training_result guarantees adapter is not None
+        assert training_result.adapter is not None
         md5 = training_result.adapter.md5 or "unknown"
 
         # Only check for duplicates if we have a real md5 hash
@@ -662,10 +671,12 @@ class FileStorage(Storage):
             return self.write_training_data(work_dir, manifest.adapter, manifest.data.records)
 
         # External file - resolve path
+        if not manifest.data.path:
+            raise ValueError("External data format requires a path")
         data_path = Path(manifest.data.path)
         if not data_path.is_absolute():
             # Relative path - resolve against manifest location or work_dir
-            if manifest.get("source_path"):
+            if manifest.source_path:
                 data_path = manifest.source_path.parent / data_path
             else:
                 data_path = work_dir / data_path

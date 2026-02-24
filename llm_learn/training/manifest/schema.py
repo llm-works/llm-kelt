@@ -6,75 +6,72 @@ that specify everything needed to run a training job.
 
 from __future__ import annotations
 
-from typing import Literal
+from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
 
-from appinfra import DotDict
+from appinfra import DataDotDict, DotDict, field
 
-
-class Source(DotDict):
-    """Provenance information for the manifest.
-
-    Fields:
-        context_key: Agent context key that created this manifest.
-        description: Human-readable description of the training goal.
-    """
-
-    pass
+if TYPE_CHECKING:
+    from ..schema import Adapter, RunResult
 
 
-class Data(DotDict):
-    """Training data specification.
+class Source(DataDotDict):
+    """Provenance information for the manifest."""
 
-    Data can be inline (records embedded in manifest) or external (path to JSONL).
-
-    Fields:
-        format: "inline" for embedded records, "external" for file path.
-        records: List of training records (for inline format).
-        path: Path to JSONL file, relative to manifest (for external format).
-    """
-
-    pass
+    # Agent context key that created this manifest
+    context_key: str | None = None
+    # Human-readable description of the training goal
+    description: str | None = None
 
 
-class Deployment(DotDict):
-    """Deployment configuration.
+class Data(DataDotDict):
+    """Training data specification (inline or external file)."""
 
-    Controls how the trained adapter is deployed after training.
-
-    Fields:
-        policy: Deployment policy - "skip" (don't deploy), "add" (deploy as new
-            version keeping existing), or "replace" (deploy and remove existing).
-            Default is "replace".
-    """
-
-    pass
+    # "inline" for embedded records, "external" for file path
+    format: Literal["inline", "external"]
+    # List of training records (for inline format)
+    records: list[dict[str, Any]] = field(default_factory=list)
+    # Path to JSONL file, relative to manifest (for external format)
+    path: str | None = None
 
 
-class Manifest(DotDict):
-    """Complete training manifest.
+class Deployment(DataDotDict):
+    """Deployment configuration after training."""
 
-    Self-contained specification for a training job. Can be created by an agent,
-    submitted to a training queue, and executed on any machine with access to
-    the base model and adapter registry.
+    # "skip" (don't deploy), "add" (keep existing), or "replace" (remove existing)
+    policy: Literal["skip", "add", "replace"] = "replace"
 
-    Fields:
-        adapter: Output adapter key (series name, e.g., "my-agent-sft").
-        method: Training method ("dpo" or "sft").
-        data: Training data specification (Data).
-        deployment: Deployment configuration (Deployment).
-        version: Schema version for forward compatibility.
-        created_at: When manifest was created (datetime).
-        source: Provenance information (Source).
-        parent: Parent adapter for lineage (Adapter).
-        lora: LoRA configuration.
-        training: Training config (num_epochs, learning_rate, requested_model, etc.).
-        method_config: Method-specific configuration (beta for DPO, etc.).
-        output: Training result, populated after completion (RunResult).
-        source_path: Path to manifest file (set during loading, used for resolving
-            relative external data paths). Not serialized.
-    """
 
-    pass
+class Manifest(DataDotDict):
+    """Complete training manifest."""
+
+    # Output adapter key (series name, e.g., "my-agent-sft")
+    adapter: str
+    # Training method
+    method: Literal["dpo", "sft"]
+    # Training data specification
+    data: Data
+    # Deployment configuration
+    deployment: Deployment | None = None
+    # Schema version for forward compatibility
+    version: str = "1"
+    # When manifest was created
+    created_at: datetime = field(default_factory=datetime.now)
+    # Provenance information
+    source: Source | None = None
+    # Parent adapter for lineage (continue training from this)
+    parent: Adapter | None = None
+    # LoRA configuration
+    lora: DotDict = field(default_factory=DotDict)
+    # Training config (num_epochs, learning_rate, requested_model, etc.)
+    training: DotDict = field(default_factory=DotDict)
+    # Method-specific configuration (beta for DPO, etc.)
+    method_config: DotDict = field(default_factory=DotDict)
+    # Training result, populated after completion
+    output: RunResult | None = None
+    # Path to manifest file (set during loading, not serialized)
+    source_path: Path | None = None
 
 
 def get_deploy_setting(manifest: Manifest) -> bool | Literal["add", "replace"]:
@@ -85,14 +82,8 @@ def get_deploy_setting(manifest: Manifest) -> bool | Literal["add", "replace"]:
 
     Returns:
         False if policy is "skip", otherwise "add" or "replace".
-
-    Raises:
-        ValueError: If policy is not a valid value ("skip", "add", "replace").
     """
-    deployment = manifest.get("deployment") or {}
-    policy: str = deployment.get("policy", "replace")
-    if policy not in ("skip", "add", "replace"):
-        raise ValueError(f"Invalid deployment policy: {policy}")
+    policy = manifest.deployment.policy if manifest.deployment else "replace"
     if policy == "skip":
         return False
-    return "add" if policy == "add" else "replace"
+    return policy

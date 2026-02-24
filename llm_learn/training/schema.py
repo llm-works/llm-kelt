@@ -6,23 +6,40 @@ Defaults are optimized for Qwen2.5-7B-Instruct with QLoRA.
 
 from __future__ import annotations
 
-from appinfra import DotDict
+from datetime import datetime
+from pathlib import Path
+
+from appinfra import DataDotDict, DotDict, field
 
 
-class AdapterInfo(DotDict):
-    """Information about a registered adapter.
+class AdapterInfo(DataDotDict):
+    """Information about a registered adapter."""
 
-    Fields:
-        key: Adapter key (unique identifier).
-        path: Path to adapter directory.
-        deployed: Whether adapter is currently deployed.
-        version_id: Version identifier (YYYYMMDD-HHMMSS-md5).
-        description: Human-readable description.
-        md5: MD5 hash of adapter weights.
-        parent: Parent adapter md5 (for lineage tracking).
-    """
+    # Adapter key (unique identifier)
+    key: str
+    # Path to adapter directory
+    path: Path
+    # Version identifier (YYYYMMDD-HHMMSS-md5)
+    version_id: str
+    # MD5 hash of adapter weights
+    md5: str
+    # Whether adapter is currently deployed
+    deployed: bool = False
+    # Human-readable description
+    description: str = ""
+    # Parent adapter md5 (for lineage tracking)
+    parent: str | None = None
 
-    pass
+
+class SubmitResult(DataDotDict):
+    """Result of submitting a manifest."""
+
+    # Adapter key
+    adapter: str
+    # When submitted
+    timestamp: datetime
+    # Storage location (path for file, URI for DB, etc.)
+    location: str
 
 
 # Training hyperparameter defaults
@@ -43,34 +60,42 @@ TRAINING_DEFAULTS = DotDict(
 )
 
 
-class Adapter(DotDict):
-    """Adapter identity.
+class Adapter(DataDotDict):
+    """Adapter identity."""
 
-    Fields:
-        md5: MD5 hash of weights (12 char hex). THE unique version identifier.
-        mtime: ISO timestamp of weights file modification time.
-        path: Full path to adapter directory.
-    """
+    # MD5 hash of weights (12 char hex) - THE unique version identifier
+    md5: str
+    # ISO timestamp of weights file modification time
+    mtime: str
+    # Full path to adapter directory
+    path: str
 
-    pass
 
+class RunResult(DataDotDict):
+    """Result of a training run."""
 
-class RunResult(DotDict):
-    """Result of a training run.
-
-    Fields:
-        status: "completed" or "failed".
-        base_model: HuggingFace model ID used as base.
-        method: Training method ("sft" or "dpo").
-        metrics: Training metrics (loss, eval metrics if applicable).
-        config: Full configuration dict used for training.
-        started_at: When training started (datetime).
-        completed_at: When training completed (datetime).
-        samples_trained: Total number of samples seen during training.
-        adapter: Adapter identity with md5/mtime/path (None if failed).
-        parent: Parent adapter this was trained from (for lineage tracking).
-        error: Error message if status is "failed".
-    """
+    # "completed" or "failed"
+    status: str | None = None
+    # When training started
+    started_at: datetime
+    # When training completed
+    completed_at: datetime
+    # HuggingFace model ID used as base
+    base_model: str | None = None
+    # Training method ("sft" or "dpo")
+    method: str | None = None
+    # Training metrics (loss, eval metrics if applicable)
+    metrics: DotDict = field(default_factory=DotDict)
+    # Full configuration dict used for training
+    config: DotDict = field(default_factory=DotDict)
+    # Total number of samples seen during training
+    samples_trained: int = 0
+    # Adapter identity with md5/mtime/path (None if failed)
+    adapter: Adapter | None = None
+    # Parent adapter this was trained from (for lineage tracking)
+    parent: Adapter | None = None
+    # Error message if status is "failed"
+    error: str | None = None
 
     @property
     def duration_seconds(self) -> float:

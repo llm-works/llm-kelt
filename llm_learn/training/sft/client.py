@@ -158,7 +158,7 @@ class Client:
             meta = compute_adapter_metadata(Path(result.adapter.path))
             result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=result.adapter.path)
 
-        description = manifest.source.description or "SFT adapter"
+        description = (manifest.source.description if manifest.source else None) or "SFT adapter"
         deploy = get_deploy_setting(manifest)
         self.registry.register(
             training_result=result,

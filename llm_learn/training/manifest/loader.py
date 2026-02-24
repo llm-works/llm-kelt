@@ -143,7 +143,6 @@ def _get_effective_config(manifest: Manifest) -> tuple[dict, dict]:
 
 def _build_output_dict(output: RunResult) -> dict[str, Any]:
     """Build output dict for YAML serialization."""
-    # Use to_dict() for recursive DotDict conversion (yaml.safe_dump requires plain dicts)
     result: dict[str, Any] = {
         "status": output.status,
         "adapter": output.adapter.to_dict() if output.adapter else None,
@@ -155,9 +154,9 @@ def _build_output_dict(output: RunResult) -> dict[str, Any]:
         "completed_at": _serialize_datetime(output.completed_at),
         "samples_trained": output.samples_trained,
     }
-    if output.get("parent") is not None:
+    if output.parent is not None:
         result["parent"] = output.parent.to_dict()
-    if output.get("error") is not None:
+    if output.error is not None:
         result["error"] = output.error
     return result
 
