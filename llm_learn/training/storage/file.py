@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,9 @@ import yaml
 from appinfra.log import Logger
 
 from .base import Storage
+
+# Pre-compiled regex for key validation (used on hot path)
+_KEY_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
 
 if TYPE_CHECKING:
     from ..manifest.schema import Manifest
@@ -115,12 +119,17 @@ class FileStorage(Storage):
 
         self.completed_path.mkdir(parents=True, exist_ok=True)
 
-        md5 = (
-            manifest.output.adapter.md5
-            if manifest.output and manifest.output.adapter
-            else "unknown"
-        )
-        completed_file = self.completed_path / f"{manifest.adapter}-{md5}.yaml.gz"
+        md5 = manifest.output.adapter.md5 if manifest.output and manifest.output.adapter else None
+        # Use timestamp suffix when md5 is unavailable to avoid overwriting
+        if md5:
+            suffix = md5
+        else:
+            suffix = datetime.now().strftime("%Y%m%d-%H%M%S")
+            self._lg.warning(
+                "completing manifest without md5, using timestamp",
+                extra={"adapter": manifest.adapter},
+            )
+        completed_file = self.completed_path / f"{manifest.adapter}-{suffix}.yaml.gz"
         save_manifest(manifest, completed_file, compress=True)
 
         # Remove from pending if it exists
@@ -138,7 +147,11 @@ class FileStorage(Storage):
             return []
 
         manifests = []
-        for path in sorted(self.completed_path.glob("*.yaml*")):  # .yaml and .yaml.gz
+        # Use explicit patterns to avoid matching editor temp files (.yaml.bak, etc.)
+        paths = list(self.completed_path.glob("*.yaml")) + list(
+            self.completed_path.glob("*.yaml.gz")
+        )
+        for path in sorted(paths):
             try:
                 manifests.append(load_manifest(path))
             except Exception as e:
@@ -433,7 +446,9 @@ class FileStorage(Storage):
 
         target = old_symlink.resolve()
         if not target.exists():
-            self._lg.warning("migration skipped: target missing", extra={"key": key})
+            # Remove dangling symlink instead of leaving it
+            old_symlink.unlink()
+            self._lg.warning("removed dangling symlink", extra={"key": key})
             return
 
         version_id = target.name
@@ -572,12 +587,14 @@ class FileStorage(Storage):
                 parts = name.rsplit("-", 1)
                 if len(parts) == 2:
                     adapter_key, md5 = parts
+                    # Normalize to lowercase for consistent comparison
+                    md5_lower = md5.lower()
                     # Validate md5 is hex or "unknown" to avoid false matches
-                    is_valid_md5 = md5 == "unknown" or (
-                        len(md5) <= 32 and all(c in "0123456789abcdef" for c in md5)
+                    is_valid_md5 = md5_lower == "unknown" or (
+                        len(md5_lower) <= 32 and all(c in "0123456789abcdef" for c in md5_lower)
                     )
                     if is_valid_md5 and (key is None or adapter_key == key):
-                        result.append((adapter_key, md5))
+                        result.append((adapter_key, md5_lower))
             else:
                 # Old-style symlink without md5 - treat as unknown
                 if key is None or name == key:
@@ -667,14 +684,12 @@ class FileStorage(Storage):
         Keys must be alphanumeric with hyphens, underscores, or dots.
         No path traversal, whitespace, or special characters allowed.
         """
-        import re
-
         if not key:
             raise ValueError("Key cannot be empty")
         if "/" in key or "\\" in key or ".." in key:
             raise ValueError(f"Invalid key (path traversal): {key}")
         # Allow alphanumeric, hyphen, underscore, dot (but not leading/trailing dots)
-        if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$", key):
+        if not _KEY_RE.match(key):
             raise ValueError(
                 f"Invalid key '{key}': must be alphanumeric with hyphens, underscores, or dots"
             )

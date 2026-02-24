@@ -68,22 +68,23 @@ def trained_adapter(logger, training_model_path, tmp_path_factory):
     # Write training data
     data_path = _write_jsonl(tmp_path / "train.jsonl", DISTINCTIVE_SFT_DATA)
 
-    # Fast training config
+    # Low VRAM training config (~8GB GPU with inference server running)
     lora_config = LoraConfig(
-        r=8,
-        lora_alpha=16,
+        r=4,  # Reduced to save VRAM
+        lora_alpha=8,
         lora_dropout=0.0,
         target_modules=["q_proj", "v_proj"],
     )
     training_config = DotDict(
-        num_epochs=3,  # More epochs for stronger effect
-        batch_size=2,
-        gradient_accumulation_steps=1,
-        max_seq_length=256,
+        num_epochs=2,  # Enough for distinctive behavior
+        batch_size=1,  # Reduced to save VRAM
+        gradient_accumulation_steps=2,  # Compensate for smaller batch
+        max_seq_length=128,  # Reduced to save VRAM
         logging_steps=1,
         save_steps=100,
         eval_split=0.0,
         learning_rate=5e-4,  # Higher LR for faster learning
+        gradient_checkpointing=True,  # Trade compute for memory
         fp16=not torch.cuda.is_bf16_supported(),
         bf16=torch.cuda.is_bf16_supported(),
     )
@@ -125,17 +126,17 @@ class TestAdapterIntegration:
         """Train adapter, register with llm-infer, verify inference differs."""
         key = "test-pineapple-adapter"
 
-        # Register adapter with llm-infer
-        info = adapter_registry.register_and_refresh(
-            training_result=trained_adapter,
-            key=key,
-            description="Test adapter trained on pineapple data",
-            overwrite=True,
-        )
-        assert info.key == key
-        assert info.deployed is True
-
         try:
+            # Register adapter with llm-infer
+            info = adapter_registry.register_and_refresh(
+                training_result=trained_adapter,
+                key=key,
+                description="Test adapter trained on pineapple data",
+                overwrite=True,
+            )
+            assert info.key == key
+            assert info.deployed is True
+
             # Query WITHOUT adapter
             response_base = await llm_client.chat_async(
                 messages=[{"role": "user", "content": "What is your favorite fruit?"}],
@@ -177,21 +178,21 @@ class TestAdapterIntegration:
         """Test deploying and undeploying adapters."""
         key = "test-deploy-undeploy"
 
-        # Register deployed
-        info = adapter_registry.register_and_refresh(
-            training_result=trained_adapter,
-            key=key,
-            deploy=True,
-            overwrite=True,
-        )
-        assert info.deployed is True
-
-        # Verify it's in the list
-        adapters = adapter_registry.list()
-        keys = [a.key for a in adapters]
-        assert key in keys
-
         try:
+            # Register deployed
+            info = adapter_registry.register_and_refresh(
+                training_result=trained_adapter,
+                key=key,
+                deploy=True,
+                overwrite=True,
+            )
+            assert info.deployed is True
+
+            # Verify it's in the list
+            adapters = adapter_registry.list()
+            keys = [a.key for a in adapters]
+            assert key in keys
+
             # Undeploy it
             adapter_registry.set_deployed(key, False)
             adapter_registry.refresh(key)
