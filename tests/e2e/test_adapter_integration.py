@@ -99,6 +99,14 @@ def trained_adapter(logger, training_model_path, tmp_path_factory):
         quantize=False,
     )
 
+    # Compute adapter metadata (md5/mtime) like the runner does
+    from llm_infer import compute_adapter_metadata
+
+    from llm_learn.training.schema import Adapter
+
+    meta = compute_adapter_metadata(Path(result.adapter.path))
+    result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=result.adapter.path)
+
     return result
 
 

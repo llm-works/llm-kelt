@@ -231,13 +231,14 @@ class FileStorage(Storage):
             return None
 
         config = self._read_adapter_config(key, version_id)
+        adapter_md5 = config.get("md5")
         return AdapterInfo(
             key=key,
             version_id=version_id,
             path=self.adapters_path / key / version_id,
             description=config.get("description", ""),
-            md5=config.get("md5"),
-            deployed=self.is_deployed(key),
+            md5=adapter_md5,
+            deployed=self.is_deployed(key, adapter_md5),
         )
 
     def _check_duplicate_md5(self, key: str, md5: str) -> None:
@@ -329,13 +330,14 @@ class FileStorage(Storage):
             return None
 
         config = self._read_adapter_config(key, version_id)
+        adapter_md5 = config.get("md5")
         return AdapterInfo(
             key=key,
             version_id=version_id,
             path=key_path / version_id,
             description=config.get("description", ""),
-            md5=config.get("md5"),
-            deployed=self.is_deployed(key),
+            md5=adapter_md5,
+            deployed=self.is_deployed(key, adapter_md5),
         )
 
     def list_adapters(self) -> list[str]:  # type: ignore[override]
@@ -365,14 +367,15 @@ class FileStorage(Storage):
                 continue
 
             config = self._read_adapter_config(key, version_id)
+            adapter_md5 = config.get("md5")
             adapters.append(
                 AdapterInfo(
                     key=key,
                     version_id=version_id,
                     path=key_path / version_id,
                     description=config.get("description", ""),
-                    md5=config.get("md5"),
-                    deployed=self.is_deployed(key),
+                    md5=adapter_md5,
+                    deployed=self.is_deployed(key, adapter_md5),
                 )
             )
         return adapters
@@ -393,10 +396,11 @@ class FileStorage(Storage):
             version_path = key_path / version_id
             if not version_path.exists():
                 raise ValueError(f"Version '{version_id}' not found for adapter '{key}'")
-            # Check if this version is deployed and undeploy if so
-            deployed_path = self.get_deployed_path(key)
-            if deployed_path and deployed_path.resolve() == version_path.resolve():
-                self.undeploy_adapter(key)
+            # Undeploy only this specific version if deployed
+            config = self._read_adapter_config(key, version_id)
+            version_md5 = config.get("md5")
+            if version_md5 and self.is_deployed(key, version_md5):
+                self.undeploy_adapter(key, version_md5)
             shutil.rmtree(version_path)
             self._lg.info("removed adapter version", extra={"key": key, "version": version_id})
         else:
