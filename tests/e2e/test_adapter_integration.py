@@ -170,9 +170,12 @@ class TestAdapterIntegration:
             )
 
         finally:
-            # Cleanup: remove adapter
-            adapter_registry.remove(key)
-            adapter_registry.refresh()
+            # Cleanup: remove adapter (suppress if registration failed)
+            try:
+                adapter_registry.remove(key)
+                adapter_registry.refresh()
+            except ValueError:
+                pass
 
     def test_adapter_deploy_undeploy(self, trained_adapter, adapter_registry):
         """Test deploying and undeploying adapters."""
@@ -210,8 +213,11 @@ class TestAdapterIntegration:
             assert info.deployed is True
 
         finally:
-            adapter_registry.remove(key)
-            adapter_registry.refresh()
+            try:
+                adapter_registry.remove(key)
+                adapter_registry.refresh()
+            except ValueError:
+                pass
 
     def test_adapter_overwrite(self, trained_adapter, adapter_registry):
         """Test overwriting an existing adapter."""

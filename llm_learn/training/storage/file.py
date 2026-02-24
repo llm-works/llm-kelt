@@ -380,6 +380,7 @@ class FileStorage(Storage):
                 continue
 
             config = self._read_adapter_config(key, version_id)
+            # md5 is always present - we don't support legacy configs without it
             adapter_md5 = config.get("md5")
             adapters.append(
                 AdapterInfo(
