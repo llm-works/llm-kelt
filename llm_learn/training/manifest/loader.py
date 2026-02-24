@@ -17,7 +17,7 @@ from llm_learn.core.base import utc_now
 
 from ..schema import Adapter, RunResult
 from .errors import CorruptedManifestError
-from .schema import Data, Manifest, Source
+from .schema import Data, Deployment, Manifest, Source
 
 
 def _parse_datetime(value: str | datetime | None) -> datetime:
@@ -64,8 +64,13 @@ def _build_output_result(output_data: dict[str, Any]) -> RunResult:
     return RunResult(data)
 
 
-def _build_manifest(data: dict[str, Any]) -> Manifest:
-    """Build Manifest from validated dict."""
+def _build_manifest(data: dict[str, Any], source_path: Path | None = None) -> Manifest:
+    """Build Manifest from validated dict.
+
+    Args:
+        data: Raw manifest data from YAML.
+        source_path: Path to manifest file (for resolving relative external data paths).
+    """
     _validate_required_fields(data)
 
     # Training section may contain output (new format) or output at root (old format)
@@ -92,7 +97,9 @@ def _build_manifest(data: dict[str, Any]) -> Manifest:
         training=DotDict(training_data),
         method_config=DotDict(data.get(data["method"], {})),
         data=Data(data["data"]),
+        deployment=Deployment(data.get("deployment", {})),
         output=output,
+        source_path=source_path,
     )
 
 
@@ -107,7 +114,7 @@ def load_manifest(path: Path) -> Manifest:
     if not isinstance(data, dict):
         raise CorruptedManifestError(path, f"expected dict, got {type(data).__name__}")
 
-    return _build_manifest(data)
+    return _build_manifest(data, source_path=path.resolve())
 
 
 def _serialize_datetime(dt: datetime) -> str:
@@ -123,28 +130,34 @@ def _get_effective_config(manifest: Manifest) -> tuple[dict, dict]:
 
     if output is not None and output.get("config"):
         output_config = output.config
-        lora = output_config.get("lora", dict(manifest_lora))
-        training = output_config.get("training", dict(manifest_training))
+        lora_raw = output_config.get("lora", manifest_lora)
+        training_raw = output_config.get("training", manifest_training)
+        # Convert DotDicts to plain dicts for YAML serialization
+        lora = lora_raw.to_dict() if hasattr(lora_raw, "to_dict") else dict(lora_raw)
+        training = (
+            training_raw.to_dict() if hasattr(training_raw, "to_dict") else dict(training_raw)
+        )
         return lora, training
     return dict(manifest_lora), dict(manifest_training)
 
 
 def _build_output_dict(output: RunResult) -> dict[str, Any]:
     """Build output dict for YAML serialization."""
+    # Use to_dict() for recursive DotDict conversion (yaml.safe_dump requires plain dicts)
     result: dict[str, Any] = {
         "status": output.status,
-        "adapter": dict(output.adapter) if output.adapter else None,
+        "adapter": output.adapter.to_dict() if output.adapter else None,
         "base_model": output.base_model,
         "method": output.method,
-        "metrics": output.metrics,
-        "config": output.config,
+        "metrics": output.metrics.to_dict() if output.metrics else None,
+        "config": output.config.to_dict() if output.config else None,
         "started_at": _serialize_datetime(output.started_at),
         "completed_at": _serialize_datetime(output.completed_at),
         "samples_trained": output.samples_trained,
     }
-    if output.parent is not None:
-        result["parent"] = dict(output.parent)
-    if output.error is not None:
+    if output.get("parent") is not None:
+        result["parent"] = output.parent.to_dict()
+    if output.get("error") is not None:
         result["error"] = output.error
     return result
 
@@ -197,6 +210,10 @@ def _build_manifest_dict(manifest: Manifest) -> dict[str, Any]:
     method_config = manifest.get("method_config")
     if method_config:
         data[manifest.get("method")] = dict(method_config)
+
+    deployment = manifest.get("deployment")
+    if deployment and deployment.get("policy"):
+        data["deployment"] = dict(deployment)
 
     data["data"] = _build_data_section(manifest)
     return data
@@ -302,6 +319,9 @@ def _validate_hyperparams(training: dict, lora: dict) -> list[str]:
     return errors
 
 
+_VALID_DEPLOYMENT_POLICIES = frozenset(["skip", "add", "replace"])
+
+
 def validate_manifest(manifest: Manifest) -> list[str]:
     """Validate a training manifest."""
     errors: list[str] = []
@@ -314,6 +334,11 @@ def validate_manifest(manifest: Manifest) -> list[str]:
         errors.append("adapter is required")
     if method not in ("dpo", "sft"):
         errors.append(f"method must be 'dpo' or 'sft', got '{method}'")
+
+    deployment = manifest.get("deployment") or Deployment()
+    policy = deployment.get("policy")
+    if policy is not None and policy not in _VALID_DEPLOYMENT_POLICIES:
+        errors.append(f"deployment.policy must be 'skip', 'add', or 'replace', got '{policy}'")
 
     if data.get("format") == "inline" and not data.get("records"):
         errors.append("Inline data requires non-empty records list")

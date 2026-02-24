@@ -8,6 +8,23 @@ from __future__ import annotations
 
 from appinfra import DotDict
 
+
+class AdapterInfo(DotDict):
+    """Information about a registered adapter.
+
+    Fields:
+        key: Adapter key (unique identifier).
+        path: Path to adapter directory.
+        deployed: Whether adapter is currently deployed.
+        version_id: Version identifier (YYYYMMDD-HHMMSS-md5).
+        description: Human-readable description.
+        md5: MD5 hash of adapter weights.
+        parent: Parent adapter md5 (for lineage tracking).
+    """
+
+    pass
+
+
 # Training hyperparameter defaults
 TRAINING_DEFAULTS = DotDict(
     num_epochs=3,

@@ -6,16 +6,19 @@ Handles creating, loading, saving, and submitting manifests to the training queu
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from appinfra import DotDict
 from appinfra.log import Logger
 
 from ..schema import Adapter
-from .errors import CorruptedManifestError
+from ..storage import Storage
 from .loader import load_manifest as _load_manifest
 from .loader import save_manifest as _save_manifest
-from .schema import Data, Manifest, Source
+from .schema import Data, Deployment, Manifest, Source
+
+if TYPE_CHECKING:
+    pass
 
 # Keys that belong in training config (vs method_config or lora)
 _TRAINING_KEYS = frozenset(
@@ -70,24 +73,19 @@ class Client:
     def __init__(
         self,
         lg: Logger,
-        registry_path: Path,
+        storage: Storage,
         default_profiles: dict[str, dict] | None = None,
     ) -> None:
         """Initialize manifest client.
 
         Args:
             lg: Logger instance.
-            registry_path: Base path for adapter registry and manifest queues.
-            default_profiles: Default training profiles by method (e.g., {"sft": {...}, "dpo": {...}}).
+            storage: Storage instance for filesystem operations.
+            default_profiles: Default training profiles by method.
         """
         self._lg = lg
-        self._registry_path = Path(registry_path).expanduser()
+        self._storage = storage
         self._default_profiles = default_profiles or {}
-
-    def _ensure_dirs(self) -> None:
-        """Lazily create directory structure on first write operation."""
-        for subdir in ("pending", "completed", "adapters", "deployed"):
-            (self._registry_path / subdir).mkdir(parents=True, exist_ok=True)
 
     def _build_manifest_configs(
         self,
@@ -129,6 +127,7 @@ class Client:
         context_key: str | None = None,
         description: str | None = None,
         config: dict[str, Any] | None = None,
+        deployment_policy: Literal["skip", "add", "replace"] | None = None,
     ) -> Manifest:
         """Create a new training manifest with inline data.
 
@@ -141,6 +140,10 @@ class Client:
             context_key: Agent context key for provenance.
             description: Human-readable description.
             config: Override training configuration (num_epochs, etc.).
+            deployment_policy: Deployment policy after training:
+                - "skip": Don't deploy the adapter.
+                - "add": Deploy as new version, keep existing versions.
+                - "replace": Deploy and remove existing versions (default).
 
         Returns:
             Manifest instance.
@@ -150,10 +153,14 @@ class Client:
             method, model, config
         )
 
+        # Build deployment config (default to "replace" if not specified)
+        deployment = Deployment(policy=deployment_policy or "replace")
+
         manifest = Manifest(
             adapter=adapter,
             method=method,
             data=Data(format="inline", records=data),
+            deployment=deployment,
             source=source,
             parent=parent,
             lora=lora_config,
@@ -189,7 +196,7 @@ class Client:
         _save_manifest(manifest, path)
         self._lg.info("saved manifest", extra={"path": str(path)})
 
-    def submit(self, manifest: Manifest) -> Path:
+    def submit(self, manifest: Manifest) -> None:
         """Submit a manifest to the pending training queue.
 
         Saves the manifest to the registry's pending directory.
@@ -197,51 +204,31 @@ class Client:
         Args:
             manifest: Manifest to submit.
 
-        Returns:
-            Path to manifest in pending queue.
-
         Raises:
             ValueError: If manifest with same key already pending.
         """
-        self._ensure_dirs()
-        self._validate_adapter_name(manifest.adapter)
+        self._storage.submit_manifest(manifest)
+        self._lg.info("submitted manifest", extra={"adapter": manifest.adapter})
 
-        pending_dir = self._registry_path / "pending"
-        dest_path = pending_dir / f"{manifest.adapter}.yaml"
-
-        # Note: check-then-write has TOCTOU race, but acceptable for single-user CLI
-        if dest_path.exists():
-            raise ValueError(f"Manifest already in queue: {manifest.adapter}")
-
-        _save_manifest(manifest, dest_path)
-        self._lg.info("submitted manifest", extra={"path": str(dest_path)})
-
-        return dest_path
-
-    def list_pending(self) -> list[Path]:
+    def list_pending(self) -> list[Manifest]:
         """List manifests waiting for training.
 
         Returns:
-            List of paths to pending manifest files.
+            List of pending manifests.
         """
-        pending_dir = self._registry_path / "pending"
-        return sorted(pending_dir.glob("*.yaml"))
+        return self._storage.list_pending_manifests()
 
-    def list_completed(self) -> list[Path]:
-        """List completed manifests (supports .yaml and .yaml.gz).
+    def list_completed(self) -> list[Manifest]:
+        """List completed manifests.
 
         Returns:
-            List of paths to completed manifest files.
+            List of completed manifests.
         """
-        completed_dir = self._registry_path / "completed"
-        yaml_files = list(completed_dir.glob("*.yaml"))
-        gz_files = list(completed_dir.glob("*.yaml.gz"))
-        return sorted(yaml_files + gz_files)
+        return self._storage.list_completed_manifests()
 
     def _validate_adapter_name(self, adapter: str) -> None:
         """Validate adapter name has no path traversal characters."""
-        if "/" in adapter or "\\" in adapter or ".." in adapter:
-            raise ValueError(f"Invalid adapter name (path traversal): {adapter}")
+        self._storage.validate_key(adapter)
 
     def get_pending(self, adapter: str) -> Manifest | None:
         """Get a pending manifest by adapter key.
@@ -250,19 +237,9 @@ class Client:
             adapter: Adapter key to look up.
 
         Returns:
-            Manifest or None if not found or corrupted.
+            Manifest or None if not found.
         """
-        self._validate_adapter_name(adapter)
-        path = self._registry_path / "pending" / f"{adapter}.yaml"
-        if not path.exists():
-            return None
-        try:
-            return _load_manifest(path)
-        except CorruptedManifestError:
-            self._lg.warning(
-                "corrupted manifest, treating as non-existent", extra={"path": str(path)}
-            )
-            return None
+        return self._storage.get_pending_manifest(adapter)
 
     def remove_pending(self, adapter: str) -> None:
         """Remove a manifest from the pending queue.
@@ -274,11 +251,7 @@ class Client:
             FileNotFoundError: If manifest not in queue.
             ValueError: If adapter name contains path traversal characters.
         """
-        self._validate_adapter_name(adapter)
-        pending_path = self._registry_path / "pending" / f"{adapter}.yaml"
-        if not pending_path.exists():
-            raise FileNotFoundError(f"Manifest not in queue: {adapter}")
-        pending_path.unlink()
+        self._storage.remove_pending_manifest(adapter)
         self._lg.info("removed from queue", extra={"adapter": adapter})
 
     def find_adapter(self, md5: str) -> Adapter | None:
@@ -292,15 +265,10 @@ class Client:
         Returns:
             Adapter if found, None otherwise.
         """
-        for path in self.list_completed():
-            try:
-                manifest = _load_manifest(path)
-            except CorruptedManifestError:
-                self._lg.warning("corrupted manifest, skipping", extra={"path": str(path)})
-                continue
-            if manifest.output and manifest.output.adapter and manifest.output.adapter.md5 == md5:
-                adapter: Adapter = manifest.output.adapter
-                return adapter
+        manifest = self._storage.find_adapter_by_md5(md5)
+        if manifest and manifest.output and manifest.output.adapter:
+            adapter: Adapter = manifest.output.adapter
+            return adapter
         return None
 
     def get_latest_completed(
@@ -316,12 +284,7 @@ class Client:
             Most recent completed manifest matching filters, or None.
         """
         manifests: list[Manifest] = []
-        for path in self.list_completed():
-            try:
-                manifest = _load_manifest(path)
-            except CorruptedManifestError:
-                self._lg.warning("corrupted manifest, skipping", extra={"path": str(path)})
-                continue
+        for manifest in self.list_completed():
             if adapter and manifest.adapter != adapter:
                 continue
             if context_key and manifest.source.context_key != context_key:

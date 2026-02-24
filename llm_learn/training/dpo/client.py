@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING
 from appinfra import DotDict
 from appinfra.log import Logger
 
-from ..manifest.loader import resolve_data
-from ..manifest.schema import Manifest
+from ..manifest.schema import Manifest, get_deploy_setting
 from ..schema import RunResult
+from ..storage import Storage
 
 if TYPE_CHECKING:
     from ..lora.config import Config
@@ -38,16 +38,16 @@ class Client:
     def __init__(
         self,
         lg: Logger,
-        registry_path: Path,
+        storage: Storage,
     ) -> None:
         """Initialize DPO client.
 
         Args:
             lg: Logger instance.
-            registry_path: Base path for adapter registry.
+            storage: Storage instance for filesystem operations.
         """
         self._lg = lg
-        self._registry_path = Path(registry_path).expanduser()
+        self._storage = storage
         self._registry: AdapterRegistry | None = None
 
     @property
@@ -56,7 +56,7 @@ class Client:
         if self._registry is None:
             from ..lora.registry import AdapterRegistry
 
-            self._registry = AdapterRegistry(self._lg, self._registry_path)
+            self._registry = AdapterRegistry(self._lg, self._storage)
         return self._registry
 
     def _validate_parent(self, manifest: Manifest) -> None:
@@ -100,33 +100,10 @@ class Client:
             task_type=lora.get("task_type", defaults.task_type),
         )
 
-    def _prepare_training(
-        self, manifest: Manifest, output_dir: Path | None, manifest_path: Path | None = None
-    ) -> tuple[Path, Path]:
-        """Prepare training: resolve work dir and data path.
-
-        Cleans any existing work directory to ensure fresh training state.
-        Only auto-cleans registry work dirs, never user-provided output_dir.
-
-        Args:
-            manifest: Training manifest.
-            output_dir: User-provided output directory (not auto-cleaned).
-            manifest_path: Path to manifest file (for resolving relative external data paths).
-        """
-        import shutil
-
-        # Only auto-clean registry work dirs, never user-provided output_dir
-        if output_dir:
-            work_dir = output_dir
-            work_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            work_dir = self._registry_path / "work" / manifest.adapter
-            if work_dir.exists():
-                self._lg.info("cleaning previous work dir", extra={"path": str(work_dir)})
-                shutil.rmtree(work_dir)
-            work_dir.mkdir(parents=True, exist_ok=True)
-
-        data_path = resolve_data(manifest, work_dir, manifest_path)
+    def _prepare_training(self, manifest: Manifest) -> tuple[Path, Path]:
+        """Prepare training: resolve work dir and data path."""
+        work_dir = self._storage.create_work_area(manifest.adapter, clean=True)
+        data_path = self._storage.resolve_data_path(manifest, work_dir)
         self._lg.info("resolved data", extra={"path": str(data_path)})
 
         self._validate_parent(manifest)
@@ -203,30 +180,22 @@ class Client:
             result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=result.adapter.path)
 
         description = manifest.source.description or "DPO adapter"
+        deploy = get_deploy_setting(manifest)
         self.registry.register(
             training_result=result,
             key=manifest.adapter,
             description=description,
-            deploy=True,
+            deploy=deploy,
             overwrite=True,
         )
         self._lg.info("registered adapter", extra={"adapter": manifest.adapter})
 
-    def train(
-        self,
-        manifest: Manifest,
-        *,
-        output_dir: Path | None = None,
-        register: bool = True,
-        manifest_path: Path | None = None,
-    ) -> RunResult:
+    def train(self, manifest: Manifest, *, register: bool = True) -> RunResult:
         """Execute DPO training from a manifest.
 
         Args:
             manifest: Manifest with DPO configuration and data.
-            output_dir: Working directory for training. Defaults to registry/work.
             register: If True, register adapter to registry after training.
-            manifest_path: Path to manifest file (for resolving relative external data paths).
 
         Returns:
             RunResult with training metrics and adapter path.
@@ -240,34 +209,10 @@ class Client:
         if manifest.data.format == "inline":
             self._validate_records(manifest)
 
-        work_dir, data_path = self._prepare_training(manifest, output_dir, manifest_path)
+        work_dir, data_path = self._prepare_training(manifest)
         result = self._execute_dpo(manifest, work_dir, data_path)
 
         if register:
             self._register_adapter(result, manifest)
 
         return result
-
-    def train_from_path(
-        self,
-        manifest_path: Path,
-        *,
-        output_dir: Path | None = None,
-        register: bool = True,
-    ) -> RunResult:
-        """Execute DPO training from a manifest file.
-
-        Args:
-            manifest_path: Path to manifest YAML file.
-            output_dir: Working directory for training.
-            register: If True, register adapter after training.
-
-        Returns:
-            RunResult with training metrics and adapter path.
-        """
-        from ..manifest.loader import load_manifest
-
-        manifest = load_manifest(manifest_path)
-        return self.train(
-            manifest, output_dir=output_dir, register=register, manifest_path=manifest_path
-        )

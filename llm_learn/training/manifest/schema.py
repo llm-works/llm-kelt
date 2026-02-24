@@ -6,6 +6,8 @@ that specify everything needed to run a training job.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from appinfra import DotDict
 
 
@@ -34,6 +36,20 @@ class Data(DotDict):
     pass
 
 
+class Deployment(DotDict):
+    """Deployment configuration.
+
+    Controls how the trained adapter is deployed after training.
+
+    Fields:
+        policy: Deployment policy - "skip" (don't deploy), "add" (deploy as new
+            version keeping existing), or "replace" (deploy and remove existing).
+            Default is "replace".
+    """
+
+    pass
+
+
 class Manifest(DotDict):
     """Complete training manifest.
 
@@ -45,6 +61,7 @@ class Manifest(DotDict):
         adapter: Output adapter key (series name, e.g., "my-agent-sft").
         method: Training method ("dpo" or "sft").
         data: Training data specification (Data).
+        deployment: Deployment configuration (Deployment).
         version: Schema version for forward compatibility.
         created_at: When manifest was created (datetime).
         source: Provenance information (Source).
@@ -53,6 +70,29 @@ class Manifest(DotDict):
         training: Training config (num_epochs, learning_rate, requested_model, etc.).
         method_config: Method-specific configuration (beta for DPO, etc.).
         output: Training result, populated after completion (RunResult).
+        source_path: Path to manifest file (set during loading, used for resolving
+            relative external data paths). Not serialized.
     """
 
     pass
+
+
+def get_deploy_setting(manifest: Manifest) -> bool | Literal["add", "replace"]:
+    """Get deployment setting from manifest.
+
+    Args:
+        manifest: Training manifest.
+
+    Returns:
+        False if policy is "skip", otherwise "add" or "replace".
+
+    Raises:
+        ValueError: If policy is not a valid value ("skip", "add", "replace").
+    """
+    deployment = manifest.get("deployment") or {}
+    policy: str = deployment.get("policy", "replace")
+    if policy not in ("skip", "add", "replace"):
+        raise ValueError(f"Invalid deployment policy: {policy}")
+    if policy == "skip":
+        return False
+    return "add" if policy == "add" else "replace"

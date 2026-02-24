@@ -7,12 +7,13 @@ Provides file-based training workflow:
 
 from .client import Client
 from .errors import CorruptedManifestError, ManifestError
-from .schema import Data, Manifest, Source
+from .schema import Data, Deployment, Manifest, Source
 
 __all__ = [
     "Client",
     "CorruptedManifestError",
     "Data",
+    "Deployment",
     "Manifest",
     "ManifestError",
     "Source",

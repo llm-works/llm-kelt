@@ -14,6 +14,7 @@ from ...training.manifest.loader import load_manifest
 from ...training.profiles import build_training_config, get_registry_path, load_default_profile
 from ...training.runner import Runner
 from ...training.schema import Adapter
+from ...training.storage import FileStorage
 
 
 def _print_adapter_metadata(adapter_path: Path) -> None:
@@ -177,6 +178,17 @@ class ListTool(_ConfigMixin, Tool):
     def add_args(self, parser) -> None:
         parser.add_argument("--completed", "-c", action="store_true", help="Show completed")
 
+    def _list_manifests(self, manifests_dir: Path, completed: bool) -> list[Path]:
+        """List manifest files in directory."""
+        if not manifests_dir.exists():
+            return []
+        if completed:
+            # Completed manifests can be .yaml or .yaml.gz
+            return sorted(
+                list(manifests_dir.glob("*.yaml")) + list(manifests_dir.glob("*.yaml.gz"))
+            )
+        return sorted(manifests_dir.glob("*.yaml"))
+
     def run(self, **kwargs: Any) -> int:
         try:
             registry_path = self._registry_path()
@@ -185,8 +197,7 @@ class ListTool(_ConfigMixin, Tool):
             return 1
 
         subdir = "completed" if self.args.completed else "pending"
-        manifests_dir = registry_path / subdir
-        manifests = sorted(manifests_dir.glob("*.yaml")) if manifests_dir.exists() else []
+        manifests = self._list_manifests(registry_path / subdir, self.args.completed)
 
         if not manifests:
             print(f"No {subdir} manifests")
@@ -309,7 +320,8 @@ class RunTool(_ConfigMixin, Tool):
             return 0 if not self.args.manifest else 1
 
         try:
-            runner = Runner(self.lg, registry_path, model_locations=self._model_locations())
+            storage = FileStorage(self.lg, registry_path)
+            runner = Runner(self.lg, storage, model_locations=self._model_locations())
             result = runner.run(
                 manifest_path,
                 skip_registration=self.args.skip_register,
@@ -344,7 +356,8 @@ class AdaptersTool(_ConfigMixin, Tool):
 
     def run(self, **kwargs: Any) -> int:
         try:
-            registry = AdapterRegistry(self.lg, self._registry_path())
+            storage = FileStorage(self.lg, self._registry_path())
+            registry = AdapterRegistry(self.lg, storage)
         except ValueError as e:
             self.lg.error(str(e))
             return 1

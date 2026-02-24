@@ -7,8 +7,9 @@ Provides:
 - AdapterRegistry: Adapter registration with llm-infer
 """
 
+from ..schema import AdapterInfo
 from .config import Config
-from .registry import AdapterInfo, AdapterRegistry
+from .registry import AdapterRegistry
 
 __all__ = [
     "Config",

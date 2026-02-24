@@ -12,9 +12,10 @@ from appinfra.log import Logger
 from llm_infer import compute_adapter_metadata
 from llm_infer.models import ModelResolver
 
-from .manifest.loader import load_manifest, save_manifest, validate_manifest
+from .manifest.loader import load_manifest, validate_manifest
 from .manifest.schema import Manifest
 from .schema import Adapter, RunResult
+from .storage import Storage
 
 
 class Runner:
@@ -27,18 +28,18 @@ class Runner:
     def __init__(
         self,
         lg: Logger,
-        registry_path: Path,
+        storage: Storage,
         model_locations: list[Path] | None = None,
     ) -> None:
         """Initialize runner.
 
         Args:
             lg: Logger instance.
-            registry_path: Base path for adapter registry.
+            storage: Storage instance for filesystem operations.
             model_locations: Directories to search for models (for name resolution).
         """
         self._lg = lg
-        self._registry_path = Path(registry_path).expanduser()
+        self._storage = storage
         self._model_locations = model_locations or []
 
     def _resolve_model(self, model_name: str) -> str:
@@ -67,7 +68,7 @@ class Runner:
         if resolved_path is None:
             raise ValueError(f"Model not found: {model_name}")
 
-        self._lg.info("resolved model", extra={"name": model_name, "path": str(resolved_path)})
+        self._lg.info("resolved model", extra={"model": model_name, "path": str(resolved_path)})
         return str(resolved_path)
 
     def _enrich_adapter(self, result: RunResult) -> RunResult:
@@ -83,43 +84,24 @@ class Runner:
         )
         return result
 
-    def _save_completed(self, manifest: Manifest, manifest_path: Path) -> Path:
-        """Save manifest with output to completed directory (gzipped)."""
-        completed_dir = self._registry_path / "completed"
-        completed_dir.mkdir(parents=True, exist_ok=True)
+    def _save_completed(self, manifest: Manifest) -> None:
+        """Save manifest with output to completed storage."""
+        self._storage.complete_manifest(manifest)
+        self._lg.info("saved completed manifest", extra={"adapter": manifest.adapter})
 
-        md5 = (
-            manifest.output.adapter.md5
-            if manifest.output and manifest.output.adapter
-            else "unknown"
-        )
-        completed_path = completed_dir / f"{manifest.adapter}-{md5}.yaml.gz"
-
-        save_manifest(manifest, completed_path, compress=True)
-        self._lg.info("saved completed manifest", extra={"path": str(completed_path)})
-
-        if manifest_path.exists():
-            manifest_path.unlink()
-
-        return completed_path
-
-    def _dispatch_training(
-        self, manifest: Manifest, output_dir: Path | None, skip_registration: bool
-    ) -> RunResult:
+    def _dispatch_training(self, manifest: Manifest, skip_registration: bool) -> RunResult:
         """Dispatch to appropriate training client based on method."""
         if manifest.method == "dpo":
             from .dpo import Client as DpoClient
 
-            return DpoClient(self._lg, self._registry_path).train(
-                manifest, output_dir=output_dir, register=not skip_registration
+            return DpoClient(self._lg, self._storage).train(
+                manifest, register=not skip_registration
             )
 
         # Fall through to SFT (method already validated by validate_manifest)
         from .sft import Client as SftClient
 
-        return SftClient(self._lg, self._registry_path).train(
-            manifest, output_dir=output_dir, register=not skip_registration
-        )
+        return SftClient(self._lg, self._storage).train(manifest, register=not skip_registration)
 
     def _get_effective_model(self, manifest: Manifest, model_override: str | None) -> str:
         """Determine effective model from override or manifest.
@@ -149,7 +131,6 @@ class Runner:
     def run(
         self,
         manifest_path: Path,
-        output_dir: Path | None = None,
         skip_registration: bool = False,
         model_override: str | None = None,
     ) -> RunResult:
@@ -157,7 +138,6 @@ class Runner:
 
         Args:
             manifest_path: Path to manifest YAML file.
-            output_dir: Working directory for training.
             skip_registration: If True, don't register adapter to registry.
             model_override: Override manifest model (path, HF ID, or name to resolve).
 
@@ -175,9 +155,9 @@ class Runner:
         base_model = self._get_effective_model(manifest, model_override)
         manifest.training["base_model"] = base_model
 
-        result = self._dispatch_training(manifest, output_dir, skip_registration)
+        result = self._dispatch_training(manifest, skip_registration)
         result = self._enrich_adapter(result)
         manifest.output = result
 
-        self._save_completed(manifest, manifest_path)
+        self._save_completed(manifest)
         return result

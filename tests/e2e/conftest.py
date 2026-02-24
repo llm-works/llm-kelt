@@ -239,12 +239,12 @@ def adapter_lora_base_path(config) -> Path:
 
 @pytest.fixture
 def fast_lora_config():
-    """Minimal LoRA config for fast tests."""
+    """Minimal LoRA config for fast tests with low VRAM usage."""
     from llm_learn.training.lora import Config as LoraConfig
 
     return LoraConfig(
-        r=8,
-        lora_alpha=16,
+        r=4,  # Reduced from 8 to save VRAM
+        lora_alpha=8,  # Scale with r
         lora_dropout=0.0,
         target_modules=["q_proj", "v_proj"],
     )
@@ -252,18 +252,19 @@ def fast_lora_config():
 
 @pytest.fixture
 def fast_training_config():
-    """Minimal training config for fast tests."""
+    """Minimal training config for fast tests with low VRAM usage (~8GB)."""
     import torch
     from appinfra import DotDict
 
     return DotDict(
         num_epochs=1,
-        batch_size=2,
-        gradient_accumulation_steps=1,
-        max_seq_length=256,
+        batch_size=1,  # Reduced from 2 to save VRAM
+        gradient_accumulation_steps=2,  # Compensate for smaller batch
+        max_seq_length=128,  # Reduced from 256 to save VRAM
         logging_steps=1,
         save_steps=100,
         eval_split=0.0,
+        gradient_checkpointing=True,  # Trade compute for memory
         fp16=not torch.cuda.is_bf16_supported(),
         bf16=torch.cuda.is_bf16_supported(),
     )
