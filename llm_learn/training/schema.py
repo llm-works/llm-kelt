@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from appinfra import DataDotDict, DotDict, field
+from appinfra import DotDict, FieldDict, field
 
 
-class AdapterInfo(DataDotDict):
+class AdapterInfo(FieldDict):
     """Information about a registered adapter."""
 
     # Adapter key (unique identifier)
@@ -30,7 +30,7 @@ class AdapterInfo(DataDotDict):
     parent: str | None = None
 
 
-class SubmitResult(DataDotDict):
+class SubmitResult(FieldDict):
     """Result of submitting a manifest."""
 
     # Adapter key
@@ -59,7 +59,7 @@ TRAINING_DEFAULTS = DotDict(
 )
 
 
-class Adapter(DataDotDict):
+class Adapter(FieldDict):
     """Adapter identity."""
 
     # MD5 hash of weights (12 char hex) - THE unique version identifier
@@ -70,7 +70,7 @@ class Adapter(DataDotDict):
     path: str
 
 
-class RunResult(DataDotDict):
+class RunResult(FieldDict):
     """Result of a training run."""
 
     # "completed" or "failed"
