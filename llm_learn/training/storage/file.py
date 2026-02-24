@@ -255,7 +255,7 @@ class FileStorage(Storage):
         return AdapterInfo(
             key=key,
             version_id=version_id,
-            path=self.adapters_path / key / version_id,
+            path=str(self.adapters_path / key / version_id),
             description=config.get("description", ""),
             md5=adapter_md5,
             deployed=self.is_deployed(key, adapter_md5),
@@ -322,7 +322,7 @@ class FileStorage(Storage):
         return AdapterInfo(
             key=key,
             version_id=version_id,
-            path=adapter_path,
+            path=str(adapter_path),
             description=description,
             md5=md5,
             deployed=deployed,
@@ -356,7 +356,7 @@ class FileStorage(Storage):
         return AdapterInfo(
             key=key,
             version_id=version_id,
-            path=key_path / version_id,
+            path=str(key_path / version_id),
             description=config.get("description", ""),
             md5=adapter_md5,
             deployed=self.is_deployed(key, adapter_md5),
@@ -395,7 +395,7 @@ class FileStorage(Storage):
                 AdapterInfo(
                     key=key,
                     version_id=version_id,
-                    path=key_path / version_id,
+                    path=str(key_path / version_id),
                     description=config.get("description", ""),
                     md5=adapter_md5,
                     deployed=self.is_deployed(key, adapter_md5),

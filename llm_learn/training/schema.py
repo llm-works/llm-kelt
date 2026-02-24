@@ -7,7 +7,6 @@ Defaults are optimized for Qwen2.5-7B-Instruct with QLoRA.
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 
 from appinfra import DataDotDict, DotDict, field
 
@@ -18,7 +17,7 @@ class AdapterInfo(DataDotDict):
     # Adapter key (unique identifier)
     key: str
     # Path to adapter directory
-    path: Path
+    path: str
     # Version identifier (YYYYMMDD-HHMMSS-md5)
     version_id: str
     # MD5 hash of adapter weights
