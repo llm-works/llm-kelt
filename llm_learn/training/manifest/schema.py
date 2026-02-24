@@ -10,13 +10,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from appinfra import DataDotDict, DotDict, field
+from appinfra import DotDict, FieldDict, field
 
 if TYPE_CHECKING:
     from ..schema import Adapter, RunResult
 
 
-class Source(DataDotDict):
+class Source(FieldDict):
     """Provenance information for the manifest."""
 
     # Agent context key that created this manifest
@@ -25,7 +25,7 @@ class Source(DataDotDict):
     description: str | None = None
 
 
-class Data(DataDotDict):
+class Data(FieldDict):
     """Training data specification (inline or external file)."""
 
     # "inline" for embedded records, "external" for file path
@@ -36,14 +36,14 @@ class Data(DataDotDict):
     path: str | None = None
 
 
-class Deployment(DataDotDict):
+class Deployment(FieldDict):
     """Deployment configuration after training."""
 
     # "skip" (don't deploy), "add" (keep existing), or "replace" (remove existing)
     policy: Literal["skip", "add", "replace"] = "replace"
 
 
-class Manifest(DataDotDict):
+class Manifest(FieldDict):
     """Complete training manifest."""
 
     # Output adapter key (series name, e.g., "my-agent-sft")
