@@ -157,7 +157,7 @@ class TestDeploymentSchema:
     def test_empty_deployment(self):
         """Test creating empty deployment (uses default policy)."""
         deployment = Deployment()
-        assert deployment.get("policy") is None  # Not set, will default at runtime
+        assert deployment.policy == "replace"  # Default policy
 
     def test_deployment_with_policy(self):
         """Test creating deployment with explicit policy."""

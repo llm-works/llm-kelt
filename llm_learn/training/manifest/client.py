@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from appinfra import DotDict
 from appinfra.log import Logger
 
-from ..schema import Adapter
+from ..schema import Adapter, SubmitResult
 from ..storage import Storage
 from .loader import load_manifest as _load_manifest
 from .loader import save_manifest as _save_manifest
@@ -196,7 +196,7 @@ class Client:
         _save_manifest(manifest, path)
         self._lg.info("saved manifest", extra={"path": str(path)})
 
-    def submit(self, manifest: Manifest) -> None:
+    def submit(self, manifest: Manifest) -> SubmitResult:
         """Submit a manifest to the pending training queue.
 
         Saves the manifest to the registry's pending directory.
@@ -204,11 +204,15 @@ class Client:
         Args:
             manifest: Manifest to submit.
 
+        Returns:
+            SubmitResult with adapter key, timestamp, and storage location.
+
         Raises:
             ValueError: If manifest with same key already pending.
         """
-        self._storage.submit_manifest(manifest)
+        result = self._storage.submit_manifest(manifest)
         self._lg.info("submitted manifest", extra={"adapter": manifest.adapter})
+        return result
 
     def list_pending(self) -> list[Manifest]:
         """List manifests waiting for training.
@@ -287,7 +291,7 @@ class Client:
         for manifest in self.list_completed():
             if adapter and manifest.adapter != adapter:
                 continue
-            if context_key and manifest.source.context_key != context_key:
+            if context_key and (not manifest.source or manifest.source.context_key != context_key):
                 continue
             if manifest.output and manifest.output.status == "completed":
                 manifests.append(manifest)

@@ -17,7 +17,7 @@ from .lora import AdapterInfo, AdapterRegistry
 from .manifest import Client, Data, Manifest, Source
 from .profiles import build_training_config, get_registry_path, load_default_profile
 from .runner import Runner
-from .schema import TRAINING_DEFAULTS, Adapter, RunResult
+from .schema import TRAINING_DEFAULTS, Adapter, RunResult, SubmitResult
 from .sft import Client as SftClient
 
 __all__ = [
@@ -25,6 +25,7 @@ __all__ = [
     "TRAINING_DEFAULTS",
     "Adapter",
     "RunResult",
+    "SubmitResult",
     "build_training_config",
     "load_default_profile",
     "get_registry_path",

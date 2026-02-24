@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from ..manifest.schema import Manifest
-    from ..schema import AdapterInfo, RunResult
+    from ..schema import AdapterInfo, RunResult, SubmitResult
 
 
 class DupAdapterError(ValueError):
@@ -47,11 +47,14 @@ class Storage(ABC):
     # =========================================================================
 
     @abstractmethod
-    def submit_manifest(self, manifest: Manifest) -> None:
+    def submit_manifest(self, manifest: Manifest) -> SubmitResult:
         """Submit a manifest to the pending queue.
 
         Args:
             manifest: Manifest to submit.
+
+        Returns:
+            SubmitResult with adapter key, timestamp, and storage location.
 
         Raises:
             ValueError: If manifest with same adapter key already pending.
