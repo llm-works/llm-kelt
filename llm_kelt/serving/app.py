@@ -15,7 +15,7 @@ def create_server(
     host: str = "0.0.0.0",
     port: int = 8001,
 ) -> Server:
-    """Create server with learning-enhanced LLM proxy.
+    """Create server with kelt-enhanced LLM proxy.
 
     Args:
         kelt_client: Configured Client instance.
@@ -57,7 +57,7 @@ def create_server(
         .with_host(host)
         .with_port(port)
         .with_title("llm-kelt Proxy")
-        .with_description("OpenAI-compatible API with learning context injection")
+        .with_description("OpenAI-compatible API with kelt context injection")
         .with_version("0.1.0")
         .routes.with_router(router)
         .done()

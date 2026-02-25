@@ -49,7 +49,7 @@ DEFAULT_CONFIG_PATH = PROJECT_ROOT / "etc" / "llm-kelt.yaml"
 
 def _get_config_path() -> Path:
     """Get config path from env var or default."""
-    config_file = os.environ.get("LEARN_TEST_CONFIG_FILE")
+    config_file = os.environ.get("KELT_TEST_CONFIG_FILE")
     if config_file:
         return Path(config_file)
     return DEFAULT_CONFIG_PATH
@@ -140,7 +140,7 @@ def pytest_runtest_setup(item):
 
 @pytest.fixture(scope="session")
 def config():
-    """Load test configuration from LEARN_TEST_CONFIG_FILE or default."""
+    """Load test configuration from KELT_TEST_CONFIG_FILE or default."""
     return Config(str(_get_config_path()))
 
 

@@ -33,7 +33,7 @@ from llm_kelt.training.dpo import export_preferences
 # Sample content: (text, title)
 _SAMPLE_CONTENT = [
     (
-        "Machine learning is a subset of AI that enables systems to kelt "
+        "Machine learning is a subset of AI that enables systems to learn "
         "from data without being explicitly programmed.",
         "What is machine learning?",
     ),

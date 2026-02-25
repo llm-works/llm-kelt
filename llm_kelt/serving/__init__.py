@@ -1,6 +1,6 @@
 """Serving layer for llm-kelt proxy server.
 
-Provides an OpenAI-compatible API that injects learning context
+Provides an OpenAI-compatible API that injects kelt context
 (facts, directives, etc.) into LLM requests.
 """
 

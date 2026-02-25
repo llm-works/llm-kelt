@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Learning framework cli entry point."""
+"""Kelt framework CLI entry point."""
 
 import sys
 from pathlib import Path

@@ -8,7 +8,7 @@ This example demonstrates:
 
 Prerequisites:
     - PostgreSQL database with pgvector extension
-    - Config file at etc/llm-kelt.yaml (or set LEARN_CONFIG_FILE env var)
+    - Config file at etc/llm-kelt.yaml (or set KELT_CONFIG_FILE env var)
     - LLM backend configured (local or OpenAI)
 
 Usage:

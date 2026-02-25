@@ -9,7 +9,7 @@ def main() -> int:
     """Main entry point for the CLI."""
     app = (
         AppBuilder("llm-kelt")
-        .with_description("LLM learning framework - collect and manage LLM context")
+        .with_description("LLM kelt framework - collect and manage LLM context")
         .with_config_file("llm-kelt.yaml")
         .logging.with_level("info")
         .with_location(1)

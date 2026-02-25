@@ -1,4 +1,4 @@
-"""Proxy tool - manages the learning proxy server."""
+"""Proxy tool - manages the kelt proxy server."""
 
 from typing import Any
 

@@ -19,8 +19,8 @@ from appinfra.log import LogConfig, LoggerFactory  # noqa: E402
 from llm_kelt.core.models import Base  # noqa: E402
 
 # Load configuration
-config_path = os.environ.get("LEARN_CONFIG", str(project_root / "etc" / "infra.yaml"))
-db_key = os.environ.get("LEARN_DB_KEY", "main")
+config_path = os.environ.get("KELT_CONFIG", str(project_root / "etc" / "infra.yaml"))
+db_key = os.environ.get("KELT_DB_KEY", "main")
 
 app_config = Config(config_path)
 db_config = app_config.dbs[db_key]

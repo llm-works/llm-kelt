@@ -6,7 +6,7 @@ Tests that:
 2. Fact is stored
 3. AI response differs with vs without facts
 
-Requires local LLM (configured via LEARN_TEST_CONFIG_FILE).
+Requires local LLM (configured via KELT_TEST_CONFIG_FILE).
 """
 
 import pytest
