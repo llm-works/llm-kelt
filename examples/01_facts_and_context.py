@@ -8,7 +8,7 @@ This example demonstrates:
 
 Prerequisites:
     - PostgreSQL database with pgvector extension
-    - Config file at etc/llm-learn.yaml (or set LEARN_CONFIG_FILE env var)
+    - Config file at etc/llm-kelt.yaml (or set KELT_CONFIG_FILE env var)
     - LLM backend configured (local or OpenAI)
 
 Usage:
@@ -38,49 +38,49 @@ from _helpers import (
 )
 from llm_infer.client import Factory as LLMClientFactory
 
-from llm_learn import LearnClient, LearnClientFactory
-from llm_learn.inference import ContextBuilder, ContextQuery
+from llm_kelt import Client, ClientFactory
+from llm_kelt.inference import ContextBuilder, ContextQuery
 
 
-def setup_facts(learn: LearnClient):
+def setup_facts(kelt: Client):
     """Add sample facts for the demo."""
     print(f"\n{H2}▶ Adding Facts{RESET}")
 
     # Clear any existing facts for a clean demo
-    existing = learn.atomic.assertions.list_active()
+    existing = kelt.atomic.assertions.list_active()
     if existing:
         for fact in existing:
-            learn.atomic.assertions.deactivate(fact.id)
+            kelt.atomic.assertions.deactivate(fact.id)
         print(f"  {MUTED}Cleared {len(existing)} existing facts{RESET}")
 
     # Add facts with specific internal conventions
-    learn.atomic.assertions.add(
+    kelt.atomic.assertions.add(
         "Error responses must use format: {error_code: 'ERR-XXX', message: str, request_id: str}",
         category="api",
     )
-    learn.atomic.assertions.add(
+    kelt.atomic.assertions.add(
         "All error codes start with ERR- followed by 3 digits (e.g., ERR-401, ERR-500)",
         category="api",
     )
-    learn.atomic.assertions.add(
+    kelt.atomic.assertions.add(
         "Every response must include the X-Request-ID header for tracing", category="api"
     )
 
     print(f"  {OK}✓ Added 3 facts:{RESET}")
-    for fact in learn.atomic.assertions.list_active():
+    for fact in kelt.atomic.assertions.list_active():
         print(f"    {MUTED}id={fact.id}{RESET} {INFO}[{fact.category}]{RESET} {fact.content}")
 
     print(
-        f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(learn)} -c "SELECT id, category, content '
-        f"FROM memv1_facts WHERE context_key='{learn.context_key}' AND active=true;\""
+        f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(kelt)} -c "SELECT id, category, content '
+        f"FROM memv1_facts WHERE context_key='{kelt.context_key}' AND active=true;\""
     )
 
 
-def demo_context_builder(learn: LearnClient):
+def demo_context_builder(kelt: Client):
     """Demonstrate building system prompts with injected facts."""
     print(f"\n{H2}▶ Building System Prompts{RESET}")
 
-    context_builder = ContextBuilder(learn.atomic.assertions)
+    context_builder = ContextBuilder(kelt.atomic.assertions)
 
     base_prompt = "You are a coding assistant."
     system_prompt = context_builder.build_system_prompt(base_prompt)
@@ -114,7 +114,7 @@ async def demo_context_query(context_builder: ContextBuilder):
         from appinfra.config import Config
         from appinfra.log import LogConfig, LoggerFactory
 
-        config = Config("etc/llm-learn.yaml")
+        config = Config("etc/llm-kelt.yaml")
         lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
         llm_factory = LLMClientFactory(lg)
         llm_client = llm_factory.from_config(config.llm.to_dict())
@@ -157,15 +157,15 @@ async def demo_context_query(context_builder: ContextBuilder):
     except Exception as e:
         print(f"  {MUTED}[Skipped] No LLM backend: {type(e).__name__}{RESET}")
         print(
-            f"  {MUTED}Start llm-infer or configure OpenAI in etc/llm-learn.yaml to enable.{RESET}"
+            f"  {MUTED}Start llm-infer or configure OpenAI in etc/llm-kelt.yaml to enable.{RESET}"
         )
 
 
-def demo_fact_management(learn: LearnClient):
+def demo_fact_management(kelt: Client):
     """Demonstrate fact management operations."""
     print(f"\n{H2}▶ Fact Management{RESET}")
 
-    facts = learn.atomic.assertions.list_active()
+    facts = kelt.atomic.assertions.list_active()
     if not facts:
         print(f"  {MUTED}No facts to manage{RESET}")
         return
@@ -174,23 +174,23 @@ def demo_fact_management(learn: LearnClient):
     fact = facts[0]
     old_content = fact.content
     new_content = "Error codes use format ERR-XXX where XXX is a 3-digit number"
-    learn.atomic.assertions.update(fact.id, content=new_content)
+    kelt.atomic.assertions.update(fact.id, content=new_content)
     print(f"  {OK}✓ Updated{RESET} fact {MUTED}id={fact.id}{RESET}")
     print(f'    {MUTED}before:{RESET} "{old_content[:50]}{"..." if len(old_content) > 50 else ""}"')
     print(f'    {MUTED}after:{RESET}  "{new_content}"')
 
     # Get facts by category
-    api_facts = learn.atomic.assertions.list_active(category="api")
+    api_facts = kelt.atomic.assertions.list_active(category="api")
     print(f"  {INFO}ℹ{RESET} Facts in {INFO}'api'{RESET} category: {len(api_facts)}")
 
     # Deactivate a fact (soft delete)
-    learn.atomic.assertions.deactivate(fact.id)
+    kelt.atomic.assertions.deactivate(fact.id)
     print(
         f"  {WARN}⚠ Deactivated{RESET} fact {MUTED}id={fact.id}{RESET} (soft-delete, still in DB)"
     )
 
     # Get statistics
-    stats = learn.get_stats()
+    stats = kelt.get_stats()
     atomic_stats = stats["atomic"]
     print(
         f"  {INFO}ℹ{RESET} Context stats: assertions={atomic_stats['assertions']}, "
@@ -198,7 +198,7 @@ def demo_fact_management(learn: LearnClient):
     )
 
     print(
-        f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(learn)} -c "SELECT id, active, content '
+        f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(kelt)} -c "SELECT id, active, content '
         f'FROM memv1_facts WHERE id={fact.id};"'
     )
 
@@ -213,23 +213,23 @@ async def main():
     from appinfra.config import Config
     from appinfra.log import LogConfig, LoggerFactory
 
-    from llm_learn import ClientContext
+    from llm_kelt import ClientContext
 
-    config = Config("etc/llm-learn.yaml")
+    config = Config("etc/llm-kelt.yaml")
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
-    factory = LearnClientFactory(lg)
+    factory = ClientFactory(lg)
 
     # Create context for this example
     context_key = get_demo_context_key("example")
     context = ClientContext(context_key=context_key)
-    learn = factory.create_from_config(context=context, config=config)
+    kelt = factory.create_from_config(context=context, config=config)
     print(f"{MUTED}Using context_key={RESET}{INFO}{context_key}{RESET}")
 
     # Run demos
-    setup_facts(learn)
-    context_builder = demo_context_builder(learn)
+    setup_facts(kelt)
+    context_builder = demo_context_builder(kelt)
     await demo_context_query(context_builder)
-    demo_fact_management(learn)
+    demo_fact_management(kelt)
 
     print(f"\n{H1}{'━' * 50}{RESET}")
     print(f"{OK}✓ Done!{RESET} Next: {CMD}python examples/02_rag_retrieval.py{RESET}")

@@ -1,4 +1,4 @@
-"""Pytest fixtures for Learn framework tests."""
+"""Pytest fixtures for Kelt framework tests."""
 
 import os
 import socket
@@ -9,16 +9,16 @@ import pytest
 from appinfra.config import Config
 from appinfra.log import LogConfig, LoggerFactory
 
-from llm_learn.client import LearnClient
-from llm_learn.core.database import Database
-from llm_learn.core.models import Base
+from llm_kelt.client import Client
+from llm_kelt.core.database import Database
+from llm_kelt.core.models import Base
 
 # Import atomic memory models so they're registered with Base for migrations
-from llm_learn.memory.atomic import models as atomic_models  # noqa: F401
+from llm_kelt.memory.atomic import models as atomic_models  # noqa: F401
 
 # Import training models so they're registered with Base for migrations
-from llm_learn.training import dpo as training_dpo  # noqa: F401
-from llm_learn.training import sft as training_sft  # noqa: F401
+from llm_kelt.training import dpo as training_dpo  # noqa: F401
+from llm_kelt.training import sft as training_sft  # noqa: F401
 
 # Enable appinfra's schema isolation fixtures for parallel test execution
 pytest_plugins = ["appinfra.db.pg.testing"]
@@ -44,12 +44,12 @@ def pytest_cmdline_main(config):
 
 # Find project root and config paths
 PROJECT_ROOT = Path(__file__).parent.parent
-DEFAULT_CONFIG_PATH = PROJECT_ROOT / "etc" / "llm-learn.yaml"
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "etc" / "llm-kelt.yaml"
 
 
 def _get_config_path() -> Path:
     """Get config path from env var or default."""
-    config_file = os.environ.get("LEARN_TEST_CONFIG_FILE")
+    config_file = os.environ.get("KELT_TEST_CONFIG_FILE")
     if config_file:
         return Path(config_file)
     return DEFAULT_CONFIG_PATH
@@ -140,7 +140,7 @@ def pytest_runtest_setup(item):
 
 @pytest.fixture(scope="session")
 def config():
-    """Load test configuration from LEARN_TEST_CONFIG_FILE or default."""
+    """Load test configuration from KELT_TEST_CONFIG_FILE or default."""
     return Config(str(_get_config_path()))
 
 
@@ -219,12 +219,12 @@ def test_context(request):
 
 
 @pytest.fixture
-def learn_client(logger, database, test_context):
-    """Create LearnClient for testing, scoped to test context."""
-    from llm_learn import ClientContext
+def kelt_client(logger, database, test_context):
+    """Create Client for testing, scoped to test context."""
+    from llm_kelt import ClientContext
 
     context = ClientContext(context_key=test_context, schema_name=None)
-    return LearnClient(database=database, context=context, lg=logger)
+    return Client(database=database, context=context, lg=logger)
 
 
 @pytest.fixture
@@ -238,9 +238,9 @@ def clean_tables(database, test_context):
 
 
 @pytest.fixture
-def sample_content(learn_client, clean_tables):
+def sample_content(kelt_client, clean_tables):
     """Create sample content for testing."""
-    content_id = learn_client.content.create(
+    content_id = kelt_client.content.create(
         content_text="This is a test article about AI and machine learning.",
         source="test",
         external_id="test_001",
@@ -251,14 +251,14 @@ def sample_content(learn_client, clean_tables):
 
 
 @pytest.fixture
-def sample_feedback(learn_client, clean_tables):
+def sample_feedback(kelt_client, clean_tables):
     """Create sample feedback for testing."""
     # Create content first, then record feedback on it
-    content_id = learn_client.content.create(
+    content_id = kelt_client.content.create(
         content_text="Sample content for feedback",
         source="test",
     )
-    feedback_id = learn_client.atomic.feedback.record(
+    feedback_id = kelt_client.atomic.feedback.record(
         signal="positive",
         content_id=content_id,
         strength=0.9,

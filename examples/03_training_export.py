@@ -9,7 +9,7 @@ This example demonstrates:
 
 Prerequisites:
     - PostgreSQL database with pgvector extension
-    - Config file at etc/llm-learn.yaml
+    - Config file at etc/llm-kelt.yaml
 
 Usage:
     python examples/03_training_export.py
@@ -26,9 +26,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from _helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, psql_cmd
 
-from llm_learn import ClientContext, LearnClient, LearnClientFactory
-from llm_learn.training import ExportResult, export_feedback_classifier, export_feedback_sft
-from llm_learn.training.dpo import export_preferences
+from llm_kelt import Client, ClientContext, ClientFactory
+from llm_kelt.training import ExportResult, export_feedback_classifier, export_feedback_sft
+from llm_kelt.training.dpo import export_preferences
 
 # Sample content: (text, title)
 _SAMPLE_CONTENT = [
@@ -101,52 +101,52 @@ def print_export_result(result: ExportResult, show_content: bool = True):
                 print(f"      {MUTED}{display}{RESET}")
 
 
-def record_sample_data(learn: LearnClient):
+def record_sample_data(kelt: Client):
     """Record sample feedback and preferences for the demo."""
     print(f"\n{H2}▶ Recording Sample Data{RESET}")
 
     # Clear existing data for clean demo
-    from llm_learn.core.models import Content
-    from llm_learn.memory.atomic.models import Fact, FeedbackDetails, PreferenceDetails
+    from llm_kelt.core.models import Content
+    from llm_kelt.memory.atomic.models import Fact, FeedbackDetails, PreferenceDetails
 
-    with learn.database.session() as session:
+    with kelt.database.session() as session:
         session.query(FeedbackDetails).filter(
             FeedbackDetails.fact_id.in_(
-                session.query(Fact.id).filter_by(context_key=learn.context_key, type="feedback")
+                session.query(Fact.id).filter_by(context_key=kelt.context_key, type="feedback")
             )
         ).delete(synchronize_session=False)
         session.query(PreferenceDetails).filter(
             PreferenceDetails.fact_id.in_(
-                session.query(Fact.id).filter_by(context_key=learn.context_key, type="preference")
+                session.query(Fact.id).filter_by(context_key=kelt.context_key, type="preference")
             )
         ).delete(synchronize_session=False)
-        session.query(Fact).filter_by(context_key=learn.context_key).delete()
-        session.query(Content).filter_by(context_key=learn.context_key).delete()
+        session.query(Fact).filter_by(context_key=kelt.context_key).delete()
+        session.query(Content).filter_by(context_key=kelt.context_key).delete()
         session.commit()
     print(f"  {MUTED}Cleared existing data for clean demo{RESET}")
 
     # Create content and record feedback
     content_ids = []
     for text, title in _SAMPLE_CONTENT:
-        cid = learn.content.create(content_text=text, source="example", title=title)
+        cid = kelt.content.create(content_text=text, source="example", title=title)
         content_ids.append(cid)
 
     # Positive feedback for good responses
     for cid in content_ids[:4]:
-        learn.atomic.feedback.record(
+        kelt.atomic.feedback.record(
             signal="positive", content_id=cid, strength=0.9, tags=["clear", "concise"]
         )
 
     # Negative feedback for bad response
-    learn.atomic.feedback.record(
+    kelt.atomic.feedback.record(
         signal="negative", content_id=content_ids[4], strength=0.8, tags=["verbose", "unclear"]
     )
 
-    print(f"  {OK}✓ Recorded {learn.atomic.feedback.count()} feedback entries{RESET}")
+    print(f"  {OK}✓ Recorded {kelt.atomic.feedback.count()} feedback entries{RESET}")
 
     # Record preference pairs
     for context, chosen, rejected in _PREFERENCE_PAIRS:
-        learn.atomic.preferences.record(
+        kelt.atomic.preferences.record(
             context=context,
             chosen=chosen,
             rejected=rejected,
@@ -154,44 +154,44 @@ def record_sample_data(learn: LearnClient):
             margin=0.8,
         )
 
-    print(f"  {OK}✓ Recorded {learn.atomic.preferences.count()} preference pairs{RESET}")
+    print(f"  {OK}✓ Recorded {kelt.atomic.preferences.count()} preference pairs{RESET}")
 
     print(
-        f'\n  {CMD}▸ Verify feedback:{RESET} {psql_cmd(learn)} -c "SELECT f.id, d.signal, d.strength '
+        f'\n  {CMD}▸ Verify feedback:{RESET} {psql_cmd(kelt)} -c "SELECT f.id, d.signal, d.strength '
         f"FROM memv1_facts f JOIN memv1_feedback_details d ON f.id = d.fact_id "
-        f'WHERE f.context_key={learn.context_key} LIMIT 5;"'
+        f'WHERE f.context_key={kelt.context_key} LIMIT 5;"'
     )
     print(
-        f'  {CMD}▸ Verify preferences:{RESET} {psql_cmd(learn)} -c "SELECT f.id, f.category, d.margin '
+        f'  {CMD}▸ Verify preferences:{RESET} {psql_cmd(kelt)} -c "SELECT f.id, f.category, d.margin '
         f"FROM memv1_facts f JOIN memv1_preference_details d ON f.id = d.fact_id "
-        f'WHERE f.context_key={learn.context_key} LIMIT 5;"'
+        f'WHERE f.context_key={kelt.context_key} LIMIT 5;"'
     )
 
 
-def demo_dpo_export(output_dir: Path, learn: LearnClient):
+def demo_dpo_export(output_dir: Path, kelt: Client):
     """Export to DPO format."""
     print(f"\n{H2}▶ DPO Export{RESET}")
     print(f"  {MUTED}Format: {{prompt, chosen, rejected}}{RESET}")
     print(f"  {MUTED}Use case: TRL DPOTrainer for preference alignment{RESET}")
 
     result = export_preferences(
-        session_factory=learn.database.session,
-        context_key=learn.context_key,
+        session_factory=kelt.database.session,
+        context_key=kelt.context_key,
         output_path=output_dir / "preferences_dpo.jsonl",
         category="ml_explanations",
     )
     print_export_result(result)
 
 
-def demo_sft_export(output_dir: Path, learn: LearnClient):
+def demo_sft_export(output_dir: Path, kelt: Client):
     """Export to SFT format."""
     print(f"\n{H2}▶ SFT Export{RESET}")
     print(f"  {MUTED}Format: {{instruction, output}} (Alpaca format){RESET}")
     print(f"  {MUTED}Use case: Supervised fine-tuning on positive examples{RESET}")
 
     result = export_feedback_sft(
-        session_factory=learn.database.session,
-        context_key=learn.context_key,
+        session_factory=kelt.database.session,
+        context_key=kelt.context_key,
         output_path=output_dir / "feedback_sft.jsonl",
         signal="positive",
         min_strength=0.5,
@@ -201,8 +201,8 @@ def demo_sft_export(output_dir: Path, learn: LearnClient):
     # SFT with context
     print(f"\n  {INFO}With context (includes input field):{RESET}")
     result_ctx = export_feedback_sft(
-        session_factory=learn.database.session,
-        context_key=learn.context_key,
+        session_factory=kelt.database.session,
+        context_key=kelt.context_key,
         output_path=output_dir / "feedback_sft_context.jsonl",
         signal="positive",
         include_context=True,
@@ -210,30 +210,30 @@ def demo_sft_export(output_dir: Path, learn: LearnClient):
     print_export_result(result_ctx)
 
 
-def demo_classifier_export(output_dir: Path, learn: LearnClient):
+def demo_classifier_export(output_dir: Path, kelt: Client):
     """Export to classifier format."""
     print(f"\n{H2}▶ Classifier Export{RESET}")
     print(f"  {MUTED}Format: {{text, label}}{RESET}")
     print(f"  {MUTED}Use case: Binary quality classifier (good/bad responses){RESET}")
 
     result = export_feedback_classifier(
-        session_factory=learn.database.session,
-        context_key=learn.context_key,
+        session_factory=kelt.database.session,
+        context_key=kelt.context_key,
         output_path=output_dir / "feedback_classifier.jsonl",
         min_strength=0.5,
     )
     print_export_result(result)
 
 
-def demo_filtered_export(output_dir: Path, learn: LearnClient):
+def demo_filtered_export(output_dir: Path, kelt: Client):
     """Export with time filters."""
     print(f"\n{H2}▶ Filtered Export{RESET}")
     print(f"  {MUTED}Filter exports by time range{RESET}")
 
     since = datetime.now(UTC) - timedelta(hours=1)
     result = export_preferences(
-        session_factory=learn.database.session,
-        context_key=learn.context_key,
+        session_factory=kelt.database.session,
+        context_key=kelt.context_key,
         output_path=output_dir / "recent_preferences.jsonl",
         since=since,
     )
@@ -269,23 +269,23 @@ def main():
     print(f"{H1}{'━' * 50}{RESET}")
 
     # Setup config, logger, and database
-    config = Config("etc/llm-learn.yaml")
+    config = Config("etc/llm-kelt.yaml")
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
 
-    # Create LearnClient using factory
+    # Create Client using factory
     context = ClientContext(context_key="demo:example")
-    factory = LearnClientFactory(lg)
-    learn = factory.create_from_config(context=context, config=config)
-    print(f"{MUTED}Using context_key={RESET}{INFO}{learn.context_key}{RESET}")
+    factory = ClientFactory(lg)
+    kelt = factory.create_from_config(context=context, config=config)
+    print(f"{MUTED}Using context_key={RESET}{INFO}{kelt.context_key}{RESET}")
 
-    record_sample_data(learn)
+    record_sample_data(kelt)
 
     with TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
-        demo_dpo_export(output_dir, learn)
-        demo_sft_export(output_dir, learn)
-        demo_classifier_export(output_dir, learn)
-        demo_filtered_export(output_dir, learn)
+        demo_dpo_export(output_dir, kelt)
+        demo_sft_export(output_dir, kelt)
+        demo_classifier_export(output_dir, kelt)
+        demo_filtered_export(output_dir, kelt)
 
     print_summary()
 

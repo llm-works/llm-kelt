@@ -1,6 +1,6 @@
 # Glossary
 
-Quick definitions of terms used in llm-learn.
+Quick definitions of terms used in llm-kelt.
 
 ---
 

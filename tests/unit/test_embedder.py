@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from llm_learn.inference.embedder import Embedder, EmbeddingResult
+from llm_kelt.inference.embedder import Embedder, EmbeddingResult
 
 
 class TestEmbeddingResult:

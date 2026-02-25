@@ -6,22 +6,22 @@ Tests that:
 2. Fact is stored
 3. AI response differs with vs without facts
 
-Requires local LLM (configured via LEARN_TEST_CONFIG_FILE).
+Requires local LLM (configured via KELT_TEST_CONFIG_FILE).
 """
 
 import pytest
 
-from llm_learn.client import LearnClient
-from llm_learn.inference.context import ContextBuilder
+from llm_kelt.client import Client
+from llm_kelt.inference.context import ContextBuilder
 
 
 @pytest.fixture
-def facts_learn_client(logger, database, test_context):
-    """Create LearnClient for facts testing."""
-    from llm_learn import ClientContext
+def facts_kelt_client(logger, database, test_context):
+    """Create Client for facts testing."""
+    from llm_kelt import ClientContext
 
     context = ClientContext(context_key=test_context, schema_name=None)
-    return LearnClient(database=database, context=context, lg=logger)
+    return Client(database=database, context=context, lg=logger)
 
 
 @pytest.mark.llm
@@ -29,7 +29,7 @@ class TestFactsEndToEnd:
     """End-to-end tests for fact memorization affecting LLM responses."""
 
     @pytest.mark.asyncio
-    async def test_fact_affects_response(self, facts_learn_client, llm_client, clean_tables):
+    async def test_fact_affects_response(self, facts_kelt_client, llm_client, clean_tables):
         """
         Test that adding a fact about preferences changes the LLM response.
 
@@ -51,17 +51,17 @@ class TestFactsEndToEnd:
         ).content
 
         # Step 2: Add facts about preferences
-        facts_learn_client.atomic.assertions.add(
+        facts_kelt_client.atomic.assertions.add(
             "Preferred programming language: Python",
             category="preferences",
         )
-        facts_learn_client.atomic.assertions.add(
+        facts_kelt_client.atomic.assertions.add(
             "Prefers Python frameworks like FastAPI and Django",
             category="preferences",
         )
 
         # Step 3: Build system prompt WITH facts
-        context_builder = ContextBuilder(facts_learn_client.atomic.assertions)
+        context_builder = ContextBuilder(facts_kelt_client.atomic.assertions)
         prompt_with_facts = context_builder.build_system_prompt(base_prompt)
 
         # Verify facts are in the prompt
@@ -106,28 +106,28 @@ class TestFactsEndToEnd:
 
     @pytest.mark.asyncio
     async def test_fact_categories_affect_response(
-        self, facts_learn_client, llm_client, clean_tables
+        self, facts_kelt_client, llm_client, clean_tables
     ):
         """Test that different fact categories can be selectively included."""
         base_prompt = "You are a helpful assistant."
         question = "How should I approach learning a new technology?"
 
         # Add facts in different categories
-        facts_learn_client.atomic.assertions.add(
+        facts_kelt_client.atomic.assertions.add(
             "Learning style: hands-on projects",
             category="preferences",
         )
-        facts_learn_client.atomic.assertions.add(
+        facts_kelt_client.atomic.assertions.add(
             "Prefers short focused learning sessions",
             category="context",
         )
-        facts_learn_client.atomic.assertions.add(
+        facts_kelt_client.atomic.assertions.add(
             "Always suggest practical examples over theory",
             category="rules",
         )
 
         # Build prompt with only preferences
-        context_builder = ContextBuilder(facts_learn_client.atomic.assertions)
+        context_builder = ContextBuilder(facts_kelt_client.atomic.assertions)
         prompt_prefs_only = context_builder.build_system_prompt(
             base_prompt,
             categories=["preferences"],
@@ -182,23 +182,23 @@ class TestFactsEndToEnd:
         )
 
     @pytest.mark.asyncio
-    async def test_deactivated_fact_not_used(self, facts_learn_client, llm_client, clean_tables):
+    async def test_deactivated_fact_not_used(self, facts_kelt_client, llm_client, clean_tables):
         """Test that deactivated facts are not included in prompts."""
         # Add and then deactivate a fact
-        fact_id = facts_learn_client.atomic.assertions.add(
+        fact_id = facts_kelt_client.atomic.assertions.add(
             "Output format: XML only",
             category="preferences",
         )
-        facts_learn_client.atomic.assertions.deactivate(fact_id)
+        facts_kelt_client.atomic.assertions.deactivate(fact_id)
 
         # Add an active fact
-        facts_learn_client.atomic.assertions.add(
+        facts_kelt_client.atomic.assertions.add(
             "Output format: JSON preferred",
             category="preferences",
         )
 
         # Build prompt
-        context_builder = ContextBuilder(facts_learn_client.atomic.assertions)
+        context_builder = ContextBuilder(facts_kelt_client.atomic.assertions)
         prompt = context_builder.build_system_prompt("You are a helpful assistant.")
 
         # Deactivated fact should not be in prompt

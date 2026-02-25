@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from llm_infer.client import ChatResponse
 
-from llm_learn.core.types import ScoredEntity
-from llm_learn.inference.embedder import EmbeddingResult
-from llm_learn.inference.query import ContextQuery, Conversation, RAGArgs
-from llm_learn.memory.atomic import Fact
+from llm_kelt.core.types import ScoredEntity
+from llm_kelt.inference.embedder import EmbeddingResult
+from llm_kelt.inference.query import ContextQuery, Conversation, RAGArgs
+from llm_kelt.memory.atomic import Fact
 
 
 class TestRAGArgs:
@@ -550,7 +550,7 @@ class TestBuildSystemPromptFromFacts:
 
     def test_builds_prompt_with_facts(self, mock_facts_client, sample_facts):
         """Test building prompt from provided facts."""
-        from llm_learn.inference.context import ContextBuilder
+        from llm_kelt.inference.context import ContextBuilder
 
         builder = ContextBuilder(mock_facts_client)
         result = builder.build_system_prompt_from_facts(
@@ -565,7 +565,7 @@ class TestBuildSystemPromptFromFacts:
 
     def test_builds_prompt_with_empty_facts(self, mock_facts_client):
         """Test building prompt with no facts returns base prompt."""
-        from llm_learn.inference.context import ContextBuilder
+        from llm_kelt.inference.context import ContextBuilder
 
         builder = ContextBuilder(mock_facts_client)
         result = builder.build_system_prompt_from_facts(
@@ -577,7 +577,7 @@ class TestBuildSystemPromptFromFacts:
 
     def test_builds_prompt_prepend(self, mock_facts_client):
         """Test prepending facts to prompt."""
-        from llm_learn.inference.context import ContextBuilder
+        from llm_kelt.inference.context import ContextBuilder
 
         fact = Fact(
             id=1,
@@ -603,7 +603,7 @@ class TestBuildSystemPromptFromFacts:
 
     def test_groups_facts_by_category(self, mock_facts_client):
         """Test facts are grouped by category."""
-        from llm_learn.inference.context import ContextBuilder
+        from llm_kelt.inference.context import ContextBuilder
 
         facts = [
             Fact(

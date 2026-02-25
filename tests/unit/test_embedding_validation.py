@@ -2,8 +2,8 @@
 
 import pytest
 
-from llm_learn.core.embedding import _validate_embedding
-from llm_learn.core.exceptions import ValidationError
+from llm_kelt.core.embedding import _validate_embedding
+from llm_kelt.core.exceptions import ValidationError
 
 
 class TestValidateEmbedding:

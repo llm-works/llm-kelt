@@ -167,7 +167,7 @@ def _strip_quantization_suffix(model_name: str) -> str:
 
 @pytest.fixture(scope="session")
 def model_resolver(logger, config):
-    """Model resolver using llm-learn.yaml models config."""
+    """Model resolver using llm-kelt.yaml models config."""
     from llm_infer.models import ModelResolver
 
     # Extract paths from locations config (handles both dict and string formats)
@@ -240,7 +240,7 @@ def adapter_lora_base_path(config) -> Path:
 @pytest.fixture
 def fast_lora_config():
     """Minimal LoRA config for fast tests with low VRAM usage."""
-    from llm_learn.training.lora import Config as LoraConfig
+    from llm_kelt.training.lora import Config as LoraConfig
 
     return LoraConfig(
         r=4,  # Reduced from 8 to save VRAM

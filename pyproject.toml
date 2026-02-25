@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel", "setuptools-scm>=8.0,<9.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llm-learn"
+name = "llm-kelt"
 dynamic = ["version"]
 description = "Framework for collecting and managing LLM context"
 license = {text = "Apache-2.0"}
@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.scripts]
-llm-learn = "llm_learn.cli:main"
+llm-kelt = "llm_kelt.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -69,7 +69,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["llm_learn"]
+known-first-party = ["llm_kelt"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -101,7 +101,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["llm_learn"]
+source = ["llm_kelt"]
 omit = ["*/test/*", "*/tests/*", "*_test.py"]
 
 [tool.coverage.report]
@@ -114,7 +114,7 @@ exclude_lines = [
 ]
 
 [tool.setuptools.package-data]
-llm_learn = [
+llm_kelt = [
     "py.typed",
     "migrations/alembic.ini",
     "migrations/env.py",
@@ -124,7 +124,7 @@ llm_learn = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["llm_learn*"]
+include = ["llm_kelt*"]
 exclude = ["tests*", "docs*", "etc*"]
 
 [tool.setuptools_scm]

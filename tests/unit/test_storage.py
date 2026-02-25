@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from appinfra.log import LogConfig, LoggerFactory
 
-from llm_learn.training.storage import FileStorage
+from llm_kelt.training.storage import FileStorage
 
 
 @pytest.fixture
@@ -696,7 +696,7 @@ class TestDataFileOperations:
 
     def test_resolve_data_path_inline(self, storage: FileStorage, tmp_path: Path):
         """Test resolve_data_path writes inline data to work_dir."""
-        from llm_learn.training.manifest.schema import Data, Manifest
+        from llm_kelt.training.manifest.schema import Data, Manifest
 
         manifest = Manifest(
             adapter="test-adapter",
@@ -714,7 +714,7 @@ class TestDataFileOperations:
 
     def test_resolve_data_path_external_absolute(self, storage: FileStorage, tmp_path: Path):
         """Test resolve_data_path with absolute external path."""
-        from llm_learn.training.manifest.schema import Data, Manifest
+        from llm_kelt.training.manifest.schema import Data, Manifest
 
         data_file = tmp_path / "data.jsonl"
         data_file.write_text('{"prompt": "test", "completion": "ok"}\n')
@@ -735,7 +735,7 @@ class TestDataFileOperations:
         self, storage: FileStorage, tmp_path: Path
     ):
         """Test resolve_data_path resolves relative paths against manifest source_path."""
-        from llm_learn.training.manifest.schema import Data, Manifest
+        from llm_kelt.training.manifest.schema import Data, Manifest
 
         # Create manifest dir and data file
         manifest_dir = tmp_path / "manifests"
@@ -760,7 +760,7 @@ class TestDataFileOperations:
         self, storage: FileStorage, tmp_path: Path
     ):
         """Test resolve_data_path falls back to work_dir for relative paths without source_path."""
-        from llm_learn.training.manifest.schema import Data, Manifest
+        from llm_kelt.training.manifest.schema import Data, Manifest
 
         work_dir = tmp_path / "work"
         work_dir.mkdir()
@@ -780,7 +780,7 @@ class TestDataFileOperations:
 
     def test_resolve_data_path_external_not_found(self, storage: FileStorage, tmp_path: Path):
         """Test resolve_data_path raises for non-existent external file."""
-        from llm_learn.training.manifest.schema import Data, Manifest
+        from llm_kelt.training.manifest.schema import Data, Manifest
 
         manifest = Manifest(
             adapter="test-adapter",

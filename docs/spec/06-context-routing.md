@@ -1,6 +1,6 @@
 # Context Routing
 
-How learn provides primitives for context selection, and the protocols agent implements.
+How kelt provides primitives for context selection, and the protocols agent implements.
 
 ## Problem
 
@@ -17,19 +17,19 @@ We need intelligent selection: given a query, which facts are relevant?
 
 | Layer | Responsibility |
 |-------|---------------|
-| **learn** | Vector search primitives, candidate retrieval, protocol definitions |
+| **kelt** | Vector search primitives, candidate retrieval, protocol definitions |
 | **agent** | Selection logic (rules, scoring, LLM-based selection) |
 
-learn provides the **what** (candidates, data types). Agent provides the **how** (selection logic).
+kelt provides the **what** (candidates, data types). Agent provides the **how** (selection logic).
 
 ---
 
-## Learn Provides: Primitives
+## Kelt Provides: Primitives
 
 ### Vector Search
 
 ```python
-# learn/collection/content.py
+# kelt/collection/content.py
 class ContentClient:
     async def search_similar(
         self,
@@ -54,7 +54,7 @@ class ContentClient:
 ### Fact Retrieval
 
 ```python
-# learn/collection/facts.py
+# kelt/collection/facts.py
 class FactsClient:
     async def list_by_category(
         self,
@@ -85,10 +85,10 @@ CREATE INDEX idx_facts_embedding ON facts USING ivfflat (embedding vector_cosine
 
 ---
 
-## Learn Defines: Data Types
+## Kelt Defines: Data Types
 
 ```python
-# learn/adaptation/types.py
+# kelt/adaptation/types.py
 
 @dataclass
 class ScoredFact:
@@ -109,14 +109,14 @@ class SelectionResult:
 
 ---
 
-## Learn Defines: Protocols
+## Kelt Defines: Protocols
 
 Agent must implement these protocols to participate in the pipeline.
 
 ### ContextSelector Protocol
 
 ```python
-# learn/adaptation/protocols.py
+# kelt/adaptation/protocols.py
 
 from typing import Protocol, runtime_checkable
 
@@ -126,7 +126,7 @@ class ContextSelector(Protocol):
     Select relevant context for a query.
 
     Agent implements this with rules, embeddings, LLM, or hybrid approaches.
-    Learn's pipeline calls this during adaptation.
+    Kelt's pipeline calls this during adaptation.
     """
 
     async def select(
@@ -140,7 +140,7 @@ class ContextSelector(Protocol):
 
         Args:
             query: The user's query
-            candidates: Pre-filtered candidates from learn's vector search
+            candidates: Pre-filtered candidates from kelt's vector search
             max_facts: Maximum facts to return
 
         Returns:
@@ -349,7 +349,7 @@ class HybridSelector(ContextSelector):
 ┌─────────────────────────────────────────────────────────────────┐
 │                  Tier 2: Embedding Retrieval                     │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │ • Check similarity scores from learn's vector search      │  │
+│  │ • Check similarity scores from kelt's vector search      │  │
 │  │ • High confidence if top results clearly separate         │  │
 │  │ • Return top-k if confident                               │  │
 │  └───────────────────────────────────────────────────────────┘  │
@@ -371,24 +371,24 @@ class HybridSelector(ContextSelector):
 
 ## Pipeline Integration
 
-Learn's pipeline uses the agent-provided selector:
+Kelt's pipeline uses the agent-provided selector:
 
 ```python
-# learn/adaptation/pipeline.py
+# kelt/adaptation/pipeline.py
 
 class AdaptationPipeline:
     def __init__(
         self,
-        learn_client: LearnClient,
+        kelt_client: Client,
         context_selector: ContextSelector,  # Agent provides this
         ...
     ):
-        self.learn = learn_client
+        self.kelt = kelt_client
         self.selector = context_selector
 
     async def process(self, query: str, messages: list, system: str | None) -> PipelineResult:
-        # Step 1: Learn retrieves candidates
-        candidates = await self.learn.content.search_similar(
+        # Step 1: Kelt retrieves candidates
+        candidates = await self.kelt.content.search_similar(
             query,
             top_k=self.config.candidate_limit,
         )
@@ -396,8 +396,8 @@ class AdaptationPipeline:
         # Step 2: Agent selects from candidates
         selection = await self.selector.select(query, candidates)
 
-        # Step 3: Build context string (learn)
-        context_str = self.learn.build_context([f.id for f in selection.facts])
+        # Step 3: Build context string (kelt)
+        context_str = self.kelt.build_context([f.id for f in selection.facts])
 
         # ... continue pipeline
 ```
@@ -464,7 +464,7 @@ context_selection:
 
 ## Feedback Tracking (Optional)
 
-Learn can optionally store routing decisions for analysis:
+Kelt can optionally store routing decisions for analysis:
 
 ```sql
 -- Optional: Track routing decisions for learning
@@ -496,7 +496,7 @@ Agent can use this data to improve selection over time.
 ## Configuration
 
 ```yaml
-# llm-learn.yaml - learn's config
+# llm-kelt.yaml - kelt's config
 adaptation:
   candidate_limit: 30           # Max candidates from vector search
   min_similarity: 0.5           # Minimum embedding similarity
@@ -519,13 +519,13 @@ context_selection:
 
 | Component | Owner | Responsibility |
 |-----------|-------|---------------|
-| Vector search | learn | Retrieve candidates by embedding similarity |
-| Fact retrieval | learn | List facts by category/confidence |
-| `ContextSelector` protocol | learn | Define what agent must implement |
-| `SelectionResult` type | learn | Standardized result format |
+| Vector search | kelt | Retrieve candidates by embedding similarity |
+| Fact retrieval | kelt | List facts by category/confidence |
+| `ContextSelector` protocol | kelt | Define what agent must implement |
+| `SelectionResult` type | kelt | Standardized result format |
 | Rule-based selection | agent | Fast selection via rules |
 | LLM-based selection | agent | Accurate selection via model |
 | Hybrid selection | agent | Tiered approach (rules → embeddings → LLM) |
 | Routing cache | agent | Optional caching of decisions |
 
-Learn provides the primitives and protocols. Agent provides the intelligence.
+Kelt provides the primitives and protocols. Agent provides the intelligence.

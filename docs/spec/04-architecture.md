@@ -4,7 +4,7 @@
 
 ```
 +------------------------------------------------------------------+
-|                         LearnClient                               |
+|                         Client                               |
 |              (Profile-scoped API entry point)                     |
 +------------------------------------------------------------------+
          |                    |                    |
@@ -36,17 +36,24 @@
 
 ## Component Responsibilities
 
-### LearnClient
+### Client
 
 Main entry point, scoped to a context. Provides unified access to all collection APIs.
 
 ```python
-from llm_learn import LearnClient
+from appinfra.config import Config
+from appinfra.log import LogConfig, LoggerFactory
+from llm_kelt import ClientContext, ClientFactory
 
-learn = LearnClient(context_key="default")
-learn.facts.add("Prefers concise output", category="preferences")
-learn.feedback.record(content_text="...", signal="positive")
-learn.preferences.record(context="...", chosen="...", rejected="...")
+config = Config("etc/llm-kelt.yaml")
+lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
+factory = ClientFactory(lg)
+context = ClientContext(context_key="default")
+kelt = factory.create_from_config(context=context, config=config)
+
+kelt.atomic.assertions.add("Prefers concise output", category="preferences")
+kelt.atomic.feedback.record(content_text="...", signal="positive")
+kelt.atomic.preferences.record(context="...", chosen="...", rejected="...")
 ```
 
 ### Collection Module
@@ -75,10 +82,10 @@ For LLM client functionality, use `llm_infer.client.LLMClient` directly.
 
 ```python
 from llm_infer.client import LLMClient
-from llm_learn.inference import ContextBuilder
+from llm_kelt.inference import ContextBuilder
 
 client = LLMClient.from_config(config["llm"])
-context = ContextBuilder(learn.facts)
+context = ContextBuilder(kelt.facts)
 system = context.build_system_prompt("You are a helpful assistant.")
 response = await client.chat_async(messages, system=system)
 ```
@@ -88,13 +95,14 @@ response = await client.chat_async(messages, system=system)
 OpenAI-compatible proxy server that injects facts into requests:
 
 ```python
-from llm_learn.serving import create_server
+from llm_kelt import ClientContext, ClientFactory
+from llm_kelt.serving import create_server
 
-server = create_server(
-    llm_config=config["llm"],
-    database=db,
-    context_key="default",
-)
+factory = ClientFactory(lg)
+context = ClientContext(context_key="default")
+kelt = factory.create_from_config(context=context, config=config)
+
+server = create_server(kelt)
 server.start()  # Serves on :8001
 ```
 
@@ -122,7 +130,7 @@ Client Request
        |
        v
 +-------------+     get facts     +-------------+
-|   SERVING   | ----------------> |    LEARN    |
+|   SERVING   | ----------------> |    KELT     |
 |   (Proxy)   |                   |   (Facts)   |
 +-------------+                   +-------------+
        |
@@ -144,7 +152,7 @@ User provides feedback
        |
        v
 +-------------+
-|    LEARN    |
+|    KELT     |
 |  (Feedback) |
 +-------------+
        |
@@ -160,11 +168,11 @@ User provides feedback
 
 ```
 +-------------+
-|    LEARN    |
+|    KELT     |
 +-------------+
        |
-       | learn.feedback.export_jsonl("feedback.jsonl")
-       | learn.preferences.export_jsonl("prefs.jsonl")
+       | kelt.feedback.export_jsonl("feedback.jsonl")
+       | kelt.preferences.export_jsonl("prefs.jsonl")
        v
 +-------------+
 |    JSONL    |  --> External training (LoRA, classifiers)
@@ -176,11 +184,21 @@ User provides feedback
 
 ## Interface Definitions
 
-### LearnClient API
+### Client API
 
 ```python
-class LearnClient:
-    def __init__(self, context_key: str, database: Database | None = None): ...
+class Client:
+    def __init__(
+        self,
+        lg: Logger,
+        database: Database,
+        context: ClientContext,
+        embedder: Embedder | None = None,
+        llm_client: ChatClient | None = None,
+        kelt_config: DotDict | None = None,
+        training_config: DotDict | None = None,
+        ensure_schema: bool = True,
+    ) -> None: ...
 
     @property
     def facts(self) -> FactsClient: ...
@@ -288,19 +306,26 @@ exports/
 ### Single Process
 
 ```python
-from llm_learn import LearnClient
-from llm_learn.serving import create_server
+from appinfra.config import Config
+from appinfra.log import LogConfig, LoggerFactory
+from llm_kelt import ClientContext, ClientFactory
+from llm_kelt.serving import create_server
 
-learn = LearnClient(context_key="default")
-server = create_server(llm_config=config, database=learn.database, context_key="default")
+config = Config("etc/llm-kelt.yaml")
+lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
+factory = ClientFactory(lg)
+context = ClientContext(context_key="default")
+kelt = factory.create_from_config(context=context, config=config)
+
+server = create_server(kelt)
 server.start()
 ```
 
 ### With External LLM
 
-```
+```text
 +------------------+     +------------------+
-|  llm-learn proxy |     |  LLM Backend     |
+|  llm-kelt proxy |     |  LLM Backend     |
 |      :8001       | --> |  (vLLM :8000)    |
 +------------------+     +------------------+
          |

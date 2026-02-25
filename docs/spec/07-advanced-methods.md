@@ -1,6 +1,6 @@
 # Advanced Adaptation Methods
 
-Learn's pipeline framework with hooks for agent-provided intelligence.
+Kelt's pipeline framework with hooks for agent-provided intelligence.
 
 ## Problem
 
@@ -23,7 +23,7 @@ Real-world needs:
 
 ## Solution: Pipeline Framework
 
-Learn provides the **pipeline executor** (structure, flow, data types).
+Kelt provides the **pipeline executor** (structure, flow, data types).
 Agent provides the **intelligence** (selectors, evaluators, routers, retry strategies).
 
 ```
@@ -32,7 +32,7 @@ Agent provides the **intelligence** (selectors, evaluators, routers, retry strat
 │                                                                          │
 │   ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐         │
 │   │ Retrieve │───▶│ Generate │───▶│ Evaluate │───▶│  Return  │         │
-│   │ (learn)  │    │ (agent)  │    │ (agent)  │    │          │         │
+│   │ (kelt)  │    │ (agent)  │    │ (agent)  │    │          │         │
 │   └──────────┘    └──────────┘    └────┬─────┘    └──────────┘         │
 │                                        │                                 │
 │                                   score < 0.7                            │
@@ -50,12 +50,12 @@ Agent provides the **intelligence** (selectors, evaluators, routers, retry strat
 
 ---
 
-## Learn Provides: Pipeline Framework
+## Kelt Provides: Pipeline Framework
 
 ### Data Types
 
 ```python
-# learn/adaptation/types.py
+# kelt/adaptation/types.py
 
 @dataclass
 class PipelineState:
@@ -66,7 +66,7 @@ class PipelineState:
     messages: list[Message]
     system: str | None
 
-    # Accumulated context (learn populates)
+    # Accumulated context (kelt populates)
     retrieved_facts: list[Fact]
     candidates: list[ScoredFact]
 
@@ -110,7 +110,7 @@ class PipelineConfig:
 ### Protocol Definitions
 
 ```python
-# learn/adaptation/protocols.py
+# kelt/adaptation/protocols.py
 
 from typing import Protocol, runtime_checkable
 
@@ -194,7 +194,7 @@ class RetryStrategy(Protocol):
 ### Result Types
 
 ```python
-# learn/adaptation/types.py
+# kelt/adaptation/types.py
 
 @dataclass
 class EvaluationResult:
@@ -224,16 +224,16 @@ class RetryDecision:
 ### Pipeline Executor
 
 ```python
-# learn/adaptation/pipeline.py
+# kelt/adaptation/pipeline.py
 
 class AdaptationPipeline:
     """
-    Pipeline executor. Learn controls flow, agent provides intelligence.
+    Pipeline executor. Kelt controls flow, agent provides intelligence.
     """
 
     def __init__(
         self,
-        learn_client: LearnClient,
+        kelt_client: Client,
         # Agent-provided implementations
         context_selector: ContextSelector,
         quality_evaluator: QualityEvaluator,
@@ -243,7 +243,7 @@ class AdaptationPipeline:
         models: dict[str, LLMBackend],
         config: PipelineConfig,
     ):
-        self.learn = learn_client
+        self.kelt = kelt_client
         self.selector = context_selector
         self.evaluator = quality_evaluator
         self.router = model_router
@@ -279,8 +279,8 @@ class AdaptationPipeline:
             while state.attempts < self.config.max_attempts:
                 state.attempts += 1
 
-                # Step 1: Retrieve candidates (learn primitive)
-                state.candidates = await self.learn.content.search_similar(
+                # Step 1: Retrieve candidates (kelt primitive)
+                state.candidates = await self.kelt.content.search_similar(
                     query,
                     top_k=self.config.candidate_limit,
                 )
@@ -297,8 +297,8 @@ class AdaptationPipeline:
                 model = self.models[routing.model]
                 state.model_used = routing.model
 
-                # Step 4: Build context and generate (learn primitive)
-                context_str = self.learn.build_context(
+                # Step 4: Build context and generate (kelt primitive)
+                context_str = self.kelt.build_context(
                     [f.id for f in selection.facts]
                 )
                 full_system = f"{system or ''}\n\n{context_str}".strip()
@@ -346,8 +346,8 @@ class AdaptationPipeline:
         )
 
     async def _record_success(self, state: PipelineState, evaluation: EvaluationResult):
-        """Record successful interaction to learn."""
-        await self.learn.feedback.record(
+        """Record successful interaction to kelt."""
+        await self.kelt.feedback.record(
             signal="positive",
             content_text=state.response,
             context={
@@ -360,7 +360,7 @@ class AdaptationPipeline:
 
     async def _record_failure(self, state: PipelineState):
         """Record failed interaction."""
-        await self.learn.feedback.record(
+        await self.kelt.feedback.record(
             signal="negative",
             content_text=state.query,
             context={
@@ -374,7 +374,7 @@ class AdaptationPipeline:
 
 ## Agent Implements: Intelligence
 
-Agent provides concrete implementations of learn's protocols.
+Agent provides concrete implementations of kelt's protocols.
 
 ### Example: Quality Evaluators
 
@@ -631,8 +631,8 @@ class ConservativeRetry(RetryStrategy):
 ```python
 # agent/adaptation/orchestrator.py
 
-from llm_learn import LearnClient
-from llm_learn.adaptation import AdaptationPipeline, PipelineConfig
+from llm_kelt import Client
+from llm_kelt.adaptation import AdaptationPipeline, PipelineConfig
 
 from agent.adaptation.selectors import HybridSelector
 from agent.adaptation.evaluators import LLMJudgeEvaluator
@@ -640,19 +640,19 @@ from agent.adaptation.routers import ConfidenceBasedRouter
 from agent.adaptation.retry import ExponentialBackoffRetry
 
 class OrchestrationAgent(WorkerAgent):
-    """Agent that uses learn's pipeline with custom intelligence."""
+    """Agent that uses kelt's pipeline with custom intelligence."""
 
     def setup(self):
         super().setup()
 
-        # Learn client for data primitives
-        self.learn = LearnClient(context_key=self.config.context_key)
+        # Kelt client for data primitives
+        self.kelt = Client(context_key=self.config.context_key)
 
         # Models
         self.small_model = LocalBackend(self.config.small_model_url)
         self.large_model = LocalBackend(self.config.large_model_url)
 
-        # Agent's implementations of learn's protocols
+        # Agent's implementations of kelt's protocols
         selector = HybridSelector(
             rule_selector=RuleBasedSelector(SELECTION_RULES),
             llm_selector=LLMSelector(self.small_model),
@@ -661,9 +661,9 @@ class OrchestrationAgent(WorkerAgent):
         router = ConfidenceBasedRouter("small", "large", threshold=0.7)
         retry = ExponentialBackoffRetry(max_attempts=3)
 
-        # Learn's pipeline with agent's implementations
+        # Kelt's pipeline with agent's implementations
         self.pipeline = AdaptationPipeline(
-            learn_client=self.learn,
+            kelt_client=self.kelt,
             context_selector=selector,
             quality_evaluator=evaluator,
             model_router=router,
@@ -681,7 +681,7 @@ class OrchestrationAgent(WorkerAgent):
 
 ## Pipeline Storage (Optional)
 
-Learn can optionally store pipeline execution history:
+Kelt can optionally store pipeline execution history:
 
 ```sql
 CREATE TABLE pipeline_executions (
@@ -704,15 +704,15 @@ CREATE TABLE pipeline_executions (
 
 | Component | Owner | Responsibility |
 |-----------|-------|---------------|
-| `PipelineState`, `PipelineResult` | learn | Data types for pipeline execution |
-| `AdaptationPipeline` | learn | Pipeline executor (controls flow) |
-| `ContextSelector` protocol | learn | Contract for context selection |
-| `QualityEvaluator` protocol | learn | Contract for quality evaluation |
-| `ModelRouter` protocol | learn | Contract for model selection |
-| `RetryStrategy` protocol | learn | Contract for retry decisions |
+| `PipelineState`, `PipelineResult` | kelt | Data types for pipeline execution |
+| `AdaptationPipeline` | kelt | Pipeline executor (controls flow) |
+| `ContextSelector` protocol | kelt | Contract for context selection |
+| `QualityEvaluator` protocol | kelt | Contract for quality evaluation |
+| `ModelRouter` protocol | kelt | Contract for model selection |
+| `RetryStrategy` protocol | kelt | Contract for retry decisions |
 | `HybridSelector` | agent | Context selection implementation |
 | `LLMJudgeEvaluator` | agent | Quality evaluation implementation |
 | `ConfidenceBasedRouter` | agent | Model routing implementation |
 | `ExponentialBackoffRetry` | agent | Retry strategy implementation |
 
-**Learn provides the framework. Agent provides the intelligence.**
+**Kelt provides the framework. Agent provides the intelligence.**

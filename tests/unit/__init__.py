@@ -1,1 +1,1 @@
-"""Unit tests for Learn framework."""
+"""Unit tests for Kelt framework."""

@@ -1,1 +1,1 @@
-"""Learn framework tests."""
+"""Kelt framework tests."""

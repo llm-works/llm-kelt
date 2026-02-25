@@ -9,7 +9,7 @@ This example demonstrates:
 
 Prerequisites:
     - PostgreSQL database with pgvector extension
-    - Config file at etc/llm-learn.yaml
+    - Config file at etc/llm-kelt.yaml
     - Embedding server running (e.g., llm-infer with embedding model)
     - LLM backend for chat (optional)
 
@@ -43,8 +43,8 @@ from appinfra.log import LogConfig, Logger, LoggerFactory
 from httpx import ConnectError, ConnectTimeout
 from llm_infer.client import Factory as LLMClientFactory
 
-from llm_learn import LearnClient, LearnClientFactory
-from llm_learn.inference import (
+from llm_kelt import Client, ClientFactory
+from llm_kelt.inference import (
     ContextBuilder,
     ContextQuery,
     Embedder,
@@ -73,32 +73,32 @@ _SAMPLE_FACTS = [
 ]
 
 
-def populate_facts(learn: LearnClient):
+def populate_facts(kelt: Client):
     """Clear and populate sample facts for the demo."""
     print(f"\n{H2}▶ Populating Facts{RESET}")
 
-    existing = learn.atomic.assertions.list_active()
+    existing = kelt.atomic.assertions.list_active()
     if existing:
         for fact in existing:
-            learn.atomic.assertions.deactivate(fact.id)
+            kelt.atomic.assertions.deactivate(fact.id)
         print(f"  {MUTED}Cleared {len(existing)} existing facts{RESET}")
 
     for content, category in _SAMPLE_FACTS:
-        learn.atomic.assertions.add(content, category=category)
+        kelt.atomic.assertions.add(content, category=category)
 
     print(f"  {OK}✓ Added {len(_SAMPLE_FACTS)} facts across 4 categories:{RESET}")
     categories: dict[str, list] = {}
-    for fact in learn.atomic.assertions.list_active():
+    for fact in kelt.atomic.assertions.list_active():
         categories.setdefault(fact.category or "uncategorized", []).append(fact)
     for cat, facts in sorted(categories.items()):
         print(f"    {INFO}[{cat}]{RESET} {len(facts)} facts")
 
     print(
-        f"\n  {CMD}▸ Verify:{RESET} {psql_cmd(learn)} -c \"SELECT id, category, content FROM atomic_facts WHERE context_key='{learn.context_key}' AND active=true;\""
+        f"\n  {CMD}▸ Verify:{RESET} {psql_cmd(kelt)} -c \"SELECT id, category, content FROM atomic_facts WHERE context_key='{kelt.context_key}' AND active=true;\""
     )
 
 
-async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedder | None:
+async def embed_facts(lg: Logger, kelt: Client, config: Config) -> Embedder | None:
     """Embed facts for semantic search. Returns embedder if successful."""
     print(f"\n{H2}▶ Embedding Facts for Semantic Search{RESET}")
 
@@ -108,14 +108,14 @@ async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedde
     try:
         print(f"  {MUTED}Connecting to embedding server...{RESET}")
         result = await embed_missing_facts(
-            lg=lg, embedder=embedder, embedding_adapter=learn.atomic.embeddings, batch_size=50
+            lg=lg, embedder=embedder, embedding_adapter=kelt.atomic.embeddings, batch_size=50
         )
         print(f"  {OK}✓ Embedded {result.processed} facts{RESET}")
         if result.failed:
             print(f"  {WARN}⚠ {result.failed} failed{RESET}")
 
         print(
-            f"\n  {CMD}▸ Verify embeddings:{RESET} {psql_cmd(learn)} -c \"SELECT id, content, (embedding IS NOT NULL) as has_embedding FROM atomic_facts WHERE context_key='{learn.context_key}' LIMIT 5;\""
+            f"\n  {CMD}▸ Verify embeddings:{RESET} {psql_cmd(kelt)} -c \"SELECT id, content, (embedding IS NOT NULL) as has_embedding FROM atomic_facts WHERE context_key='{kelt.context_key}' LIMIT 5;\""
         )
         return embedder
     except (ConnectError, ConnectTimeout, OSError):
@@ -126,7 +126,7 @@ async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedde
     print(f"  {MUTED}Using synthetic embeddings for demo...{RESET}")
 
     # Set demo embeddings manually based on keywords
-    for i, fact in enumerate(learn.atomic.assertions.list_active()):
+    for i, fact in enumerate(kelt.atomic.assertions.list_active()):
         embedding = [0.0] * 384
         content_lower = fact.content.lower()
         # Create simple keyword-based embeddings for demo
@@ -139,13 +139,13 @@ async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedde
         if "test" in content_lower or "mock" in content_lower:
             embedding[3] = 0.9
         embedding[i % 384] = 0.5  # Ensure uniqueness
-        learn.atomic.embeddings.set_embedding(fact.id, embedding, "demo-model")
+        kelt.atomic.embeddings.set_embedding(fact.id, embedding, "demo-model")
 
     print(f"  {OK}✓ Set synthetic embeddings for all facts{RESET}")
     return None
 
 
-async def demo_similarity_search(learn: LearnClient, embedder: Embedder):
+async def demo_similarity_search(kelt: Client, embedder: Embedder):
     """Demonstrate similarity search with embeddings."""
     print(f"\n{H2}▶ Similarity Search{RESET}")
     print(f"  {MUTED}Finding facts similar to a query using vector similarity{RESET}")
@@ -154,7 +154,7 @@ async def demo_similarity_search(learn: LearnClient, embedder: Embedder):
     print(f'\n  {LLM_Q}Query: "{query}"{RESET}')
 
     query_result = await embedder.embed_async(query)
-    similar_facts = learn.atomic.embeddings.search_similar(
+    similar_facts = kelt.atomic.embeddings.search_similar(
         query=query_result.embedding, model_name=embedder.model, top_k=5, min_similarity=0.3
     )
 
@@ -167,7 +167,7 @@ async def demo_similarity_search(learn: LearnClient, embedder: Embedder):
     # Search with category filter
     print(f"\n  {LLM_Q}Query: \"{query}\" {MUTED}(filtered to 'security' category){RESET}")
 
-    similar_security = learn.atomic.embeddings.search_similar(
+    similar_security = kelt.atomic.embeddings.search_similar(
         query=query_result.embedding,
         model_name=embedder.model,
         top_k=5,
@@ -182,12 +182,12 @@ async def demo_similarity_search(learn: LearnClient, embedder: Embedder):
         )
 
 
-async def demo_rag_vs_static(learn: LearnClient, config: Config, embedder: Embedder | None):
+async def demo_rag_vs_static(kelt: Client, config: Config, embedder: Embedder | None):
     """Demonstrate RAG vs static context injection - the key comparison."""
     print(f"\n{H2}▶ RAG vs Static Context Injection{RESET}")
     print(f"  {MUTED}Comparing which facts get included in the LLM prompt{RESET}")
 
-    context_builder = ContextBuilder(learn.atomic.assertions)
+    context_builder = ContextBuilder(kelt.atomic.assertions)
     question = "How should I handle database queries securely?"
 
     # Static: just takes first N facts regardless of relevance
@@ -207,7 +207,7 @@ async def demo_rag_vs_static(learn: LearnClient, config: Config, embedder: Embed
 
     if embedder:
         query_result = await embedder.embed_async(question)
-        similar = learn.atomic.embeddings.search_similar(
+        similar = kelt.atomic.embeddings.search_similar(
             query=query_result.embedding, model_name=embedder.model, top_k=3, min_similarity=0.3
         )
         print(f"  {OK}Selected facts:{RESET}")
@@ -223,21 +223,21 @@ async def demo_rag_vs_static(learn: LearnClient, config: Config, embedder: Embed
     )
 
 
-async def demo_rag_query(learn: LearnClient, config: Config, lg: Logger, embedder: Embedder | None):
+async def demo_rag_query(kelt: Client, config: Config, lg: Logger, embedder: Embedder | None):
     """Demonstrate full RAG query with LLM."""
     print(f"\n{H2}▶ Full RAG Query (LLM + Context){RESET}")
 
     try:
         llm_factory = LLMClientFactory(lg)
         llm_client = llm_factory.from_config(config.llm.to_dict())
-        context_builder = ContextBuilder(learn.atomic.assertions)
+        context_builder = ContextBuilder(kelt.atomic.assertions)
 
         query = ContextQuery(
             client=llm_client,
             context_builder=context_builder,
             base_system_prompt="You are a coding assistant.",
             embedder=embedder,
-            embedding_adapter=learn.atomic.embeddings,
+            embedding_adapter=kelt.atomic.embeddings,
         )
 
         question = "What are best practices for API security?"
@@ -255,7 +255,7 @@ async def demo_rag_query(learn: LearnClient, config: Config, lg: Logger, embedde
     except Exception as e:
         print(f"  {MUTED}[Skipped] No LLM backend: {type(e).__name__}{RESET}")
         print(
-            f"  {MUTED}Start llm-infer or configure OpenAI in etc/llm-learn.yaml to enable.{RESET}"
+            f"  {MUTED}Start llm-infer or configure OpenAI in etc/llm-kelt.yaml to enable.{RESET}"
         )
 
 
@@ -265,28 +265,28 @@ async def main():
     print(f"{H1}  Example 02: RAG (Retrieval-Augmented Generation){RESET}")
     print(f"{H1}{'━' * 50}{RESET}")
 
-    from llm_learn import ClientContext
+    from llm_kelt import ClientContext
 
     # Suppress logging noise
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
-    config = Config("etc/llm-learn.yaml")
-    factory = LearnClientFactory(lg)
+    config = Config("etc/llm-kelt.yaml")
+    factory = ClientFactory(lg)
 
     # Create context for this example
     context_key = get_demo_context_key("rag-demo")
     context = ClientContext(context_key=context_key)
-    learn = factory.create_from_config(context=context, config=config)
+    kelt = factory.create_from_config(context=context, config=config)
     print(f"{MUTED}Using context_key={RESET}{INFO}{context_key}{RESET}")
 
     # Run demos
-    populate_facts(learn)
-    embedder = await embed_facts(lg, learn, config)
+    populate_facts(kelt)
+    embedder = await embed_facts(lg, kelt, config)
 
     if embedder:
-        await demo_similarity_search(learn, embedder)
+        await demo_similarity_search(kelt, embedder)
 
-    await demo_rag_vs_static(learn, config, embedder)
-    await demo_rag_query(learn, config, lg, embedder)
+    await demo_rag_vs_static(kelt, config, embedder)
+    await demo_rag_query(kelt, config, lg, embedder)
 
     if embedder:
         await embedder.close_async()

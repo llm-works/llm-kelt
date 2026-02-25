@@ -1,10 +1,10 @@
-# llm-learn
+# llm-kelt
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![Type Hints](https://img.shields.io/badge/type%20hints-100%25-brightgreen.svg)
 [![Linting:
 Ruff](https://img.shields.io/badge/linting-ruff-yellowgreen)](https://github.com/astral-sh/ruff)
-[![CI](https://github.com/serendip-ml/llm-learn/actions/workflows/ci.yml/badge.svg)](https://github.com/serendip-ml/llm-learn/actions/workflows/ci.yml)
+[![CI](https://github.com/serendip-ml/llm-kelt/actions/workflows/ci.yml/badge.svg)](https://github.com/serendip-ml/llm-kelt/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 
 A framework for collecting, managing, and leveraging context for LLM applications. Supports fact
@@ -24,14 +24,14 @@ storage, feedback collection, preference pairs, RAG-based retrieval, and fine-tu
 
 ```bash
 # Basic installation
-pip install llm-learn
+pip install llm-kelt
 
 # With training dependencies (PyTorch, transformers, PEFT, TRL)
-pip install llm-learn[training]
+pip install llm-kelt[training]
 
 # Development installation
-git clone https://github.com/serendip-ml/llm-learn.git
-cd llm-learn
+git clone https://github.com/serendip-ml/llm-kelt.git
+cd llm-kelt
 pip install -e ".[dev]"
 ```
 
@@ -40,25 +40,25 @@ pip install -e ".[dev]"
 ### Setup
 
 ```python
-from llm_learn import LearnClient
+from llm_kelt import Client
 
 # Create client scoped to a context
-learn = LearnClient(context_key="default")
-learn.migrate()  # Create database tables
+kelt = Client(context_key="default")
+kelt.migrate()  # Create database tables
 
 # Add facts about the user
-learn.facts.add("Prefers concise explanations", category="preferences")
-learn.facts.add("Expert Python developer", category="background")
-learn.facts.add("Always include code examples", category="rules")
+kelt.facts.add("Prefers concise explanations", category="preferences")
+kelt.facts.add("Expert Python developer", category="background")
+kelt.facts.add("Always include code examples", category="rules")
 ```
 
 ### Context Injection
 
 ```python
-from llm_learn.inference import ContextBuilder
+from llm_kelt.inference import ContextBuilder
 
 # Build system prompt with facts injected
-builder = ContextBuilder(learn.facts)
+builder = ContextBuilder(kelt.facts)
 system_prompt = builder.build_system_prompt(
     base_prompt="You are a helpful assistant.",
     categories=["preferences", "rules"],  # Optional: filter by category
@@ -72,19 +72,19 @@ RAG (Retrieval-Augmented Generation) finds facts relevant to each query using se
 
 ```python
 from llm_infer.client import LLMClient
-from llm_learn.inference import (
+from llm_kelt.inference import (
     ContextBuilder, ContextQuery, Embedder, RAGArgs, embed_missing_facts
 )
 
 # 1. Embed facts for semantic search (model name discovered from server)
 embedder = Embedder(base_url="http://localhost:8001/v1")
-await embed_missing_facts(logger, embedder, learn.facts)
+await embed_missing_facts(logger, embedder, kelt.facts)
 
 # 2. Create context-aware query interface
 llm_client = LLMClient.from_config(config)
 query = ContextQuery(
     client=llm_client,
-    context_builder=ContextBuilder(learn.facts),
+    context_builder=ContextBuilder(kelt.facts),
     base_system_prompt="You are a helpful assistant.",
     embedder=embedder,
 )
@@ -108,11 +108,11 @@ await embedder.close_async()
 ### Training Data Export
 
 ```python
-from llm_learn.training import export_feedback_sft
-from llm_learn.training.dpo import export_preferences
+from llm_kelt.training import export_feedback_sft
+from llm_kelt.training.dpo import export_preferences
 
 # Record preference pairs
-learn.atomic.preferences.record(
+kelt.atomic.preferences.record(
     context="Explain gradient descent",
     chosen="Concise, accurate explanation",
     rejected="Verbose, rambling explanation",
@@ -120,16 +120,16 @@ learn.atomic.preferences.record(
 
 # Export to DPO format for TRL
 result = export_preferences(
-    session_factory=learn.database.session,
-    context_key=learn.context_key,
+    session_factory=kelt.database.session,
+    context_key=kelt.context_key,
     output_path="preferences.jsonl",
 )
 # Output: {"prompt": str, "chosen": str, "rejected": str}
 
 # Export feedback to SFT format
 result = export_feedback_sft(
-    session_factory=learn.database.session,
-    context_key=learn.context_key,
+    session_factory=kelt.database.session,
+    context_key=kelt.context_key,
     output_path="feedback_sft.jsonl",
     signal="positive",
 )
@@ -140,12 +140,12 @@ result = export_feedback_sft(
 
 ```python
 from appinfra.log import LogConfig, LoggerFactory
-from llm_learn.training import train_lora, RunConfig
-from llm_learn.training.lora import Config as LoraConfig
+from llm_kelt.training import train_lora, RunConfig
+from llm_kelt.training.lora import Config as LoraConfig
 
 lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
 
-# Train LoRA adapter (requires pip install llm-learn[training])
+# Train LoRA adapter (requires pip install llm-kelt[training])
 result = train_lora(
     lg=lg,
     data_path="feedback_sft.jsonl",
@@ -213,7 +213,7 @@ See the [`examples/`](examples/) directory for complete working examples:
 
 | Class | Description |
 |-------|-------------|
-| `LearnClient` | Main entry point, scoped to a context |
+| `Client` | Main entry point, scoped to a context |
 | `FactsClient` | Store and retrieve facts |
 | `FeedbackClient` | Record explicit feedback signals |
 | `PreferencesClient` | Store preference pairs |
@@ -263,12 +263,12 @@ paths:
   adapters: !path ~/models/adapters     # Trained LoRA adapters
 ```
 
-2. The main config is in `etc/llm-learn.yaml`. Database and LLM settings:
+2. The main config is in `etc/llm-kelt.yaml`. Database and LLM settings:
 
 ```yaml
 dbs:
   main:
-    url: postgresql://user:pass@localhost:5432/llm_learn
+    url: postgresql://user:pass@localhost:5432/llm_kelt
     extensions: [vector]
 
 llm:

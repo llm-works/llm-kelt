@@ -1,1 +1,1 @@
-"""Integration tests for Learn framework."""
+"""Integration tests for Kelt framework."""

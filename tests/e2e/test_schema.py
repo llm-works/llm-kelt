@@ -6,8 +6,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import pytest
 from sqlalchemy import text
 
-from llm_learn.core.exceptions import SchemaVersionError
-from llm_learn.core.schema import SchemaManager, SchemaState
+from llm_kelt.core.exceptions import SchemaVersionError
+from llm_kelt.core.schema import SchemaManager, SchemaState
 
 
 @pytest.fixture(autouse=True)
@@ -143,7 +143,7 @@ class TestSchemaManager:
 
     def test_lock_timeout_non_blocking(self, logger, database):
         """Test that non-blocking lock fails fast when lock is held."""
-        from llm_learn.core.schema import _ADVISORY_LOCK_KEY
+        from llm_kelt.core.schema import _ADVISORY_LOCK_KEY
 
         manager = SchemaManager(logger, database.engine)
 

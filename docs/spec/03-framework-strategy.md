@@ -1,34 +1,34 @@
 # Framework Strategy
 
-Which approaches the framework supports, how responsibilities are divided between learn and agent.
+Which approaches the framework supports, how responsibilities are divided between kelt and agent.
 
 ## Architectural Boundary
 
-**learn** and **agent** have distinct responsibilities:
+**kelt** and **agent** have distinct responsibilities:
 
 | Layer | Responsibility | Examples |
 |-------|---------------|----------|
-| **learn** | Data primitives + pipeline framework | Facts CRUD, feedback storage, vector search, pipeline executor |
+| **kelt** | Data primitives + pipeline framework | Facts CRUD, feedback storage, vector search, pipeline executor |
 | **agent** | Orchestration intelligence | Routing decisions, quality evaluation, model selection, retry logic |
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                              agent                                       │
 │                                                                          │
-│   Implements learn's protocols:                                          │
+│   Implements kelt's protocols:                                          │
 │   - ContextSelector (which facts for this query?)                        │
 │   - QualityEvaluator (is response good enough?)                          │
 │   - ModelRouter (small or large model?)                                  │
 │   - RetryStrategy (how to handle failures?)                              │
 │                                                                          │
-│   Uses learn's primitives + pipeline framework                           │
+│   Uses kelt's primitives + pipeline framework                           │
 └──────────────────────────────────────────────────────────────────────────┘
                                    │
                         implements │ protocols
                                    │
                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                              learn                                       │
+│                              kelt                                        │
 │                                                                          │
 │   Provides:                                                              │
 │   - Data primitives (facts, feedback, preferences, content)              │
@@ -44,7 +44,7 @@ Which approaches the framework supports, how responsibilities are divided betwee
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key insight:** learn defines *what* the pipeline does (structure, data flow, hooks). Agent defines
+**Key insight:** kelt defines *what* the pipeline does (structure, data flow, hooks). Agent defines
 *how* decisions are made (implementations of the hooks).
 
 ---
@@ -55,18 +55,18 @@ From the [learning methods](02-learning-methods.md), the framework supports:
 
 | Approach | Use Case | Owner |
 |----------|----------|-------|
-| **RAG** | Semantic context retrieval | learn (primitives) + agent (selection logic) |
-| **Memory** | Fact injection | learn (storage) + agent (routing) |
-| **Classifiers** | Fast scoring/filtering | learn (data export) + agent (model calls) |
-| **Embeddings** | Similarity search | learn (vector storage + search) |
-| **LoRA + DPO** | Behavior customization | learn (training data export) |
+| **RAG** | Semantic context retrieval | kelt (primitives) + agent (selection logic) |
+| **Memory** | Fact injection | kelt (storage) + agent (routing) |
+| **Classifiers** | Fast scoring/filtering | kelt (data export) + agent (model calls) |
+| **Embeddings** | Similarity search | kelt (vector storage + search) |
+| **LoRA + DPO** | Behavior customization | kelt (training data export) |
 
-## What learn Provides
+## What kelt Provides
 
 ### Data Primitives
 
 ```python
-# learn owns CRUD and retrieval
+# kelt owns CRUD and retrieval
 class FactsClient:
     def add(content, category, source, confidence) -> int
     def list_active(category, min_confidence, limit) -> list[Fact]
@@ -83,14 +83,14 @@ class FeedbackClient:
 
 ### Pipeline Framework
 
-learn provides the pipeline executor that calls agent-provided hooks:
+kelt provides the pipeline executor that calls agent-provided hooks:
 
 ```python
-# learn owns the pipeline structure
+# kelt owns the pipeline structure
 class AdaptationPipeline:
     def __init__(
         self,
-        learn_client: LearnClient,
+        kelt_client: Client,
         # Agent provides these implementations
         context_selector: ContextSelector,
         quality_evaluator: QualityEvaluator,
@@ -100,16 +100,16 @@ class AdaptationPipeline:
     ): ...
 
     async def process(query, messages, system) -> PipelineResult:
-        # learn controls the flow, agent provides the intelligence
+        # kelt controls the flow, agent provides the intelligence
         ...
 ```
 
 ### Protocol Definitions
 
-learn defines what agent must implement:
+kelt defines what agent must implement:
 
 ```python
-# learn defines the contracts
+# kelt defines the contracts
 class ContextSelector(Protocol):
     async def select(query, candidates, max_facts) -> SelectionResult: ...
 
@@ -126,7 +126,7 @@ class RetryStrategy(Protocol):
 See [Context Routing](06-context-routing.md) and [Advanced Methods](07-advanced-methods.md) for full
 protocol definitions.
 
-## What learn Does NOT Provide
+## What kelt Does NOT Provide
 
 | Concern | Why Not | Owner |
 |---------|---------|-------|
@@ -150,7 +150,7 @@ protocol definitions.
 
 ## Implementation Layers
 
-### Layer 1: Data Primitives (learn)
+### Layer 1: Data Primitives (kelt)
 
 **Goal:** Store and retrieve personalization data.
 
@@ -162,14 +162,14 @@ protocol definitions.
 
 **No intelligence here** - just CRUD and retrieval.
 
-### Layer 2: Pipeline Framework (learn)
+### Layer 2: Pipeline Framework (kelt)
 
 **Goal:** Define the adaptation flow structure.
 
 - Pipeline executor with configurable steps
 - Protocol definitions for agent hooks
 - Data types for pipeline state
-- Result recording back to learn
+- Result recording back to kelt
 
 **Orchestrates the flow, delegates decisions to agent.**
 
@@ -182,7 +182,7 @@ protocol definitions.
 - Model routing (small for filtering, large for reasoning)
 - Retry strategies (escalate model, expand context)
 
-**Implements learn's protocols with actual intelligence.**
+**Implements kelt's protocols with actual intelligence.**
 
 ---
 
@@ -191,10 +191,10 @@ protocol definitions.
 ```python
 # In agent - assembles pipeline with its implementations
 
-from llm_learn import LearnClient
-from llm_learn.adaptation import AdaptationPipeline, PipelineConfig
+from llm_kelt import Client
+from llm_kelt.adaptation import AdaptationPipeline, PipelineConfig
 
-# Agent's implementations of learn's protocols
+# Agent's implementations of kelt's protocols
 from agent.adaptation.selectors import HybridSelector
 from agent.adaptation.evaluators import LLMJudgeEvaluator
 from agent.adaptation.routers import ConfidenceBasedRouter
@@ -202,8 +202,8 @@ from agent.adaptation.retry import ExponentialBackoffRetry
 
 class OrchestrationAgent:
     def setup(self):
-        # Learn client for data primitives
-        self.learn = LearnClient(context_key=self.config.context_key)
+        # Kelt client for data primitives
+        self.kelt = Client(context_key=self.config.context_key)
 
         # Agent provides implementations
         selector = HybridSelector(self.small_model)
@@ -211,9 +211,9 @@ class OrchestrationAgent:
         router = ConfidenceBasedRouter("small", "large", threshold=0.7)
         retry = ExponentialBackoffRetry(max_attempts=3)
 
-        # Learn's pipeline with agent's implementations
+        # Kelt's pipeline with agent's implementations
         self.pipeline = AdaptationPipeline(
-            learn_client=self.learn,
+            kelt_client=self.kelt,
             context_selector=selector,
             quality_evaluator=evaluator,
             model_router=router,
@@ -238,7 +238,7 @@ class OrchestrationAgent:
 - Support both API and local models
 
 ### Separation of Concerns
-- learn = data + framework (stable, tested)
+- kelt = data + framework (stable, tested)
 - agent = intelligence (flexible, evolving)
 - Clean protocol boundary between them
 
