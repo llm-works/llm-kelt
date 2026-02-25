@@ -1,6 +1,6 @@
 pgserver:
   # version: 16                # Ignored when image is specified
-  name: learn-pg               # Server identifier/name for logging and identification
+  name: kelt-pg               # Server identifier/name for logging and identification
   port: 7632                   # PostgreSQL port (default: 5432, can be overridden with INFRA_PGSERVER_PORT)
   image: pgvector/pgvector:pg16  # pgvector for vector similarity search
   user: postgres               # Database username (can be overridden with INFRA_PGSERVER_USER)
@@ -8,7 +8,7 @@ pgserver:
 
 dbs:
   main:
-    url: "postgresql://${pgserver.user}:${pgserver.pass}@127.0.0.1:${pgserver.port}/learn"
+    url: "postgresql://${pgserver.user}:${pgserver.pass}@127.0.0.1:${pgserver.port}/kelt"
     create_db: true             # Create database if it doesn't exist
     readonly: false             # Read-write mode (default)
     pool_pre_ping: true         # Verify connections before use

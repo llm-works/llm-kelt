@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for Learn framework.
+"""SQLAlchemy ORM models for Kelt framework.
 
 Re-exports core models for convenient imports.
 """

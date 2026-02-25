@@ -14,9 +14,9 @@ if TYPE_CHECKING:
 
 class Database:
     """
-    Database interface for Learn framework.
+    Database interface for Kelt framework.
 
-    Wraps appinfra's PG class with Learn-specific configuration
+    Wraps appinfra's PG class with Kelt-specific configuration
     and model management.
 
     Usage:

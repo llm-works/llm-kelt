@@ -53,7 +53,7 @@ TRAINING_DATA = [
     },
     {
         "instruction": "Explain machine learning briefly.",
-        "output": "Machine learning: algorithms that learn patterns from data to make predictions. "
+        "output": "Machine learning: algorithms that kelt patterns from data to make predictions. "
         "Types: supervised, unsupervised, reinforcement.",
     },
     {

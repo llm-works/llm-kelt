@@ -25,9 +25,9 @@ LLM_Q = f"{BOLD}{WHITE}"
 LLM_A = GREEN
 
 
-def psql_cmd(learn: Client) -> str:
+def psql_cmd(kelt: Client) -> str:
     """Build psql command from database config."""
-    url = learn.database.engine.url
+    url = kelt.database.engine.url
     return f"psql -h {url.host} -p {url.port} -U {url.username} -d {url.database}"
 
 

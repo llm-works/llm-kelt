@@ -11,16 +11,16 @@ from llm_kelt.training.dpo import export_preferences
 class TestExportPreferencesDPO:
     """Test export_preferences function."""
 
-    def test_export_basic(self, learn_client, database, clean_tables):
+    def test_export_basic(self, kelt_client, database, clean_tables):
         """Test basic DPO export."""
         # Create test data
-        learn_client.atomic.preferences.record(
+        kelt_client.atomic.preferences.record(
             context="Summarize this article",
             chosen="Concise summary",
             rejected="Verbose essay",
             category="synthesis",
         )
-        learn_client.atomic.preferences.record(
+        kelt_client.atomic.preferences.record(
             context="Explain quantum computing",
             chosen="Simple explanation",
             rejected="Overly complex explanation",
@@ -31,7 +31,7 @@ class TestExportPreferencesDPO:
             output_path = Path(tmpdir) / "dpo.jsonl"
             result = export_preferences(
                 database.session,
-                learn_client.context.context_key,
+                kelt_client.context.context_key,
                 output_path,
             )
 
@@ -52,15 +52,15 @@ class TestExportPreferencesDPO:
             assert record["chosen"] == "Concise summary"
             assert record["rejected"] == "Verbose essay"
 
-    def test_export_filter_by_category(self, learn_client, database, clean_tables):
+    def test_export_filter_by_category(self, kelt_client, database, clean_tables):
         """Test export filtering by category."""
-        learn_client.atomic.preferences.record(
+        kelt_client.atomic.preferences.record(
             context="A", chosen="G", rejected="B", category="synthesis"
         )
-        learn_client.atomic.preferences.record(
+        kelt_client.atomic.preferences.record(
             context="B", chosen="G", rejected="B", category="analysis"
         )
-        learn_client.atomic.preferences.record(
+        kelt_client.atomic.preferences.record(
             context="C", chosen="G", rejected="B", category="synthesis"
         )
 
@@ -68,37 +68,37 @@ class TestExportPreferencesDPO:
             output_path = Path(tmpdir) / "dpo.jsonl"
             result = export_preferences(
                 database.session,
-                learn_client.context.context_key,
+                kelt_client.context.context_key,
                 output_path,
                 category="synthesis",
             )
 
             assert result.count == 2
 
-    def test_export_filter_by_margin(self, learn_client, database, clean_tables):
+    def test_export_filter_by_margin(self, kelt_client, database, clean_tables):
         """Test export filtering by minimum margin."""
-        learn_client.atomic.preferences.record(context="A", chosen="G", rejected="B", margin=0.9)
-        learn_client.atomic.preferences.record(context="B", chosen="G", rejected="B", margin=0.5)
-        learn_client.atomic.preferences.record(context="C", chosen="G", rejected="B", margin=0.3)
+        kelt_client.atomic.preferences.record(context="A", chosen="G", rejected="B", margin=0.9)
+        kelt_client.atomic.preferences.record(context="B", chosen="G", rejected="B", margin=0.5)
+        kelt_client.atomic.preferences.record(context="C", chosen="G", rejected="B", margin=0.3)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "dpo.jsonl"
             result = export_preferences(
                 database.session,
-                learn_client.context.context_key,
+                kelt_client.context.context_key,
                 output_path,
                 min_margin=0.5,
             )
 
             assert result.count == 2
 
-    def test_export_empty(self, learn_client, database, clean_tables):
+    def test_export_empty(self, kelt_client, database, clean_tables):
         """Test export with no data."""
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "dpo.jsonl"
             result = export_preferences(
                 database.session,
-                learn_client.context.context_key,
+                kelt_client.context.context_key,
                 output_path,
             )
 
@@ -106,15 +106,15 @@ class TestExportPreferencesDPO:
             assert output_path.exists()
             assert output_path.read_text() == ""
 
-    def test_export_creates_parent_dirs(self, learn_client, database, clean_tables):
+    def test_export_creates_parent_dirs(self, kelt_client, database, clean_tables):
         """Test that export creates parent directories."""
-        learn_client.atomic.preferences.record(context="A", chosen="G", rejected="B")
+        kelt_client.atomic.preferences.record(context="A", chosen="G", rejected="B")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "nested" / "dir" / "dpo.jsonl"
             result = export_preferences(
                 database.session,
-                learn_client.context.context_key,
+                kelt_client.context.context_key,
                 output_path,
             )
 
@@ -125,17 +125,17 @@ class TestExportPreferencesDPO:
 class TestExportFeedbackSFT:
     """Test export_feedback_sft function."""
 
-    def test_export_basic(self, learn_client, database, clean_tables):
+    def test_export_basic(self, kelt_client, database, clean_tables):
         """Test basic SFT export."""
         # Create content first
-        content_id = learn_client.content.create(
+        content_id = kelt_client.content.create(
             content_text="This is a great article about AI.",
             source="test",
             title="AI Overview",
         )
 
         # Record feedback on that content
-        learn_client.atomic.feedback.record(
+        kelt_client.atomic.feedback.record(
             signal="positive",
             content_id=content_id,
             strength=0.9,
@@ -147,7 +147,7 @@ class TestExportFeedbackSFT:
             output_path = Path(tmpdir) / "sft.jsonl"
             result = export_feedback_sft(
                 database.session,
-                learn_client.context.context_key,
+                kelt_client.context.context_key,
                 output_path,
             )
 
@@ -162,24 +162,24 @@ class TestExportFeedbackSFT:
             assert record["output"] == "This is a great article about AI."
             assert "interesting" in record["instruction"]
 
-    def test_export_filters_by_signal(self, learn_client, database, clean_tables):
+    def test_export_filters_by_signal(self, kelt_client, database, clean_tables):
         """Test that export filters by signal type."""
         # Create content
-        good_id = learn_client.content.create(
+        good_id = kelt_client.content.create(
             content_text="Good content",
             source="test",
         )
-        bad_id = learn_client.content.create(
+        bad_id = kelt_client.content.create(
             content_text="Bad content",
             source="test",
         )
 
-        learn_client.atomic.feedback.record(
+        kelt_client.atomic.feedback.record(
             signal="positive",
             content_id=good_id,
             strength=0.9,
         )
-        learn_client.atomic.feedback.record(
+        kelt_client.atomic.feedback.record(
             signal="negative",
             content_id=bad_id,
             strength=0.9,
@@ -189,31 +189,31 @@ class TestExportFeedbackSFT:
             output_path = Path(tmpdir) / "sft.jsonl"
             result = export_feedback_sft(
                 database.session,
-                learn_client.context.context_key,
+                kelt_client.context.context_key,
                 output_path,
                 signal="positive",
             )
 
             assert result.count == 1
 
-    def test_export_filters_by_strength(self, learn_client, database, clean_tables):
+    def test_export_filters_by_strength(self, kelt_client, database, clean_tables):
         """Test that export filters by minimum strength."""
         # Create content
-        strong_id = learn_client.content.create(
+        strong_id = kelt_client.content.create(
             content_text="Strong positive",
             source="test",
         )
-        weak_id = learn_client.content.create(
+        weak_id = kelt_client.content.create(
             content_text="Weak positive",
             source="test",
         )
 
-        learn_client.atomic.feedback.record(
+        kelt_client.atomic.feedback.record(
             signal="positive",
             content_id=strong_id,
             strength=0.9,
         )
-        learn_client.atomic.feedback.record(
+        kelt_client.atomic.feedback.record(
             signal="positive",
             content_id=weak_id,
             strength=0.3,
@@ -223,22 +223,22 @@ class TestExportFeedbackSFT:
             output_path = Path(tmpdir) / "sft.jsonl"
             result = export_feedback_sft(
                 database.session,
-                learn_client.context.context_key,
+                kelt_client.context.context_key,
                 output_path,
                 min_strength=0.5,
             )
 
             assert result.count == 1
 
-    def test_export_with_context(self, learn_client, database, clean_tables):
+    def test_export_with_context(self, kelt_client, database, clean_tables):
         """Test export with context in Alpaca format."""
         # Create content
-        content_id = learn_client.content.create(
+        content_id = kelt_client.content.create(
             content_text="Response text",
             source="test",
         )
 
-        learn_client.atomic.feedback.record(
+        kelt_client.atomic.feedback.record(
             signal="positive",
             content_id=content_id,
             strength=0.9,
@@ -249,7 +249,7 @@ class TestExportFeedbackSFT:
             output_path = Path(tmpdir) / "sft.jsonl"
             result = export_feedback_sft(
                 database.session,
-                learn_client.context.context_key,
+                kelt_client.context.context_key,
                 output_path,
                 include_context=True,
             )
@@ -266,24 +266,24 @@ class TestExportFeedbackSFT:
 class TestExportFeedbackClassifier:
     """Test export_feedback_classifier function."""
 
-    def test_export_basic(self, learn_client, database, clean_tables):
+    def test_export_basic(self, kelt_client, database, clean_tables):
         """Test basic classifier export."""
         # Create content
-        good_id = learn_client.content.create(
+        good_id = kelt_client.content.create(
             content_text="Good content",
             source="test",
         )
-        bad_id = learn_client.content.create(
+        bad_id = kelt_client.content.create(
             content_text="Bad content",
             source="test",
         )
 
-        learn_client.atomic.feedback.record(
+        kelt_client.atomic.feedback.record(
             signal="positive",
             content_id=good_id,
             strength=0.9,
         )
-        learn_client.atomic.feedback.record(
+        kelt_client.atomic.feedback.record(
             signal="negative",
             content_id=bad_id,
             strength=0.9,
@@ -293,7 +293,7 @@ class TestExportFeedbackClassifier:
             output_path = Path(tmpdir) / "classifier.jsonl"
             result = export_feedback_classifier(
                 database.session,
-                learn_client.context.context_key,
+                kelt_client.context.context_key,
                 output_path,
             )
 
@@ -308,24 +308,24 @@ class TestExportFeedbackClassifier:
             assert labels["Good content"] == 1
             assert labels["Bad content"] == 0
 
-    def test_export_excludes_dismiss(self, learn_client, database, clean_tables):
+    def test_export_excludes_dismiss(self, kelt_client, database, clean_tables):
         """Test that dismiss signals are excluded."""
         # Create content
-        good_id = learn_client.content.create(
+        good_id = kelt_client.content.create(
             content_text="Positive",
             source="test",
         )
-        dismiss_id = learn_client.content.create(
+        dismiss_id = kelt_client.content.create(
             content_text="Dismissed",
             source="test",
         )
 
-        learn_client.atomic.feedback.record(
+        kelt_client.atomic.feedback.record(
             signal="positive",
             content_id=good_id,
             strength=0.9,
         )
-        learn_client.atomic.feedback.record(
+        kelt_client.atomic.feedback.record(
             signal="dismiss",
             content_id=dismiss_id,
             strength=0.9,
@@ -335,30 +335,30 @@ class TestExportFeedbackClassifier:
             output_path = Path(tmpdir) / "classifier.jsonl"
             result = export_feedback_classifier(
                 database.session,
-                learn_client.context.context_key,
+                kelt_client.context.context_key,
                 output_path,
             )
 
             assert result.count == 1
 
-    def test_export_filters_by_strength(self, learn_client, database, clean_tables):
+    def test_export_filters_by_strength(self, kelt_client, database, clean_tables):
         """Test that export filters by minimum strength."""
         # Create content
-        strong_id = learn_client.content.create(
+        strong_id = kelt_client.content.create(
             content_text="Strong",
             source="test",
         )
-        weak_id = learn_client.content.create(
+        weak_id = kelt_client.content.create(
             content_text="Weak",
             source="test",
         )
 
-        learn_client.atomic.feedback.record(
+        kelt_client.atomic.feedback.record(
             signal="positive",
             content_id=strong_id,
             strength=0.9,
         )
-        learn_client.atomic.feedback.record(
+        kelt_client.atomic.feedback.record(
             signal="positive",
             content_id=weak_id,
             strength=0.3,
@@ -368,7 +368,7 @@ class TestExportFeedbackClassifier:
             output_path = Path(tmpdir) / "classifier.jsonl"
             result = export_feedback_classifier(
                 database.session,
-                learn_client.context.context_key,
+                kelt_client.context.context_key,
                 output_path,
                 min_strength=0.5,
             )

@@ -1,4 +1,4 @@
-"""Export utilities for Learn framework."""
+"""Export utilities for Kelt framework."""
 
 from .jsonl import (
     export_feedback,

@@ -33,16 +33,16 @@ class Protocol:
     Usage:
         from llm_kelt import Client, ClientContext
         context = ClientContext(context_key="my-agent")
-        learn = Client(database=db, context=context)
+        kelt = Client(database=db, context=context)
 
         # Access atomic primitives
-        learn.atomic.assertions.add("User prefers Python")
-        learn.atomic.solutions.record(agent_name="reviewer", ...)
-        learn.atomic.predictions.record(hypothesis="X will happen", confidence=0.7)
+        kelt.atomic.assertions.add("User prefers Python")
+        kelt.atomic.solutions.record(agent_name="reviewer", ...)
+        kelt.atomic.predictions.record(hypothesis="X will happen", confidence=0.7)
 
         # Embedding operations
-        learn.atomic.embeddings.embed_fact(fact, "text-embedding-3-small")
-        results = learn.atomic.embeddings.search_similar(query_embedding, model_name)
+        kelt.atomic.embeddings.embed_fact(fact, "text-embedding-3-small")
+        results = kelt.atomic.embeddings.search_similar(query_embedding, model_name)
     """
 
     def __init__(

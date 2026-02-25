@@ -31,22 +31,22 @@ class Factory:
     Usage:
         from llm_kelt import Client, ClientContext
 
-        learn = Client(...)
+        kelt = Client(...)
 
         # Create and submit a manifest
-        manifest = learn.train.manifest.create(
+        manifest = kelt.train.manifest.create(
             adapter="coding-v1",
             method="dpo",
             model="Qwen/Qwen2.5-7B-Instruct",
             data=[{"prompt": "...", "chosen": "...", "rejected": "..."}],
         )
-        learn.train.manifest.submit(manifest)
+        kelt.train.manifest.submit(manifest)
 
         # Train from manifest
-        result = learn.train.dpo.train(manifest)
+        result = kelt.train.dpo.train(manifest)
 
         # List adapters
-        adapters = learn.train.registry.list()
+        adapters = kelt.train.registry.list()
     """
 
     def __init__(

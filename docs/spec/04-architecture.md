@@ -4,7 +4,7 @@
 
 ```
 +------------------------------------------------------------------+
-|                         LearnClient                               |
+|                         Client                               |
 |              (Profile-scoped API entry point)                     |
 +------------------------------------------------------------------+
          |                    |                    |
@@ -36,17 +36,17 @@
 
 ## Component Responsibilities
 
-### LearnClient
+### Client
 
 Main entry point, scoped to a context. Provides unified access to all collection APIs.
 
 ```python
-from llm_kelt import LearnClient
+from llm_kelt import Client
 
-learn = LearnClient(context_key="default")
-learn.facts.add("Prefers concise output", category="preferences")
-learn.feedback.record(content_text="...", signal="positive")
-learn.preferences.record(context="...", chosen="...", rejected="...")
+kelt = Client(context_key="default")
+kelt.facts.add("Prefers concise output", category="preferences")
+kelt.feedback.record(content_text="...", signal="positive")
+kelt.preferences.record(context="...", chosen="...", rejected="...")
 ```
 
 ### Collection Module
@@ -78,7 +78,7 @@ from llm_infer.client import LLMClient
 from llm_kelt.inference import ContextBuilder
 
 client = LLMClient.from_config(config["llm"])
-context = ContextBuilder(learn.facts)
+context = ContextBuilder(kelt.facts)
 system = context.build_system_prompt("You are a helpful assistant.")
 response = await client.chat_async(messages, system=system)
 ```
@@ -122,7 +122,7 @@ Client Request
        |
        v
 +-------------+     get facts     +-------------+
-|   SERVING   | ----------------> |    LEARN    |
+|   SERVING   | ----------------> |    KELT     |
 |   (Proxy)   |                   |   (Facts)   |
 +-------------+                   +-------------+
        |
@@ -144,7 +144,7 @@ User provides feedback
        |
        v
 +-------------+
-|    LEARN    |
+|    KELT     |
 |  (Feedback) |
 +-------------+
        |
@@ -160,11 +160,11 @@ User provides feedback
 
 ```
 +-------------+
-|    LEARN    |
+|    KELT     |
 +-------------+
        |
-       | learn.feedback.export_jsonl("feedback.jsonl")
-       | learn.preferences.export_jsonl("prefs.jsonl")
+       | kelt.feedback.export_jsonl("feedback.jsonl")
+       | kelt.preferences.export_jsonl("prefs.jsonl")
        v
 +-------------+
 |    JSONL    |  --> External training (LoRA, classifiers)
@@ -176,10 +176,10 @@ User provides feedback
 
 ## Interface Definitions
 
-### LearnClient API
+### Client API
 
 ```python
-class LearnClient:
+class Client:
     def __init__(self, context_key: str, database: Database | None = None): ...
 
     @property
@@ -288,11 +288,11 @@ exports/
 ### Single Process
 
 ```python
-from llm_kelt import LearnClient
+from llm_kelt import Client
 from llm_kelt.serving import create_server
 
-learn = LearnClient(context_key="default")
-server = create_server(llm_config=config, database=learn.database, context_key="default")
+kelt = Client(context_key="default")
+server = create_server(llm_config=config, database=kelt.database, context_key="default")
 server.start()
 ```
 

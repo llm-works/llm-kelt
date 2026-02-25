@@ -1,4 +1,4 @@
-"""Core infrastructure for Learn framework.
+"""Core infrastructure for Kelt framework.
 
 Provides database, models, exceptions, and shared utilities.
 Memory models (facts, predictions, etc.) are in memory/atomic.

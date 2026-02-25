@@ -43,13 +43,13 @@ pip install -e ".[dev]"
 from llm_kelt import Client
 
 # Create client scoped to a context
-learn = Client(context_key="default")
-learn.migrate()  # Create database tables
+kelt = Client(context_key="default")
+kelt.migrate()  # Create database tables
 
 # Add facts about the user
-learn.facts.add("Prefers concise explanations", category="preferences")
-learn.facts.add("Expert Python developer", category="background")
-learn.facts.add("Always include code examples", category="rules")
+kelt.facts.add("Prefers concise explanations", category="preferences")
+kelt.facts.add("Expert Python developer", category="background")
+kelt.facts.add("Always include code examples", category="rules")
 ```
 
 ### Context Injection
@@ -58,7 +58,7 @@ learn.facts.add("Always include code examples", category="rules")
 from llm_kelt.inference import ContextBuilder
 
 # Build system prompt with facts injected
-builder = ContextBuilder(learn.facts)
+builder = ContextBuilder(kelt.facts)
 system_prompt = builder.build_system_prompt(
     base_prompt="You are a helpful assistant.",
     categories=["preferences", "rules"],  # Optional: filter by category
@@ -78,13 +78,13 @@ from llm_kelt.inference import (
 
 # 1. Embed facts for semantic search (model name discovered from server)
 embedder = Embedder(base_url="http://localhost:8001/v1")
-await embed_missing_facts(logger, embedder, learn.facts)
+await embed_missing_facts(logger, embedder, kelt.facts)
 
 # 2. Create context-aware query interface
 llm_client = LLMClient.from_config(config)
 query = ContextQuery(
     client=llm_client,
-    context_builder=ContextBuilder(learn.facts),
+    context_builder=ContextBuilder(kelt.facts),
     base_system_prompt="You are a helpful assistant.",
     embedder=embedder,
 )
@@ -112,7 +112,7 @@ from llm_kelt.training import export_feedback_sft
 from llm_kelt.training.dpo import export_preferences
 
 # Record preference pairs
-learn.atomic.preferences.record(
+kelt.atomic.preferences.record(
     context="Explain gradient descent",
     chosen="Concise, accurate explanation",
     rejected="Verbose, rambling explanation",
@@ -120,16 +120,16 @@ learn.atomic.preferences.record(
 
 # Export to DPO format for TRL
 result = export_preferences(
-    session_factory=learn.database.session,
-    context_key=learn.context_key,
+    session_factory=kelt.database.session,
+    context_key=kelt.context_key,
     output_path="preferences.jsonl",
 )
 # Output: {"prompt": str, "chosen": str, "rejected": str}
 
 # Export feedback to SFT format
 result = export_feedback_sft(
-    session_factory=learn.database.session,
-    context_key=learn.context_key,
+    session_factory=kelt.database.session,
+    context_key=kelt.context_key,
     output_path="feedback_sft.jsonl",
     signal="positive",
 )

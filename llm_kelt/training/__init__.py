@@ -1,4 +1,4 @@
-"""Training modules for Learn framework.
+"""Training modules for Kelt framework.
 
 Contains utilities for training data preparation and model fine-tuning:
 - manifest: File-based training workflow (create, submit, run manifests)

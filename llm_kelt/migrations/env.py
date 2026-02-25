@@ -1,4 +1,4 @@
-"""Alembic environment configuration for Learn framework."""
+"""Alembic environment configuration for Kelt framework."""
 
 import os
 import sys

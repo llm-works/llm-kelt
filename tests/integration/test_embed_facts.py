@@ -45,7 +45,7 @@ class TestEmbedMissingFactsIntegration:
         return embedder
 
     @pytest.fixture
-    def sample_facts(self, learn_client, clean_tables):
+    def sample_facts(self, kelt_client, clean_tables):
         """Create a small set of facts for testing."""
         facts = [
             ("User prefers Python", "preferences"),
@@ -56,29 +56,29 @@ class TestEmbedMissingFactsIntegration:
         ]
         fact_ids = []
         for content, category in facts:
-            fact_id = learn_client.atomic.assertions.add(content, category=category)
+            fact_id = kelt_client.atomic.assertions.add(content, category=category)
             fact_ids.append(fact_id)
         return fact_ids
 
     @pytest.mark.asyncio
-    async def test_embed_all_facts(self, logger, learn_client, mock_embedder, sample_facts):
+    async def test_embed_all_facts(self, logger, kelt_client, mock_embedder, sample_facts):
         """Test embedding all facts that don't have embeddings."""
         # Verify no embeddings exist
-        without = learn_client.atomic.embeddings.list_without_embeddings("test-model")
+        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model")
         assert len(without) == 5
 
         # Run embedding - pass the embeddings adapter
-        result = await embed_missing_facts(logger, mock_embedder, learn_client.atomic.embeddings)
+        result = await embed_missing_facts(logger, mock_embedder, kelt_client.atomic.embeddings)
 
         assert result.processed == 5
         assert result.failed == 0
 
         # Verify all facts now have embeddings
-        without_after = learn_client.atomic.embeddings.list_without_embeddings("test-model")
+        without_after = kelt_client.atomic.embeddings.list_without_embeddings("test-model")
         assert len(without_after) == 0
 
         # Verify embeddings work for similarity search
-        search_results = learn_client.atomic.embeddings.search_similar(
+        search_results = kelt_client.atomic.embeddings.search_similar(
             query=[0.2, 0.3, 0.4],
             model_name="test-model",
             min_similarity=0.0,
@@ -87,15 +87,15 @@ class TestEmbedMissingFactsIntegration:
 
     @pytest.mark.asyncio
     async def test_embed_skips_already_embedded(
-        self, logger, learn_client, mock_embedder, sample_facts
+        self, logger, kelt_client, mock_embedder, sample_facts
     ):
         """Test that already-embedded facts are skipped."""
         # Embed first two facts manually
-        learn_client.atomic.embeddings.set_embedding(sample_facts[0], [0.1, 0.2, 0.3], "test-model")
-        learn_client.atomic.embeddings.set_embedding(sample_facts[1], [0.4, 0.5, 0.6], "test-model")
+        kelt_client.atomic.embeddings.set_embedding(sample_facts[0], [0.1, 0.2, 0.3], "test-model")
+        kelt_client.atomic.embeddings.set_embedding(sample_facts[1], [0.4, 0.5, 0.6], "test-model")
 
         # Run embedding
-        result = await embed_missing_facts(logger, mock_embedder, learn_client.atomic.embeddings)
+        result = await embed_missing_facts(logger, mock_embedder, kelt_client.atomic.embeddings)
 
         # Should only process the 3 without embeddings
         assert result.processed == 3
@@ -103,36 +103,36 @@ class TestEmbedMissingFactsIntegration:
 
     @pytest.mark.asyncio
     async def test_embed_different_model_embeds_all(
-        self, logger, learn_client, mock_embedder, sample_facts
+        self, logger, kelt_client, mock_embedder, sample_facts
     ):
         """Test that switching models embeds all facts for new model."""
         # Embed all for model-a
         for fact_id in sample_facts:
-            learn_client.atomic.embeddings.set_embedding(fact_id, [0.1, 0.2, 0.3], "model-a")
+            kelt_client.atomic.embeddings.set_embedding(fact_id, [0.1, 0.2, 0.3], "model-a")
 
         # Update embedder to discover model-b
         mock_embedder.discover_async = AsyncMock(return_value="model-b")
 
         # Run embedding - should discover model-b and embed all for it
-        result = await embed_missing_facts(logger, mock_embedder, learn_client.atomic.embeddings)
+        result = await embed_missing_facts(logger, mock_embedder, kelt_client.atomic.embeddings)
 
         # Should embed all 5 for the new model
         assert result.processed == 5
         assert result.failed == 0
 
         # Both models should have embeddings now
-        without_a = learn_client.atomic.embeddings.list_without_embeddings("model-a")
-        without_b = learn_client.atomic.embeddings.list_without_embeddings("model-b")
+        without_a = kelt_client.atomic.embeddings.list_without_embeddings("model-a")
+        without_b = kelt_client.atomic.embeddings.list_without_embeddings("model-b")
         assert len(without_a) == 0
         assert len(without_b) == 0
 
     @pytest.mark.asyncio
     async def test_embed_respects_batch_size(
-        self, logger, learn_client, mock_embedder, sample_facts
+        self, logger, kelt_client, mock_embedder, sample_facts
     ):
         """Test that batch_size controls how many facts are processed per batch."""
         result = await embed_missing_facts(
-            logger, mock_embedder, learn_client.atomic.embeddings, batch_size=2
+            logger, mock_embedder, kelt_client.atomic.embeddings, batch_size=2
         )
 
         assert result.processed == 5
@@ -143,21 +143,21 @@ class TestEmbedMissingFactsIntegration:
 
     @pytest.mark.asyncio
     async def test_embed_inactive_facts_skipped(
-        self, logger, learn_client, mock_embedder, clean_tables
+        self, logger, kelt_client, mock_embedder, clean_tables
     ):
         """Test that inactive facts are not embedded."""
         # Create mix of active and inactive facts
-        active_id = learn_client.atomic.assertions.add("Active fact")
-        inactive_id = learn_client.atomic.assertions.add("Inactive fact")
-        learn_client.atomic.assertions.deactivate(inactive_id)
+        active_id = kelt_client.atomic.assertions.add("Active fact")
+        inactive_id = kelt_client.atomic.assertions.add("Inactive fact")
+        kelt_client.atomic.assertions.deactivate(inactive_id)
 
-        result = await embed_missing_facts(logger, mock_embedder, learn_client.atomic.embeddings)
+        result = await embed_missing_facts(logger, mock_embedder, kelt_client.atomic.embeddings)
 
         # Only active fact should be embedded
         assert result.processed == 1
 
         # Verify via search
-        search_results = learn_client.atomic.embeddings.search_similar(
+        search_results = kelt_client.atomic.embeddings.search_similar(
             query=[0.1, 0.2, 0.3],
             model_name="test-model",
             min_similarity=0.0,
@@ -166,9 +166,9 @@ class TestEmbedMissingFactsIntegration:
         assert search_results[0].entity.id == active_id
 
     @pytest.mark.asyncio
-    async def test_embed_empty_context(self, logger, learn_client, mock_embedder, clean_tables):
+    async def test_embed_empty_context(self, logger, kelt_client, mock_embedder, clean_tables):
         """Test embedding when context has no facts."""
-        result = await embed_missing_facts(logger, mock_embedder, learn_client.atomic.embeddings)
+        result = await embed_missing_facts(logger, mock_embedder, kelt_client.atomic.embeddings)
 
         assert result.processed == 0
         assert result.failed == 0

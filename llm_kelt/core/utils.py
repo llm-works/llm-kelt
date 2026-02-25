@@ -1,4 +1,4 @@
-"""Core utility functions for Learn framework."""
+"""Core utility functions for Kelt framework."""
 
 # Re-export from base for backwards compatibility
 from .base import utc_now

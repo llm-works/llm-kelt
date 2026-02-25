@@ -28,11 +28,11 @@ class Client:
 
     Usage:
         # Train from manifest object
-        manifest = learn.train.manifest.create(method="sft", ...)
-        result = learn.train.sft.train(manifest)
+        manifest = kelt.train.manifest.create(method="sft", ...)
+        result = kelt.train.sft.train(manifest)
 
         # Train from manifest path
-        result = learn.train.sft.train_from_path(Path("manifest.yaml"))
+        result = kelt.train.sft.train_from_path(Path("manifest.yaml"))
     """
 
     def __init__(

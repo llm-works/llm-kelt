@@ -1,4 +1,4 @@
-# Learn Framework Configuration
+# Kelt Framework Configuration
 # Main entry point - includes all sub-configs
 
 # Infrastructure (logging, database, llm, embedding)
@@ -26,8 +26,8 @@ adapters:
   lora:
     base_path: !include "../.env.yaml#paths.adapters"
 
-# Learn-specific settings (runtime behavior)
-learn:
+# Kelt-specific settings (runtime behavior)
+kelt:
   # Memory/Context Injection settings
   memory:
     max_facts: 100              # Maximum facts to inject per query

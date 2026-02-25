@@ -10,7 +10,7 @@ from .routes import create_router
 
 
 def create_server(
-    learn_client: Client,
+    kelt_client: Client,
     model_name: str = "llm-kelt-proxy",
     host: str = "0.0.0.0",
     port: int = 8001,
@@ -18,7 +18,7 @@ def create_server(
     """Create server with learning-enhanced LLM proxy.
 
     Args:
-        learn_client: Configured Client instance.
+        kelt_client: Configured Client instance.
         model_name: Model name to report in responses.
         host: Host to bind to.
         port: Port to bind to (default 8001, since llm-infer uses 8000).
@@ -36,20 +36,20 @@ def create_server(
         lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
         factory = ClientFactory(lg)
         context = ClientContext(context_key="my-agent")
-        learn_client = factory.create_from_config(context=context, config=config)
+        kelt_client = factory.create_from_config(context=context, config=config)
 
-        server = create_server(learn_client)
+        server = create_server(kelt_client)
         server.start()
     """
     # Ensure LLM client is configured
-    if learn_client.llm_client is None:
+    if kelt_client.llm_client is None:
         raise ValueError("Client must have llm_client configured for serving")
 
-    # Create router with dependencies from learn_client
+    # Create router with dependencies from kelt_client
     router = create_router(
         model_name=model_name,
-        llm_client=learn_client.llm_client,
-        context_builder=learn_client.context_builder,
+        llm_client=kelt_client.llm_client,
+        context_builder=kelt_client.context_builder,
     )
 
     return (
@@ -73,7 +73,7 @@ def create_server_from_config(config: dict, lg: Logger | None = None) -> Server:
             - dbs.main: Database configuration
             - llm: LLM backend configuration
             - embedding: Embedding service configuration
-            - learn: Learn-specific settings
+            - kelt: Kelt-specific settings
             - proxy: Proxy-specific settings (host, port, context_key, model_name)
         lg: Optional logger. If not provided, creates one.
 
@@ -96,13 +96,13 @@ def create_server_from_config(config: dict, lg: Logger | None = None) -> Server:
 
     factory = ClientFactory(lg)
     context = ClientContext(context_key=str(context_key))
-    learn_client = factory.create_from_config(
+    kelt_client = factory.create_from_config(
         context=context,
         config=DotDict(**config),
     )
 
     return create_server(
-        learn_client=learn_client,
+        kelt_client=kelt_client,
         model_name=proxy_config.get("model_name", "llm-kelt-proxy"),
         host=proxy_config.get("host", config.get("host", "0.0.0.0")),
         port=proxy_config.get("port", config.get("port", 8001)),

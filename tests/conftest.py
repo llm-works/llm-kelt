@@ -1,4 +1,4 @@
-"""Pytest fixtures for Learn framework tests."""
+"""Pytest fixtures for Kelt framework tests."""
 
 import os
 import socket
@@ -219,7 +219,7 @@ def test_context(request):
 
 
 @pytest.fixture
-def learn_client(logger, database, test_context):
+def kelt_client(logger, database, test_context):
     """Create Client for testing, scoped to test context."""
     from llm_kelt import ClientContext
 
@@ -238,9 +238,9 @@ def clean_tables(database, test_context):
 
 
 @pytest.fixture
-def sample_content(learn_client, clean_tables):
+def sample_content(kelt_client, clean_tables):
     """Create sample content for testing."""
-    content_id = learn_client.content.create(
+    content_id = kelt_client.content.create(
         content_text="This is a test article about AI and machine learning.",
         source="test",
         external_id="test_001",
@@ -251,14 +251,14 @@ def sample_content(learn_client, clean_tables):
 
 
 @pytest.fixture
-def sample_feedback(learn_client, clean_tables):
+def sample_feedback(kelt_client, clean_tables):
     """Create sample feedback for testing."""
     # Create content first, then record feedback on it
-    content_id = learn_client.content.create(
+    content_id = kelt_client.content.create(
         content_text="Sample content for feedback",
         source="test",
     )
-    feedback_id = learn_client.atomic.feedback.record(
+    feedback_id = kelt_client.atomic.feedback.record(
         signal="positive",
         content_id=content_id,
         strength=0.9,

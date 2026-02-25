@@ -20,9 +20,9 @@ Usage:
     lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
     factory = ClientFactory(lg)
     context = ClientContext(context_key="my-agent")
-    learn = factory.create_from_config(context=context, config=config)
+    kelt = factory.create_from_config(context=context, config=config)
     client = LLMClient.from_config(config["llm"])
-    context_builder = ContextBuilder(learn.assertions)
+    context_builder = ContextBuilder(kelt.atomic.assertions)
 
     # Build prompt with facts injected
     system = context_builder.build_system_prompt("You are a helpful assistant.")

@@ -86,7 +86,7 @@ class ClientFactory:
             embedding:
               model_name: all-MiniLM-L6-v2
               base_url: http://localhost:8001/v1
-            learn:
+            kelt:
               memory:
                 max_facts: 100
                 min_confidence: 0.0
@@ -99,7 +99,7 @@ class ClientFactory:
             lg=self._lg,
             embedder=self._create_embedder(config),
             llm_client=self._create_llm_client(config),
-            learn_config=getattr(config, "learn", None),
+            kelt_config=getattr(config, "kelt", None),
             training_config=getattr(config, "training", None),
             ensure_schema=ensure_schema,
         )
@@ -110,7 +110,7 @@ class ClientFactory:
         database: Database,
         embedder: Embedder | None = None,
         llm_client: ChatClient | None = None,
-        learn_config: DotDict | None = None,
+        kelt_config: DotDict | None = None,
         training_config: DotDict | None = None,
         ensure_schema: bool = True,
     ) -> Client:
@@ -124,7 +124,7 @@ class ClientFactory:
             database: Existing Database instance
             embedder: Optional existing Embedder instance
             llm_client: Optional existing LLM client instance
-            learn_config: Optional learn settings (config.learn section)
+            kelt_config: Optional kelt settings (config.kelt section)
             training_config: Optional training settings (config.training section)
             ensure_schema: If True (default), auto-migrate schema on init
 
@@ -137,7 +137,7 @@ class ClientFactory:
             lg=self._lg,
             embedder=embedder,
             llm_client=llm_client,
-            learn_config=learn_config,
+            kelt_config=kelt_config,
             training_config=training_config,
             ensure_schema=ensure_schema,
         )

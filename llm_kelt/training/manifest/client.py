@@ -53,7 +53,7 @@ class Client:
 
     Usage:
         # Create a manifest
-        manifest = learn.train.manifest.create(
+        manifest = kelt.train.manifest.create(
             adapter="coding-v1",
             method="dpo",
             model="Qwen/Qwen2.5-7B-Instruct",
@@ -61,13 +61,13 @@ class Client:
         )
 
         # Save to file
-        learn.train.manifest.save(manifest, Path("coding-v1.yaml"))
+        kelt.train.manifest.save(manifest, Path("coding-v1.yaml"))
 
         # Submit to training queue
-        learn.train.manifest.submit(manifest)
+        kelt.train.manifest.submit(manifest)
 
         # List pending manifests
-        learn.train.manifest.list_pending()
+        kelt.train.manifest.list_pending()
     """
 
     def __init__(

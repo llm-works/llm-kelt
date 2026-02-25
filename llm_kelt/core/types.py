@@ -1,4 +1,4 @@
-"""Shared types for the Learn framework."""
+"""Shared types for the Kelt framework."""
 
 from dataclasses import dataclass
 from typing import Generic, TypeVar

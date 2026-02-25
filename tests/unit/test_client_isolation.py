@@ -25,7 +25,7 @@ class TestClientIsolation:
         return Mock()
 
     @pytest.fixture
-    def learn_client(self, mock_logger, mock_database):
+    def kelt_client(self, mock_logger, mock_database):
         """Create Client with mocked dependencies."""
         from unittest.mock import patch
 
@@ -41,48 +41,48 @@ class TestClientIsolation:
                     )
                     return client
 
-    def test_context_property_returns_isolation_context(self, learn_client):
+    def test_context_property_returns_isolation_context(self, kelt_client):
         """Test that context property returns ClientContext."""
-        context = learn_client.context
+        context = kelt_client.context
 
         assert isinstance(context, ClientContext)
         assert context.context_key == "a" * 32
         assert context.schema_name is None
 
-    def test_with_isolation_override_schema(self, learn_client, mock_logger, mock_database):
+    def test_with_isolation_override_schema(self, kelt_client, mock_logger, mock_database):
         """Test overriding just schema with with_isolation()."""
         from unittest.mock import patch
 
         with patch.object(Client, "_verify_schema"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
-                    new_client = learn_client.with_isolation(schema_name="public")
+                    new_client = kelt_client.with_isolation(schema_name="public")
 
         # New client should have merged context
         assert new_client.context.context_key == "a" * 32  # Kept from original
         assert new_client.context.schema_name == "public"  # Overridden
 
-    def test_with_isolation_override_context_key(self, learn_client, mock_logger, mock_database):
+    def test_with_isolation_override_context_key(self, kelt_client, mock_logger, mock_database):
         """Test overriding just context_key with with_isolation()."""
         from unittest.mock import patch
 
         with patch.object(Client, "_verify_schema"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
-                    new_client = learn_client.with_isolation(context_key="b" * 32)
+                    new_client = kelt_client.with_isolation(context_key="b" * 32)
 
         # New client should have new context_key
         assert new_client.context.context_key == "b" * 32
         assert new_client.context.schema_name is None  # Kept from original
 
-    def test_with_isolation_override_both(self, learn_client, mock_logger, mock_database):
+    def test_with_isolation_override_both(self, kelt_client, mock_logger, mock_database):
         """Test overriding both fields with with_isolation()."""
         from unittest.mock import patch
 
         with patch.object(Client, "_verify_schema"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
-                    new_client = learn_client.with_isolation(
+                    new_client = kelt_client.with_isolation(
                         context_key="c" * 32, schema_name="customer_acme"
                     )
 
@@ -90,30 +90,30 @@ class TestClientIsolation:
         assert new_client.context.context_key == "c" * 32
         assert new_client.context.schema_name == "customer_acme"
 
-    def test_with_isolation_preserves_other_params(self, learn_client):
+    def test_with_isolation_preserves_other_params(self, kelt_client):
         """Test that with_isolation() preserves other client parameters."""
         from unittest.mock import patch
 
         with patch.object(Client, "_verify_schema"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
-                    new_client = learn_client.with_isolation(schema_name="public")
+                    new_client = kelt_client.with_isolation(schema_name="public")
 
         # Should preserve database reference
-        assert new_client.database is learn_client.database
+        assert new_client.database is kelt_client.database
 
-    def test_with_isolation_no_args_no_change(self, learn_client):
+    def test_with_isolation_no_args_no_change(self, kelt_client):
         """Test that with_isolation() with no args doesn't change context."""
         from unittest.mock import patch
 
         with patch.object(Client, "_verify_schema"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
-                    new_client = learn_client.with_isolation()
+                    new_client = kelt_client.with_isolation()
 
         # Should keep original context_key
-        assert new_client.context.context_key == learn_client.context.context_key
-        assert new_client.context.schema_name == learn_client.context.schema_name
+        assert new_client.context.context_key == kelt_client.context.context_key
+        assert new_client.context.schema_name == kelt_client.context.schema_name
 
     def test_with_isolation_can_clear_to_none(self, mock_logger, mock_database):
         """Test that with_isolation() can explicitly clear a field to None."""

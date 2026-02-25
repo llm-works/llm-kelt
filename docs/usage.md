@@ -7,9 +7,9 @@ How to use the llm-kelt.
 ## Setup
 
 ```python
-from llm_kelt import LearnClient
+from llm_kelt import Client
 
-client = LearnClient("etc/infra.yaml")
+client = Client("etc/infra.yaml")
 
 # Run migrations (first time)
 client.migrate()

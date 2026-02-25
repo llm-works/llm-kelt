@@ -1,8 +1,8 @@
-"""Custom exceptions for Learn framework."""
+"""Custom exceptions for Kelt framework."""
 
 
 class KeltError(Exception):
-    """Base exception for Learn framework."""
+    """Base exception for Kelt framework."""
 
     pass
 

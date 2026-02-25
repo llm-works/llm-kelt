@@ -28,12 +28,12 @@ if TYPE_CHECKING:
 
 class Client:
     """
-    Main client for the Learn framework, scoped to an isolation context.
+    Main client for the Kelt framework, scoped to an isolation context.
 
     Provides unified access to all framework capabilities:
-    - learn.atomic.* - Fact-based memory storage (assertions, solutions, feedback, etc.)
-    - learn.train.* - Training manifest and execution
-    - learn.query - Context-aware LLM queries
+    - kelt.atomic.* - Fact-based memory storage (assertions, solutions, feedback, etc.)
+    - kelt.train.* - Training manifest and execution
+    - kelt.query - Context-aware LLM queries
 
     Usage (via factory - recommended):
         from appinfra.config import Config
@@ -45,34 +45,34 @@ class Client:
 
         factory = ClientFactory(lg)
         context = ClientContext(context_key="my-agent", schema_name="public")
-        learn = factory.create_from_config(context=context, config=config)
+        kelt = factory.create_from_config(context=context, config=config)
 
     Usage (direct - for testing or shared resources):
         from llm_kelt import Client, ClientContext
 
         context = ClientContext(context_key="my-agent", schema_name="public")
-        learn = Client(
+        kelt = Client(
             database=db, context=context, lg=lg,
             embedder=embedder, llm_client=llm_client,
         )
 
     Memory API:
-        learn.atomic.assertions.add("Prefers concise explanations", category="preferences")
-        learn.atomic.solutions.record(agent_name="reviewer", problem="...", ...)
-        learn.atomic.feedback.record(signal="positive", content_id=456)
+        kelt.atomic.assertions.add("Prefers concise explanations", category="preferences")
+        kelt.atomic.solutions.record(agent_name="reviewer", problem="...", ...)
+        kelt.atomic.feedback.record(signal="positive", content_id=456)
 
     Training API:
-        manifest = learn.train.manifest.create(
+        manifest = kelt.train.manifest.create(
             key="my-adapter",
             method="dpo",
             model="Qwen/Qwen2.5-7B-Instruct",
             data=[{"prompt": "...", "chosen": "...", "rejected": "..."}],
         )
-        learn.train.manifest.submit(manifest)
-        result = learn.train.dpo.train(manifest)
+        kelt.train.manifest.submit(manifest)
+        result = kelt.train.dpo.train(manifest)
 
     Query API (requires llm_client):
-        response = await learn.query.ask("What's a good approach?")
+        response = await kelt.query.ask("What's a good approach?")
     """
 
     def __init__(
@@ -82,7 +82,7 @@ class Client:
         context: ClientContext,
         embedder: Embedder | None = None,
         llm_client: ChatClient | None = None,
-        learn_config: DotDict | None = None,
+        kelt_config: DotDict | None = None,
         training_config: DotDict | None = None,
         ensure_schema: bool = True,
     ) -> None:
@@ -95,7 +95,7 @@ class Client:
             lg: Optional logger instance
             embedder: Optional embedder for generating embeddings
             llm_client: Optional LLM client for context-aware queries
-            learn_config: Optional learn settings (config.learn section)
+            kelt_config: Optional kelt settings (config.kelt section)
             training_config: Optional training settings (config.training section)
             ensure_schema: If True (default), auto-migrate schema on init
         """
@@ -104,7 +104,7 @@ class Client:
         self._lg = lg
         self._embedder = embedder
         self._llm_client = llm_client
-        self._learn_config = learn_config
+        self._kelt_config = kelt_config
         self._training_config = training_config
 
         self._verify_schema(ensure=ensure_schema)
@@ -174,13 +174,13 @@ class Client:
 
         Example:
             # Override just schema (keeps same context_key)
-            learn.with_isolation(schema_name="public")
+            kelt.with_isolation(schema_name="public")
 
             # Clear context_key to None, keep schema_name
-            learn.with_isolation(context_key=None)
+            kelt.with_isolation(context_key=None)
 
             # Override both
-            learn.with_isolation(
+            kelt.with_isolation(
                 context_key="other_context",
                 schema_name="customer_other"
             )
@@ -207,7 +207,7 @@ class Client:
             lg=self._lg,
             embedder=self._embedder,
             llm_client=self._llm_client,
-            learn_config=self._learn_config,
+            kelt_config=self._kelt_config,
             training_config=self._training_config,
             ensure_schema=False,  # Don't re-run schema checks
         )
@@ -226,7 +226,7 @@ class Client:
     def train(self) -> TrainFactory:
         """Access training factory for manifest lifecycle and training execution.
 
-        Requires adapters.lora.base_path to be configured in learn_config.
+        Requires adapters.lora.base_path to be configured in kelt_config.
 
         Raises:
             RuntimeError: If adapters.lora.base_path is not configured.
@@ -237,16 +237,16 @@ class Client:
             registry_path = self._get_registry_path()
             if registry_path is None:
                 raise RuntimeError(
-                    "Training not configured: adapters.lora.base_path not set in learn_config"
+                    "Training not configured: adapters.lora.base_path not set in kelt_config"
                 )
             self._train = Factory(self._lg, registry_path, self._get_default_profiles())
         return self._train
 
     def _get_registry_path(self) -> Path | None:
-        """Get adapter registry path from learn_config."""
-        if self._learn_config is None:
+        """Get adapter registry path from kelt_config."""
+        if self._kelt_config is None:
             return None
-        adapters = getattr(self._learn_config, "adapters", None)
+        adapters = getattr(self._kelt_config, "adapters", None)
         if adapters is None:
             return None
         lora = getattr(adapters, "lora", None)
@@ -285,9 +285,9 @@ class Client:
         return self._embedder
 
     @property
-    def learn_config(self) -> DotDict | None:
-        """Access learn configuration (memory, embedding, default_system_prompt, etc.)."""
-        return self._learn_config
+    def kelt_config(self) -> DotDict | None:
+        """Access kelt configuration (memory, embedding, default_system_prompt, etc.)."""
+        return self._kelt_config
 
     @property
     def context_builder(self) -> ContextBuilder:
@@ -306,10 +306,10 @@ class Client:
         return self._context_query
 
     def _get_default_system_prompt(self) -> str:
-        """Get default system prompt from learn config."""
-        if self._learn_config is None:
+        """Get default system prompt from kelt config."""
+        if self._kelt_config is None:
             return ""
-        return getattr(self._learn_config, "default_system_prompt", "") or ""
+        return getattr(self._kelt_config, "default_system_prompt", "") or ""
 
     def _verify_schema(self, *, ensure: bool) -> None:
         """Verify database schema is current, optionally auto-migrating.

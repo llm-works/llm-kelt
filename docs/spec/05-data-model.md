@@ -337,7 +337,7 @@ For DPO training.
 All schema changes tracked in migrations.
 
 ```
-learn/
+kelt/
 +-- migrations/
     +-- 001_initial_schema.sql
     +-- 002_add_predictions.sql
