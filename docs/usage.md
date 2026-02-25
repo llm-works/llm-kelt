@@ -7,12 +7,18 @@ How to use the llm-kelt.
 ## Setup
 
 ```python
-from llm_kelt import Client
+from appinfra.config import Config
+from appinfra.log import LogConfig, LoggerFactory
+from llm_kelt import ClientContext, ClientFactory
 
-client = Client("etc/infra.yaml")
+# Load configuration
+config = Config("etc/llm-kelt.yaml")
+lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
 
-# Run migrations (first time)
-client.migrate()
+# Create client via factory
+factory = ClientFactory(lg)
+context = ClientContext(context_key="default")
+client = factory.create_from_config(context=context, config=config)
 
 # Check connection
 client.health_check()
@@ -149,7 +155,7 @@ client.directives.set_status(directive_id, "completed")
 ## Exporting Training Data
 
 ```python
-from llm_kelt.export.jsonl import (
+from llm_kelt.core.export import (
     export_feedback,
     export_preferences,
     export_predictions,

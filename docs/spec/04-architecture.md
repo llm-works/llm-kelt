@@ -41,12 +41,19 @@
 Main entry point, scoped to a context. Provides unified access to all collection APIs.
 
 ```python
-from llm_kelt import Client
+from appinfra.config import Config
+from appinfra.log import LogConfig, LoggerFactory
+from llm_kelt import ClientContext, ClientFactory
 
-kelt = Client(context_key="default")
-kelt.facts.add("Prefers concise output", category="preferences")
-kelt.feedback.record(content_text="...", signal="positive")
-kelt.preferences.record(context="...", chosen="...", rejected="...")
+config = Config("etc/llm-kelt.yaml")
+lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
+factory = ClientFactory(lg)
+context = ClientContext(context_key="default")
+kelt = factory.create_from_config(context=context, config=config)
+
+kelt.atomic.assertions.add("Prefers concise output", category="preferences")
+kelt.atomic.feedback.record(content_text="...", signal="positive")
+kelt.atomic.preferences.record(context="...", chosen="...", rejected="...")
 ```
 
 ### Collection Module
@@ -88,13 +95,14 @@ response = await client.chat_async(messages, system=system)
 OpenAI-compatible proxy server that injects facts into requests:
 
 ```python
+from llm_kelt import ClientContext, ClientFactory
 from llm_kelt.serving import create_server
 
-server = create_server(
-    llm_config=config["llm"],
-    database=db,
-    context_key="default",
-)
+factory = ClientFactory(lg)
+context = ClientContext(context_key="default")
+kelt = factory.create_from_config(context=context, config=config)
+
+server = create_server(kelt)
 server.start()  # Serves on :8001
 ```
 
@@ -180,7 +188,17 @@ User provides feedback
 
 ```python
 class Client:
-    def __init__(self, context_key: str, database: Database | None = None): ...
+    def __init__(
+        self,
+        lg: Logger,
+        database: Database,
+        context: ClientContext,
+        embedder: Embedder | None = None,
+        llm_client: ChatClient | None = None,
+        kelt_config: DotDict | None = None,
+        training_config: DotDict | None = None,
+        ensure_schema: bool = True,
+    ) -> None: ...
 
     @property
     def facts(self) -> FactsClient: ...
@@ -288,17 +306,24 @@ exports/
 ### Single Process
 
 ```python
-from llm_kelt import Client
+from appinfra.config import Config
+from appinfra.log import LogConfig, LoggerFactory
+from llm_kelt import ClientContext, ClientFactory
 from llm_kelt.serving import create_server
 
-kelt = Client(context_key="default")
-server = create_server(llm_config=config, database=kelt.database, context_key="default")
+config = Config("etc/llm-kelt.yaml")
+lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
+factory = ClientFactory(lg)
+context = ClientContext(context_key="default")
+kelt = factory.create_from_config(context=context, config=config)
+
+server = create_server(kelt)
 server.start()
 ```
 
 ### With External LLM
 
-```
+```text
 +------------------+     +------------------+
 |  llm-kelt proxy |     |  LLM Backend     |
 |      :8001       | --> |  (vLLM :8000)    |
