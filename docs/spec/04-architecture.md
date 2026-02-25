@@ -41,7 +41,7 @@
 Main entry point, scoped to a context. Provides unified access to all collection APIs.
 
 ```python
-from llm_learn import LearnClient
+from llm_kelt import LearnClient
 
 learn = LearnClient(context_key="default")
 learn.facts.add("Prefers concise output", category="preferences")
@@ -75,7 +75,7 @@ For LLM client functionality, use `llm_infer.client.LLMClient` directly.
 
 ```python
 from llm_infer.client import LLMClient
-from llm_learn.inference import ContextBuilder
+from llm_kelt.inference import ContextBuilder
 
 client = LLMClient.from_config(config["llm"])
 context = ContextBuilder(learn.facts)
@@ -88,7 +88,7 @@ response = await client.chat_async(messages, system=system)
 OpenAI-compatible proxy server that injects facts into requests:
 
 ```python
-from llm_learn.serving import create_server
+from llm_kelt.serving import create_server
 
 server = create_server(
     llm_config=config["llm"],
@@ -288,8 +288,8 @@ exports/
 ### Single Process
 
 ```python
-from llm_learn import LearnClient
-from llm_learn.serving import create_server
+from llm_kelt import LearnClient
+from llm_kelt.serving import create_server
 
 learn = LearnClient(context_key="default")
 server = create_server(llm_config=config, database=learn.database, context_key="default")
@@ -300,7 +300,7 @@ server.start()
 
 ```
 +------------------+     +------------------+
-|  llm-learn proxy |     |  LLM Backend     |
+|  llm-kelt proxy |     |  LLM Backend     |
 |      :8001       | --> |  (vLLM :8000)    |
 +------------------+     +------------------+
          |

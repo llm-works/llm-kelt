@@ -9,7 +9,7 @@ This example demonstrates:
 
 Prerequisites:
     - PostgreSQL database with pgvector extension
-    - Config file at etc/llm-learn.yaml
+    - Config file at etc/llm-kelt.yaml
 
 Usage:
     python examples/03_training_export.py
@@ -26,9 +26,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from _helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, psql_cmd
 
-from llm_learn import ClientContext, LearnClient, LearnClientFactory
-from llm_learn.training import ExportResult, export_feedback_classifier, export_feedback_sft
-from llm_learn.training.dpo import export_preferences
+from llm_kelt import Client, ClientContext, ClientFactory
+from llm_kelt.training import ExportResult, export_feedback_classifier, export_feedback_sft
+from llm_kelt.training.dpo import export_preferences
 
 # Sample content: (text, title)
 _SAMPLE_CONTENT = [
@@ -101,13 +101,13 @@ def print_export_result(result: ExportResult, show_content: bool = True):
                 print(f"      {MUTED}{display}{RESET}")
 
 
-def record_sample_data(learn: LearnClient):
+def record_sample_data(learn: Client):
     """Record sample feedback and preferences for the demo."""
     print(f"\n{H2}▶ Recording Sample Data{RESET}")
 
     # Clear existing data for clean demo
-    from llm_learn.core.models import Content
-    from llm_learn.memory.atomic.models import Fact, FeedbackDetails, PreferenceDetails
+    from llm_kelt.core.models import Content
+    from llm_kelt.memory.atomic.models import Fact, FeedbackDetails, PreferenceDetails
 
     with learn.database.session() as session:
         session.query(FeedbackDetails).filter(
@@ -168,7 +168,7 @@ def record_sample_data(learn: LearnClient):
     )
 
 
-def demo_dpo_export(output_dir: Path, learn: LearnClient):
+def demo_dpo_export(output_dir: Path, learn: Client):
     """Export to DPO format."""
     print(f"\n{H2}▶ DPO Export{RESET}")
     print(f"  {MUTED}Format: {{prompt, chosen, rejected}}{RESET}")
@@ -183,7 +183,7 @@ def demo_dpo_export(output_dir: Path, learn: LearnClient):
     print_export_result(result)
 
 
-def demo_sft_export(output_dir: Path, learn: LearnClient):
+def demo_sft_export(output_dir: Path, learn: Client):
     """Export to SFT format."""
     print(f"\n{H2}▶ SFT Export{RESET}")
     print(f"  {MUTED}Format: {{instruction, output}} (Alpaca format){RESET}")
@@ -210,7 +210,7 @@ def demo_sft_export(output_dir: Path, learn: LearnClient):
     print_export_result(result_ctx)
 
 
-def demo_classifier_export(output_dir: Path, learn: LearnClient):
+def demo_classifier_export(output_dir: Path, learn: Client):
     """Export to classifier format."""
     print(f"\n{H2}▶ Classifier Export{RESET}")
     print(f"  {MUTED}Format: {{text, label}}{RESET}")
@@ -225,7 +225,7 @@ def demo_classifier_export(output_dir: Path, learn: LearnClient):
     print_export_result(result)
 
 
-def demo_filtered_export(output_dir: Path, learn: LearnClient):
+def demo_filtered_export(output_dir: Path, learn: Client):
     """Export with time filters."""
     print(f"\n{H2}▶ Filtered Export{RESET}")
     print(f"  {MUTED}Filter exports by time range{RESET}")
@@ -269,12 +269,12 @@ def main():
     print(f"{H1}{'━' * 50}{RESET}")
 
     # Setup config, logger, and database
-    config = Config("etc/llm-learn.yaml")
+    config = Config("etc/llm-kelt.yaml")
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
 
-    # Create LearnClient using factory
+    # Create Client using factory
     context = ClientContext(context_key="demo:example")
-    factory = LearnClientFactory(lg)
+    factory = ClientFactory(lg)
     learn = factory.create_from_config(context=context, config=config)
     print(f"{MUTED}Using context_key={RESET}{INFO}{learn.context_key}{RESET}")
 

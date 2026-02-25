@@ -2,7 +2,7 @@
 
 import pytest
 
-from llm_learn import ValidationError
+from llm_kelt import ValidationError
 
 
 class TestPreferencesClient:

@@ -1,6 +1,6 @@
 """Tests for context builder (fact injection into system prompts)."""
 
-from llm_learn.inference.context import ContextBuilder
+from llm_kelt.inference.context import ContextBuilder
 
 
 class TestContextBuilder:

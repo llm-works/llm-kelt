@@ -10,7 +10,7 @@ tenant isolation.
 
 import pytest
 
-from llm_learn import ClientContext
+from llm_kelt import ClientContext
 
 
 class TestSQLInjectionProtection:
@@ -19,26 +19,26 @@ class TestSQLInjectionProtection:
     @pytest.fixture
     def client_acme_prod(self, logger, database):
         """Create client for acme_prod context (contains underscore)."""
-        from llm_learn.client import LearnClient
+        from llm_kelt.client import Client
 
         context = ClientContext(context_key="acme_prod")
-        return LearnClient(database=database, context=context, lg=logger)
+        return Client(database=database, context=context, lg=logger)
 
     @pytest.fixture
     def client_acme_dev(self, logger, database):
         """Create client for acme_dev context (different but similar key)."""
-        from llm_learn.client import LearnClient
+        from llm_kelt.client import Client
 
         context = ClientContext(context_key="acme_dev")
-        return LearnClient(database=database, context=context, lg=logger)
+        return Client(database=database, context=context, lg=logger)
 
     @pytest.fixture
     def client_acme_x_prod(self, logger, database):
         """Create client for acmeXprod context (X matches _ wildcard if not escaped)."""
-        from llm_learn.client import LearnClient
+        from llm_kelt.client import Client
 
         context = ClientContext(context_key="acmeXprod")
-        return LearnClient(database=database, context=context, lg=logger)
+        return Client(database=database, context=context, lg=logger)
 
     def test_underscore_not_treated_as_wildcard(
         self, client_acme_prod, client_acme_dev, client_acme_x_prod, clean_tables
@@ -79,14 +79,14 @@ class TestSQLInjectionProtection:
 
     def test_percent_not_treated_as_wildcard(self, logger, database, clean_tables):
         """Test that percent sign in context_key is NOT treated as SQL wildcard."""
-        from llm_learn.client import LearnClient
+        from llm_kelt.client import Client
 
         # Create clients with percent sign in context key
         context_percent = ClientContext(context_key="discount_25%")
         context_other = ClientContext(context_key="discount_25X")
 
-        client_percent = LearnClient(database=database, context=context_percent, lg=logger)
-        client_other = LearnClient(database=database, context=context_other, lg=logger)
+        client_percent = Client(database=database, context=context_percent, lg=logger)
+        client_other = Client(database=database, context=context_other, lg=logger)
 
         # Add data
         fact_percent = client_percent.atomic.assertions.add("25% discount setting")
@@ -110,7 +110,7 @@ class TestSQLInjectionProtection:
         2. Glob wildcards (* and ?) work as expected
         3. No cross-contamination between literal and pattern matching
         """
-        from llm_learn.client import LearnClient
+        from llm_kelt.client import Client
 
         # Create multiple contexts with hierarchy
         contexts = [
@@ -123,14 +123,14 @@ class TestSQLInjectionProtection:
         clients = {}
         for ctx_key in contexts:
             context = ClientContext(context_key=ctx_key)
-            clients[ctx_key] = LearnClient(database=database, context=context, lg=logger)
+            clients[ctx_key] = Client(database=database, context=context, lg=logger)
 
         # Add data to each context
         for ctx_key, client in clients.items():
             client.atomic.assertions.add(f"Data for {ctx_key}")
 
         # Test exact match - should see only one
-        exact_client = LearnClient(
+        exact_client = Client(
             database=database,
             context=ClientContext(context_key="customer_123:prod:agent_a"),
             lg=logger,
@@ -140,7 +140,7 @@ class TestSQLInjectionProtection:
         assert "customer_123:prod:agent_a" in exact_facts[0].content
 
         # Test glob pattern - all agents in customer_123:prod environment
-        pattern_client = LearnClient(
+        pattern_client = Client(
             database=database,
             context=ClientContext(context_key="customer_123:prod:*"),
             lg=logger,
@@ -152,7 +152,7 @@ class TestSQLInjectionProtection:
         assert any("agent_b" in c for c in contents)
 
         # Test broader glob - all customer_123 contexts
-        broader_client = LearnClient(
+        broader_client = Client(
             database=database,
             context=ClientContext(context_key="customer_123:*"),
             lg=logger,
@@ -166,7 +166,7 @@ class TestSQLInjectionProtection:
 
     def test_edge_cases_combined_wildcards(self, logger, database, clean_tables):
         """Test edge cases with multiple wildcard characters."""
-        from llm_learn.client import LearnClient
+        from llm_kelt.client import Client
 
         # Test data with multiple underscores and percent signs
         test_keys = [
@@ -179,7 +179,7 @@ class TestSQLInjectionProtection:
         clients = {}
         for key in test_keys:
             context = ClientContext(context_key=key)
-            clients[key] = LearnClient(database=database, context=context, lg=logger)
+            clients[key] = Client(database=database, context=context, lg=logger)
             clients[key].atomic.assertions.add(f"Data for {key}")
 
         # Verify each client sees only its own data (exact match)

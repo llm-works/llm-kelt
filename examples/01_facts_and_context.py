@@ -8,7 +8,7 @@ This example demonstrates:
 
 Prerequisites:
     - PostgreSQL database with pgvector extension
-    - Config file at etc/llm-learn.yaml (or set LEARN_CONFIG_FILE env var)
+    - Config file at etc/llm-kelt.yaml (or set LEARN_CONFIG_FILE env var)
     - LLM backend configured (local or OpenAI)
 
 Usage:
@@ -38,11 +38,11 @@ from _helpers import (
 )
 from llm_infer.client import Factory as LLMClientFactory
 
-from llm_learn import LearnClient, LearnClientFactory
-from llm_learn.inference import ContextBuilder, ContextQuery
+from llm_kelt import Client, ClientFactory
+from llm_kelt.inference import ContextBuilder, ContextQuery
 
 
-def setup_facts(learn: LearnClient):
+def setup_facts(learn: Client):
     """Add sample facts for the demo."""
     print(f"\n{H2}▶ Adding Facts{RESET}")
 
@@ -76,7 +76,7 @@ def setup_facts(learn: LearnClient):
     )
 
 
-def demo_context_builder(learn: LearnClient):
+def demo_context_builder(learn: Client):
     """Demonstrate building system prompts with injected facts."""
     print(f"\n{H2}▶ Building System Prompts{RESET}")
 
@@ -114,7 +114,7 @@ async def demo_context_query(context_builder: ContextBuilder):
         from appinfra.config import Config
         from appinfra.log import LogConfig, LoggerFactory
 
-        config = Config("etc/llm-learn.yaml")
+        config = Config("etc/llm-kelt.yaml")
         lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
         llm_factory = LLMClientFactory(lg)
         llm_client = llm_factory.from_config(config.llm.to_dict())
@@ -157,11 +157,11 @@ async def demo_context_query(context_builder: ContextBuilder):
     except Exception as e:
         print(f"  {MUTED}[Skipped] No LLM backend: {type(e).__name__}{RESET}")
         print(
-            f"  {MUTED}Start llm-infer or configure OpenAI in etc/llm-learn.yaml to enable.{RESET}"
+            f"  {MUTED}Start llm-infer or configure OpenAI in etc/llm-kelt.yaml to enable.{RESET}"
         )
 
 
-def demo_fact_management(learn: LearnClient):
+def demo_fact_management(learn: Client):
     """Demonstrate fact management operations."""
     print(f"\n{H2}▶ Fact Management{RESET}")
 
@@ -213,11 +213,11 @@ async def main():
     from appinfra.config import Config
     from appinfra.log import LogConfig, LoggerFactory
 
-    from llm_learn import ClientContext
+    from llm_kelt import ClientContext
 
-    config = Config("etc/llm-learn.yaml")
+    config = Config("etc/llm-kelt.yaml")
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
-    factory = LearnClientFactory(lg)
+    factory = ClientFactory(lg)
 
     # Create context for this example
     context_key = get_demo_context_key("example")

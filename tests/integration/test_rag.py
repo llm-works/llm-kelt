@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from llm_infer.client import ChatResponse
 
-from llm_learn.inference.context import ContextBuilder
-from llm_learn.inference.embedder import EmbeddingResult
-from llm_learn.inference.query import ContextQuery, RAGArgs
+from llm_kelt.inference.context import ContextBuilder
+from llm_kelt.inference.embedder import EmbeddingResult
+from llm_kelt.inference.query import ContextQuery, RAGArgs
 
 
 class TestRAGIntegration:
@@ -301,7 +301,7 @@ class TestRAGIntegration:
         self, learn_client, mock_embedder, mock_llm_client, sample_facts_with_embeddings
     ):
         """Test RAG works across multi-turn conversations."""
-        from llm_learn.inference.query import Conversation
+        from llm_kelt.inference.query import Conversation
 
         context_builder = ContextBuilder(learn_client.atomic.assertions)
         query = ContextQuery(

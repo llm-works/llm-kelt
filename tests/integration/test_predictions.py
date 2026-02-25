@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from llm_learn import NotFoundError, ValidationError
+from llm_kelt import NotFoundError, ValidationError
 
 
 class TestPredictionsClient:

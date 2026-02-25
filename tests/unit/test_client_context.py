@@ -1,6 +1,6 @@
 """Unit tests for ClientContext."""
 
-from llm_learn import ClientContext
+from llm_kelt import ClientContext
 
 
 class TestClientContext:

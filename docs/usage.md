@@ -1,13 +1,13 @@
 # Usage Guide
 
-How to use the llm-learn.
+How to use the llm-kelt.
 
 ---
 
 ## Setup
 
 ```python
-from llm_learn import LearnClient
+from llm_kelt import LearnClient
 
 client = LearnClient("etc/infra.yaml")
 
@@ -149,7 +149,7 @@ client.directives.set_status(directive_id, "completed")
 ## Exporting Training Data
 
 ```python
-from llm_learn.export.jsonl import (
+from llm_kelt.export.jsonl import (
     export_feedback,
     export_preferences,
     export_predictions,

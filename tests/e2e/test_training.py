@@ -27,7 +27,7 @@ class TestLoraTraining:
         from peft import PeftModel
         from transformers import AutoModelForCausalLM
 
-        from llm_learn.training import train_lora
+        from llm_kelt.training import train_lora
 
         output_dir = tmp_path / "lora_output"
 
@@ -82,7 +82,7 @@ class TestLoraTraining:
         """Train with validation split and verify eval metrics are produced."""
         from appinfra import DotDict
 
-        from llm_learn.training import train_lora
+        from llm_kelt.training import train_lora
 
         output_dir = tmp_path / "lora_output_eval"
 
@@ -131,7 +131,7 @@ class TestDpoTraining:
         from peft import PeftModel
         from transformers import AutoModelForCausalLM
 
-        from llm_learn.training import train_dpo
+        from llm_kelt.training import train_dpo
 
         output_dir = tmp_path / "dpo_output"
 

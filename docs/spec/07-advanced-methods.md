@@ -631,8 +631,8 @@ class ConservativeRetry(RetryStrategy):
 ```python
 # agent/adaptation/orchestrator.py
 
-from llm_learn import LearnClient
-from llm_learn.adaptation import AdaptationPipeline, PipelineConfig
+from llm_kelt import LearnClient
+from llm_kelt.adaptation import AdaptationPipeline, PipelineConfig
 
 from agent.adaptation.selectors import HybridSelector
 from agent.adaptation.evaluators import LLMJudgeEvaluator

@@ -11,17 +11,17 @@ Requires local LLM (configured via LEARN_TEST_CONFIG_FILE).
 
 import pytest
 
-from llm_learn.client import LearnClient
-from llm_learn.inference.context import ContextBuilder
+from llm_kelt.client import Client
+from llm_kelt.inference.context import ContextBuilder
 
 
 @pytest.fixture
 def facts_learn_client(logger, database, test_context):
-    """Create LearnClient for facts testing."""
-    from llm_learn import ClientContext
+    """Create Client for facts testing."""
+    from llm_kelt import ClientContext
 
     context = ClientContext(context_key=test_context, schema_name=None)
-    return LearnClient(database=database, context=context, lg=logger)
+    return Client(database=database, context=context, lg=logger)
 
 
 @pytest.mark.llm

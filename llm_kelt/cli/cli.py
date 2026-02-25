@@ -1,0 +1,27 @@
+"""CLI entry point for llm-kelt."""
+
+from appinfra.app import AppBuilder
+
+from .tools import ProxyTool, TrainTool
+
+
+def main() -> int:
+    """Main entry point for the CLI."""
+    app = (
+        AppBuilder("llm-kelt")
+        .with_description("LLM learning framework - collect and manage LLM context")
+        .with_config_file("llm-kelt.yaml")
+        .logging.with_level("info")
+        .with_location(1)
+        .done()
+        .tools.with_tool(ProxyTool())
+        .with_tool(TrainTool())
+        .done()
+        .build()
+    )
+    result: int = app.main()
+    return result
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

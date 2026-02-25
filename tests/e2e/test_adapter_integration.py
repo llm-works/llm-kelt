@@ -43,8 +43,8 @@ def _write_jsonl(path: Path, data: list[dict]) -> Path:
 @pytest.fixture(scope="module")
 def adapter_registry(logger, adapter_lora_base_path, infer_server_url):
     """Create adapter registry pointing to llm-infer's adapter path."""
-    from llm_learn.training import AdapterRegistry
-    from llm_learn.training.storage import FileStorage
+    from llm_kelt.training import AdapterRegistry
+    from llm_kelt.training.storage import FileStorage
 
     storage = FileStorage(logger, adapter_lora_base_path)
     return AdapterRegistry(
@@ -60,8 +60,8 @@ def trained_adapter(logger, training_model_path, tmp_path_factory):
     import torch
     from appinfra import DotDict
 
-    from llm_learn.training import train_lora
-    from llm_learn.training.lora import Config as LoraConfig
+    from llm_kelt.training import train_lora
+    from llm_kelt.training.lora import Config as LoraConfig
 
     tmp_path = tmp_path_factory.mktemp("training")
 
@@ -103,7 +103,7 @@ def trained_adapter(logger, training_model_path, tmp_path_factory):
     # Compute adapter metadata (md5/mtime) like the runner does
     from llm_infer import compute_adapter_metadata
 
-    from llm_learn.training.schema import Adapter
+    from llm_kelt.training.schema import Adapter
 
     meta = compute_adapter_metadata(Path(result.adapter.path))
     result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=result.adapter.path)

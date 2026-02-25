@@ -9,16 +9,16 @@ import pytest
 from appinfra.config import Config
 from appinfra.log import LogConfig, LoggerFactory
 
-from llm_learn.client import LearnClient
-from llm_learn.core.database import Database
-from llm_learn.core.models import Base
+from llm_kelt.client import Client
+from llm_kelt.core.database import Database
+from llm_kelt.core.models import Base
 
 # Import atomic memory models so they're registered with Base for migrations
-from llm_learn.memory.atomic import models as atomic_models  # noqa: F401
+from llm_kelt.memory.atomic import models as atomic_models  # noqa: F401
 
 # Import training models so they're registered with Base for migrations
-from llm_learn.training import dpo as training_dpo  # noqa: F401
-from llm_learn.training import sft as training_sft  # noqa: F401
+from llm_kelt.training import dpo as training_dpo  # noqa: F401
+from llm_kelt.training import sft as training_sft  # noqa: F401
 
 # Enable appinfra's schema isolation fixtures for parallel test execution
 pytest_plugins = ["appinfra.db.pg.testing"]
@@ -44,7 +44,7 @@ def pytest_cmdline_main(config):
 
 # Find project root and config paths
 PROJECT_ROOT = Path(__file__).parent.parent
-DEFAULT_CONFIG_PATH = PROJECT_ROOT / "etc" / "llm-learn.yaml"
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "etc" / "llm-kelt.yaml"
 
 
 def _get_config_path() -> Path:
@@ -220,11 +220,11 @@ def test_context(request):
 
 @pytest.fixture
 def learn_client(logger, database, test_context):
-    """Create LearnClient for testing, scoped to test context."""
-    from llm_learn import ClientContext
+    """Create Client for testing, scoped to test context."""
+    from llm_kelt import ClientContext
 
     context = ClientContext(context_key=test_context, schema_name=None)
-    return LearnClient(database=database, context=context, lg=logger)
+    return Client(database=database, context=context, lg=logger)
 
 
 @pytest.fixture

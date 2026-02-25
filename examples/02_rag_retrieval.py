@@ -9,7 +9,7 @@ This example demonstrates:
 
 Prerequisites:
     - PostgreSQL database with pgvector extension
-    - Config file at etc/llm-learn.yaml
+    - Config file at etc/llm-kelt.yaml
     - Embedding server running (e.g., llm-infer with embedding model)
     - LLM backend for chat (optional)
 
@@ -43,8 +43,8 @@ from appinfra.log import LogConfig, Logger, LoggerFactory
 from httpx import ConnectError, ConnectTimeout
 from llm_infer.client import Factory as LLMClientFactory
 
-from llm_learn import LearnClient, LearnClientFactory
-from llm_learn.inference import (
+from llm_kelt import Client, ClientFactory
+from llm_kelt.inference import (
     ContextBuilder,
     ContextQuery,
     Embedder,
@@ -73,7 +73,7 @@ _SAMPLE_FACTS = [
 ]
 
 
-def populate_facts(learn: LearnClient):
+def populate_facts(learn: Client):
     """Clear and populate sample facts for the demo."""
     print(f"\n{H2}▶ Populating Facts{RESET}")
 
@@ -98,7 +98,7 @@ def populate_facts(learn: LearnClient):
     )
 
 
-async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedder | None:
+async def embed_facts(lg: Logger, learn: Client, config: Config) -> Embedder | None:
     """Embed facts for semantic search. Returns embedder if successful."""
     print(f"\n{H2}▶ Embedding Facts for Semantic Search{RESET}")
 
@@ -145,7 +145,7 @@ async def embed_facts(lg: Logger, learn: LearnClient, config: Config) -> Embedde
     return None
 
 
-async def demo_similarity_search(learn: LearnClient, embedder: Embedder):
+async def demo_similarity_search(learn: Client, embedder: Embedder):
     """Demonstrate similarity search with embeddings."""
     print(f"\n{H2}▶ Similarity Search{RESET}")
     print(f"  {MUTED}Finding facts similar to a query using vector similarity{RESET}")
@@ -182,7 +182,7 @@ async def demo_similarity_search(learn: LearnClient, embedder: Embedder):
         )
 
 
-async def demo_rag_vs_static(learn: LearnClient, config: Config, embedder: Embedder | None):
+async def demo_rag_vs_static(learn: Client, config: Config, embedder: Embedder | None):
     """Demonstrate RAG vs static context injection - the key comparison."""
     print(f"\n{H2}▶ RAG vs Static Context Injection{RESET}")
     print(f"  {MUTED}Comparing which facts get included in the LLM prompt{RESET}")
@@ -223,7 +223,7 @@ async def demo_rag_vs_static(learn: LearnClient, config: Config, embedder: Embed
     )
 
 
-async def demo_rag_query(learn: LearnClient, config: Config, lg: Logger, embedder: Embedder | None):
+async def demo_rag_query(learn: Client, config: Config, lg: Logger, embedder: Embedder | None):
     """Demonstrate full RAG query with LLM."""
     print(f"\n{H2}▶ Full RAG Query (LLM + Context){RESET}")
 
@@ -255,7 +255,7 @@ async def demo_rag_query(learn: LearnClient, config: Config, lg: Logger, embedde
     except Exception as e:
         print(f"  {MUTED}[Skipped] No LLM backend: {type(e).__name__}{RESET}")
         print(
-            f"  {MUTED}Start llm-infer or configure OpenAI in etc/llm-learn.yaml to enable.{RESET}"
+            f"  {MUTED}Start llm-infer or configure OpenAI in etc/llm-kelt.yaml to enable.{RESET}"
         )
 
 
@@ -265,12 +265,12 @@ async def main():
     print(f"{H1}  Example 02: RAG (Retrieval-Augmented Generation){RESET}")
     print(f"{H1}{'━' * 50}{RESET}")
 
-    from llm_learn import ClientContext
+    from llm_kelt import ClientContext
 
     # Suppress logging noise
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
-    config = Config("etc/llm-learn.yaml")
-    factory = LearnClientFactory(lg)
+    config = Config("etc/llm-kelt.yaml")
+    factory = ClientFactory(lg)
 
     # Create context for this example
     context_key = get_demo_context_key("rag-demo")

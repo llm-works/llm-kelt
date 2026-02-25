@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from llm_learn.inference.embed_facts import embed_missing_facts
-from llm_learn.inference.embedder import EmbeddingResult
+from llm_kelt.inference.embed_facts import embed_missing_facts
+from llm_kelt.inference.embedder import EmbeddingResult
 
 
 class TestEmbedMissingFactsIntegration:

@@ -4,8 +4,8 @@ from datetime import datetime
 
 import pytest
 
-from llm_learn.training import TRAINING_DEFAULTS, RunResult
-from llm_learn.training.lora import Config as LoraConfig
+from llm_kelt.training import TRAINING_DEFAULTS, RunResult
+from llm_kelt.training.lora import Config as LoraConfig
 
 
 class TestLoraConfig:
@@ -116,7 +116,7 @@ class TestRunResult:
 
     def test_basic_creation(self):
         """Test creating a RunResult."""
-        from llm_learn.training.schema import Adapter
+        from llm_kelt.training.schema import Adapter
 
         started = datetime(2024, 1, 1, 10, 0, 0)
         completed = datetime(2024, 1, 1, 11, 30, 0)

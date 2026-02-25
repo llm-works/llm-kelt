@@ -4,8 +4,8 @@ import json
 import tempfile
 from pathlib import Path
 
-from llm_learn.training import export_feedback_classifier, export_feedback_sft
-from llm_learn.training.dpo import export_preferences
+from llm_kelt.training import export_feedback_classifier, export_feedback_sft
+from llm_kelt.training.dpo import export_preferences
 
 
 class TestExportPreferencesDPO:

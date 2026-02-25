@@ -10,7 +10,7 @@ The trained adapter can be deployed to llm-infer manually or via
 the manifest-based workflow (see training CLI documentation).
 
 Prerequisites:
-    - Config file at etc/llm-learn.yaml
+    - Config file at etc/llm-kelt.yaml
     - GPU with CUDA support (training)
     - Local model weights in HuggingFace format
 
@@ -34,7 +34,7 @@ from _helpers import H1, H2, INFO, MUTED, OK, RESET, WARN
 from appinfra.config import Config
 from appinfra.log import LogConfig, Logger, LoggerFactory
 
-from llm_learn.training import LoraConfig, train_lora
+from llm_kelt.training import LoraConfig, train_lora
 
 # Training data: teach the model to give concise, structured responses
 TRAINING_DATA = [
@@ -70,7 +70,7 @@ def find_training_model(lg: Logger, config: Config, running_model: str) -> Path:
 
     model_locations = [Path(p) for p in config.get("models.locations", [])]
     if not model_locations:
-        raise RuntimeError("No model locations configured in etc/llm-learn.yaml")
+        raise RuntimeError("No model locations configured in etc/llm-kelt.yaml")
 
     resolver = ModelResolver(lg=lg, locations=model_locations)
     model_name = running_model.split("/")[-1] if "/" in running_model else running_model
@@ -188,7 +188,7 @@ def main() -> None:
 
     lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
 
-    config = Config("etc/llm-learn.yaml")
+    config = Config("etc/llm-kelt.yaml")
 
     # Get inference URL and find matching training model
     infer_url = get_infer_url(config)

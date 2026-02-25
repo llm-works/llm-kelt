@@ -191,8 +191,8 @@ protocol definitions.
 ```python
 # In agent - assembles pipeline with its implementations
 
-from llm_learn import LearnClient
-from llm_learn.adaptation import AdaptationPipeline, PipelineConfig
+from llm_kelt import LearnClient
+from llm_kelt.adaptation import AdaptationPipeline, PipelineConfig
 
 # Agent's implementations of learn's protocols
 from agent.adaptation.selectors import HybridSelector

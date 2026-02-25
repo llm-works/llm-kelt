@@ -6,19 +6,19 @@ from pathlib import Path
 
 import pytest
 
-from llm_learn.training.manifest import Client, Deployment, Manifest
-from llm_learn.training.manifest.errors import CorruptedManifestError
+from llm_kelt.training.manifest import Client, Deployment, Manifest
+from llm_kelt.training.manifest.errors import CorruptedManifestError
 
 # Import private functions to test internal parsing logic directly
-from llm_learn.training.manifest.loader import (
+from llm_kelt.training.manifest.loader import (
     _build_output_result,
     _to_number,
     load_manifest,
     save_manifest,
     validate_manifest,
 )
-from llm_learn.training.manifest.schema import Data, Source
-from llm_learn.training.schema import Adapter
+from llm_kelt.training.manifest.schema import Data, Source
+from llm_kelt.training.schema import Adapter
 
 
 class TestManifestSchema:
@@ -567,7 +567,7 @@ class TestManifestClient:
     @pytest.fixture
     def storage(self, lg, tmp_path: Path):
         """Create FileStorage with temp directory."""
-        from llm_learn.training.storage import FileStorage
+        from llm_kelt.training.storage import FileStorage
 
         return FileStorage(lg, tmp_path)
 
@@ -681,7 +681,7 @@ class TestManifestClient:
 
     def test_default_profiles_applied(self, lg, tmp_path: Path):
         """Test that default profiles are merged into manifest config."""
-        from llm_learn.training.storage import FileStorage
+        from llm_kelt.training.storage import FileStorage
 
         default_profiles = {
             "sft": {"epochs": 5, "batch_size": 8, "learning_rate": 1e-4},
@@ -703,7 +703,7 @@ class TestManifestClient:
 
     def test_config_overrides_defaults(self, lg, tmp_path: Path):
         """Test that explicit config overrides default profile."""
-        from llm_learn.training.storage import FileStorage
+        from llm_kelt.training.storage import FileStorage
 
         default_profiles = {"sft": {"epochs": 5, "batch_size": 8}}
         storage = FileStorage(lg, tmp_path)
