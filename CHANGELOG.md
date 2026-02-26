@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-02-25
+
 ### Added
 
 #### Core Data Collection
@@ -46,3 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Documentation
 - Example scripts for common workflows
 - API reference documentation in README
+
+[Unreleased]: https://github.com/serendip-ml/llm-kelt/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/serendip-ml/llm-kelt/releases/tag/v0.1.0
