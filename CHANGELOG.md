@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Add `readme` field to pyproject.toml so PyPI displays the README
+
 ## [0.1.0] - 2026-02-25
 
 ### Added
