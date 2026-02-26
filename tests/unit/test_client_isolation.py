@@ -1,0 +1,168 @@
+"""Unit tests for Client isolation context fluent API."""
+
+from unittest.mock import MagicMock, Mock
+
+import pytest
+
+from llm_kelt import ClientContext
+from llm_kelt.client import Client
+
+
+class TestClientIsolation:
+    """Tests for Client isolation context and fluent API."""
+
+    @pytest.fixture
+    def mock_database(self):
+        """Create mock database."""
+        db = Mock()
+        db.session = MagicMock()
+        db.engine = Mock()
+        return db
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create mock logger."""
+        return Mock()
+
+    @pytest.fixture
+    def kelt_client(self, mock_logger, mock_database):
+        """Create Client with mocked dependencies."""
+        from unittest.mock import patch
+
+        # Mock the schema verification
+        with patch.object(Client, "_verify_schema"):
+            with patch.object(Client, "_setup_stores"):
+                with patch.object(Client, "_setup_query_interface"):
+                    context = ClientContext(context_key="a" * 32, schema_name=None)
+                    client = Client(
+                        database=mock_database,
+                        context=context,
+                        lg=mock_logger,
+                    )
+                    return client
+
+    def test_context_property_returns_isolation_context(self, kelt_client):
+        """Test that context property returns ClientContext."""
+        context = kelt_client.context
+
+        assert isinstance(context, ClientContext)
+        assert context.context_key == "a" * 32
+        assert context.schema_name is None
+
+    def test_with_isolation_override_schema(self, kelt_client, mock_logger, mock_database):
+        """Test overriding just schema with with_isolation()."""
+        from unittest.mock import patch
+
+        with patch.object(Client, "_verify_schema"):
+            with patch.object(Client, "_setup_stores"):
+                with patch.object(Client, "_setup_query_interface"):
+                    new_client = kelt_client.with_isolation(schema_name="public")
+
+        # New client should have merged context
+        assert new_client.context.context_key == "a" * 32  # Kept from original
+        assert new_client.context.schema_name == "public"  # Overridden
+
+    def test_with_isolation_override_context_key(self, kelt_client, mock_logger, mock_database):
+        """Test overriding just context_key with with_isolation()."""
+        from unittest.mock import patch
+
+        with patch.object(Client, "_verify_schema"):
+            with patch.object(Client, "_setup_stores"):
+                with patch.object(Client, "_setup_query_interface"):
+                    new_client = kelt_client.with_isolation(context_key="b" * 32)
+
+        # New client should have new context_key
+        assert new_client.context.context_key == "b" * 32
+        assert new_client.context.schema_name is None  # Kept from original
+
+    def test_with_isolation_override_both(self, kelt_client, mock_logger, mock_database):
+        """Test overriding both fields with with_isolation()."""
+        from unittest.mock import patch
+
+        with patch.object(Client, "_verify_schema"):
+            with patch.object(Client, "_setup_stores"):
+                with patch.object(Client, "_setup_query_interface"):
+                    new_client = kelt_client.with_isolation(
+                        context_key="c" * 32, schema_name="customer_acme"
+                    )
+
+        # New client should have both overridden
+        assert new_client.context.context_key == "c" * 32
+        assert new_client.context.schema_name == "customer_acme"
+
+    def test_with_isolation_preserves_other_params(self, kelt_client):
+        """Test that with_isolation() preserves other client parameters."""
+        from unittest.mock import patch
+
+        with patch.object(Client, "_verify_schema"):
+            with patch.object(Client, "_setup_stores"):
+                with patch.object(Client, "_setup_query_interface"):
+                    new_client = kelt_client.with_isolation(schema_name="public")
+
+        # Should preserve database reference
+        assert new_client.database is kelt_client.database
+
+    def test_with_isolation_no_args_no_change(self, kelt_client):
+        """Test that with_isolation() with no args doesn't change context."""
+        from unittest.mock import patch
+
+        with patch.object(Client, "_verify_schema"):
+            with patch.object(Client, "_setup_stores"):
+                with patch.object(Client, "_setup_query_interface"):
+                    new_client = kelt_client.with_isolation()
+
+        # Should keep original context_key
+        assert new_client.context.context_key == kelt_client.context.context_key
+        assert new_client.context.schema_name == kelt_client.context.schema_name
+
+    def test_with_isolation_can_clear_to_none(self, mock_logger, mock_database):
+        """Test that with_isolation() can explicitly clear a field to None."""
+        from unittest.mock import patch
+
+        # Create client with both fields set
+        with patch.object(Client, "_verify_schema"):
+            with patch.object(Client, "_setup_stores"):
+                with patch.object(Client, "_setup_query_interface"):
+                    context = ClientContext(context_key="a" * 32, schema_name="customer_acme")
+                    client = Client(
+                        database=mock_database,
+                        context=context,
+                        lg=mock_logger,
+                    )
+
+        # Clear context_key to None, keep schema_name
+        with patch.object(Client, "_verify_schema"):
+            with patch.object(Client, "_setup_stores"):
+                with patch.object(Client, "_setup_query_interface"):
+                    new_client = client.with_isolation(context_key=None)
+
+        # context_key should be None, schema_name preserved
+        assert new_client.context.context_key is None
+        assert new_client.context.schema_name == "customer_acme"
+
+
+class TestClientContextIntegrationWithClient:
+    """Integration tests showing ClientContext patterns with Client."""
+
+    def test_merge_pattern_with_dataclasses_replace(self):
+        """Test the recommended pattern using dataclasses.replace()."""
+        from dataclasses import replace
+
+        # Original context
+        original = ClientContext(context_key="acme:prod", schema_name="customer_acme")
+
+        # Override just schema (recommended pattern)
+        override = replace(original, schema_name="public")
+
+        assert override.context_key == "acme:prod"
+        assert override.schema_name == "public"
+
+    def test_partial_context_for_override(self):
+        """Test creating partial context for with_isolation()."""
+        # Create partial context (only schema set)
+        partial = ClientContext(schema_name="analytics")
+
+        assert partial.context_key is None
+        assert partial.schema_name == "analytics"
+
+        # This would be merged with current context in with_isolation()

@@ -1,0 +1,54 @@
+# Kelt Framework Configuration
+# Main entry point - includes all sub-configs
+
+# Infrastructure (logging, database, llm, embedding)
+logging: !include './infra.yaml#logging'
+pgserver: !include './infra.yaml#pgserver'
+dbs: !include './infra.yaml#dbs'
+
+llm: !include './llm.yaml'
+
+# Embedding service configuration
+embedding:
+  model_name: all-MiniLM-L6-v2   # Current model (used as key in fact_embeddings)
+  dimensions: 384                 # Expected embedding dimensions
+  base_url: http://localhost:8001/v1  # Embedding server URL
+
+# Proxy server settings
+proxy:
+  host: "0.0.0.0"
+  port: 8010
+  context_key: "default"
+  model_name: "llm-kelt-proxy"
+
+# Adapter settings (for training integration with llm-infer)
+adapters:
+  lora:
+    base_path: !include "../.env.yaml#paths.adapters"
+
+# Kelt-specific settings (runtime behavior)
+kelt:
+  # Memory/Context Injection settings
+  memory:
+    max_facts: 100              # Maximum facts to inject per query
+    min_confidence: 0.0         # Minimum confidence threshold for facts
+    fact_position: append       # Where to place facts: append or prepend
+
+  # Default system prompt (can be overridden per query)
+  default_system_prompt: ""
+
+# Training defaults by method (manifest values override these)
+training:
+  default_profiles:
+    sft:
+      epochs: 3
+      batch_size: 4
+      learning_rate: 0.0002
+
+    dpo:
+      beta: 0.1
+      epochs: 3
+      batch_size: 4
+      learning_rate: 0.0002
+
+models: !include "./models.yaml"

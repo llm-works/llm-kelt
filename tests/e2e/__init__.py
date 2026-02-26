@@ -1,1 +1,1 @@
-"""End-to-end tests for Learn framework."""
+"""End-to-end tests for Kelt framework."""
