@@ -139,8 +139,12 @@ def run_migrations_online() -> None:  # cq: exempt
             _lg.info("migration complete", extra={"new_revision": new_rev})
 
     except OperationalError as e:
-        # Database doesn't exist - bootstrap it (PostgreSQL error code 3D000)
-        if e.orig is not None and hasattr(e.orig, "pgcode") and e.orig.pgcode == "3D000":
+        # Database doesn't exist - bootstrap it
+        # Check pgcode 3D000 or fallback to error message (pgcode not always set on connection errors)
+        pgcode = getattr(e.orig, "pgcode", None) if e.orig else None
+        is_db_missing = pgcode == "3D000" or "does not exist" in str(e)
+
+        if is_db_missing:
             _lg.info("database does not exist, bootstrapping")
             _bootstrap_fresh_database(pg)
         else:

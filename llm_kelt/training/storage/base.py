@@ -26,8 +26,7 @@ class DupAdapterError(ValueError):
         self.key = key
         self.md5 = md5
         super().__init__(
-            f"Adapter '{key}' already exists with md5 {md5[:8]}. "
-            "Use overwrite=True to return existing."
+            f"Adapter '{key}' already exists with md5 {md5}. Use overwrite=True to return existing."
         )
 
 

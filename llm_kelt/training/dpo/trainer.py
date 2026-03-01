@@ -192,6 +192,7 @@ class Trainer:
             gradient_accumulation_steps=self.training_config.gradient_accumulation_steps,
             learning_rate=self.training_config.learning_rate,
             warmup_ratio=self.training_config.warmup_ratio,
+            max_grad_norm=self.training_config.max_grad_norm,
             logging_steps=self.training_config.logging_steps,
             save_steps=self.training_config.save_steps,
             save_total_limit=2,
@@ -206,7 +207,6 @@ class Trainer:
             optim="paged_adamw_8bit",
             beta=self.beta,
             max_length=self.training_config.max_seq_length,
-            max_prompt_length=self.training_config.max_seq_length // 2,
         )
 
     def _create_trainer(self):

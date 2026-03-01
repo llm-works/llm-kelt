@@ -15,7 +15,12 @@ from .export import ExportResult, export_feedback_classifier, export_feedback_sf
 from .factory import Factory
 from .lora import AdapterInfo, AdapterRegistry
 from .manifest import Client, Data, Manifest, Source
-from .profiles import build_training_config, get_registry_path, load_default_profile
+from .profiles import (
+    ProfileDetectionError,
+    build_training_config,
+    get_registry_path,
+    load_default_profile,
+)
 from .runner import Runner
 from .schema import TRAINING_DEFAULTS, Adapter, RunResult, SubmitResult
 from .sft import Client as SftClient
@@ -26,6 +31,7 @@ __all__ = [
     "Adapter",
     "RunResult",
     "SubmitResult",
+    "ProfileDetectionError",
     "build_training_config",
     "load_default_profile",
     "get_registry_path",

@@ -87,6 +87,17 @@ class Client:
         self._storage = storage
         self._default_profiles = default_profiles or {}
 
+    def _extract_nested_configs(
+        self, config: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        """Extract nested lora/training sections from config, returning flat remainder."""
+        config = dict(config) if config else {}
+        nested_lora = config.pop("lora", {}) if isinstance(config.get("lora"), dict) else {}
+        nested_training = (
+            config.pop("training", {}) if isinstance(config.get("training"), dict) else {}
+        )
+        return config, nested_lora, nested_training
+
     def _build_manifest_configs(
         self,
         method: Literal["dpo", "sft"],
@@ -94,22 +105,27 @@ class Client:
         config: dict[str, Any] | None,
     ) -> tuple[DotDict, DotDict, DotDict]:
         """Build configuration objects by merging default profile with agent overrides."""
-        # Start with default profile for this method
         defaults = dict(self._default_profiles.get(method, {}))
-        # Agent config overrides defaults
-        merged = {**defaults, **(config or {})}
+        flat_config, nested_lora, nested_training = self._extract_nested_configs(config or {})
+
+        # Merge flat config with defaults
+        merged = {**defaults, **flat_config}
 
         # Map profile keys to training config keys (e.g., epochs -> num_epochs)
         for profile_key, config_key in _PROFILE_KEY_MAP.items():
             if profile_key in merged and config_key not in merged:
                 merged[config_key] = merged.pop(profile_key)
 
-        # Build training config with model info
+        # Build training config: defaults + flat keys + nested training overrides
         training_config = DotDict({k: merged[k] for k in _TRAINING_KEYS if k in merged})
+        training_config.update(nested_training)
         if model:
             training_config["requested_model"] = model
 
+        # Build lora config: defaults + nested lora overrides
         lora_config = DotDict(merged.get("lora", {}))
+        lora_config.update(nested_lora)
+
         method_config = DotDict()
         if method == "dpo":
             method_config = DotDict(self._extract_method_config(merged, ["beta", "reference_free"]))

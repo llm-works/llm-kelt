@@ -133,6 +133,7 @@ class Runner:
         manifest_path: Path,
         skip_registration: bool = False,
         model_override: str | None = None,
+        lora_profile: str | None = None,
     ) -> RunResult:
         """Execute training from a manifest file.
 
@@ -140,6 +141,8 @@ class Runner:
             manifest_path: Path to manifest YAML file.
             skip_registration: If True, don't register adapter to registry.
             model_override: Override manifest model (path, HF ID, or name to resolve).
+            lora_profile: LoRA profile override ("small", "medium", "large").
+                If None, auto-detects from model size (aborts if detection fails).
 
         Returns:
             RunResult with adapter metadata, metrics, and training info.
@@ -154,6 +157,8 @@ class Runner:
         # Resolve effective model and store in training config
         base_model = self._get_effective_model(manifest, model_override)
         manifest.training["base_model"] = base_model
+        if lora_profile:
+            manifest.training["lora_profile"] = lora_profile
 
         result = self._dispatch_training(manifest, skip_registration)
         result = self._enrich_adapter(result)

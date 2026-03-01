@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 import re
 import shutil
 from datetime import datetime
@@ -120,6 +121,17 @@ class FileStorage(Storage):
             raise FileNotFoundError(f"Manifest not found: {adapter}")
         pending_file.unlink()
 
+    def _link_manifest_to_adapter(self, key: str, md5: str, manifest_file: Path) -> None:
+        """Create symlink from adapter directory to its completed manifest."""
+        version_id = self._find_version_by_md5(key, md5)
+        if not version_id:
+            return
+        adapter_dir = self.adapters_path / key / version_id
+        manifest_link = adapter_dir / "manifest"
+        if not manifest_link.exists():
+            rel_path = os.path.relpath(manifest_file, adapter_dir)
+            manifest_link.symlink_to(rel_path)
+
     def complete_manifest(self, manifest: Manifest) -> None:
         """Move a manifest to completed storage."""
         from ..manifest.loader import save_manifest
@@ -138,6 +150,9 @@ class FileStorage(Storage):
             )
         completed_file = self.completed_path / f"{manifest.adapter}-{suffix}.yaml.gz"
         save_manifest(manifest, completed_file, compress=True)
+
+        if md5:
+            self._link_manifest_to_adapter(manifest.adapter, md5, completed_file)
 
         # Remove from pending if it exists
         pending_file = self.pending_path / f"{manifest.adapter}.yaml"
@@ -310,7 +325,7 @@ class FileStorage(Storage):
         if md5 != "unknown":
             self._check_duplicate_md5(key, md5)
 
-        version_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{md5[:8]}"
+        version_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{md5}"
         adapter_path = self._copy_adapter_files(source, key, version_id)
 
         self._write_adapter_result_config(

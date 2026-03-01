@@ -273,6 +273,11 @@ class RunTool(_ConfigMixin, Tool):
         parser.add_argument("manifest", nargs="?", help="Manifest path (interactive if omitted)")
         parser.add_argument("--model", "-m", help="Override model (path, HF ID, or name)")
         parser.add_argument("--skip-register", action="store_true", help="Skip registration")
+        parser.add_argument(
+            "--lora-profile",
+            choices=["small", "medium", "large", "xlarge"],
+            help="LoRA/training profile (auto-detected from model size if omitted)",
+        )
 
     def _select_interactive(self, pending_dir: Path) -> Path | None:
         manifests = sorted(pending_dir.glob("*.yaml"))
@@ -326,6 +331,7 @@ class RunTool(_ConfigMixin, Tool):
                 manifest_path,
                 skip_registration=self.args.skip_register,
                 model_override=getattr(self.args, "model", None),
+                lora_profile=getattr(self.args, "lora_profile", None),
             )
         except Exception as e:
             self.lg.error(f"Training failed: {e}")

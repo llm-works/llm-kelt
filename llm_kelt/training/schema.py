@@ -49,6 +49,7 @@ TRAINING_DEFAULTS = DotDict(
     learning_rate=2e-4,
     warmup_ratio=0.03,
     max_seq_length=2048,
+    max_grad_norm=1.0,
     logging_steps=10,
     save_steps=100,
     eval_split=0.0,
