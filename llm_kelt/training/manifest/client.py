@@ -29,6 +29,7 @@ _TRAINING_KEYS = frozenset(
         "learning_rate",
         "warmup_ratio",
         "max_seq_length",
+        "max_grad_norm",
         "logging_steps",
         "save_steps",
         "eval_split",

@@ -102,7 +102,7 @@ factory = ClientFactory(lg)
 context = ClientContext(context_key="default")
 kelt = factory.create_from_config(context=context, config=config)
 
-server = create_server(kelt)
+server = create_server(lg, kelt)
 server.start()  # Serves on :8001
 ```
 
@@ -317,7 +317,7 @@ factory = ClientFactory(lg)
 context = ClientContext(context_key="default")
 kelt = factory.create_from_config(context=context, config=config)
 
-server = create_server(kelt)
+server = create_server(lg, kelt)
 server.start()
 ```
 

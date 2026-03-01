@@ -40,7 +40,7 @@ def create_server(
         context = ClientContext(context_key="my-agent")
         kelt_client = factory.create_from_config(context=context, config=config)
 
-        server = create_server(kelt_client)
+        server = create_server(lg, kelt_client)
         server.start()
     """
     # Ensure LLM client is configured
