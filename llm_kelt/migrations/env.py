@@ -142,7 +142,8 @@ def run_migrations_online() -> None:  # cq: exempt
         # Database doesn't exist - bootstrap it
         # Check pgcode 3D000 or fallback to error message (pgcode not always set on connection errors)
         pgcode = getattr(e.orig, "pgcode", None) if e.orig else None
-        is_db_missing = pgcode == "3D000" or "does not exist" in str(e)
+        err_str = str(e).lower()
+        is_db_missing = pgcode == "3D000" or ("database" in err_str and "does not exist" in err_str)
 
         if is_db_missing:
             _lg.info("database does not exist, bootstrapping")

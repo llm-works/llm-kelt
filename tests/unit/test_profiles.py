@@ -111,7 +111,7 @@ class TestGetModelSizeProfile:
         with pytest.raises(ProfileDetectionError) as exc_info:
             get_model_size_profile("gpt2", require_detection=True)
         assert "Cannot detect model size" in str(exc_info.value)
-        assert "--profile" in str(exc_info.value)
+        assert "--lora-profile" in str(exc_info.value)
 
     def test_require_detection_ok_with_override(self):
         # Should not raise even with require_detection if override given

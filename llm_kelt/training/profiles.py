@@ -116,14 +116,20 @@ def get_model_size_profile(
         ProfileDetectionError: If require_detection=True and size cannot be detected.
     """
     if profile_override:
+        if profile_override not in MODEL_SIZE_PROFILES:
+            valid = ", ".join(sorted(MODEL_SIZE_PROFILES.keys()))
+            raise ProfileDetectionError(
+                f"Invalid lora_profile '{profile_override}'. Valid values: {valid}"
+            )
         return profile_override, MODEL_SIZE_PROFILES[profile_override]
 
     size_b = get_model_size_b(model_path)
     if size_b is None:
         if require_detection:
+            valid = "|".join(sorted(MODEL_SIZE_PROFILES.keys()))
             raise ProfileDetectionError(
                 f"Cannot detect model size for '{model_path}'. "
-                "Use --profile small|medium|large to specify manually."
+                f"Use --lora-profile {valid} to specify manually."
             )
         return "small", MODEL_SIZE_PROFILES["small"]
 

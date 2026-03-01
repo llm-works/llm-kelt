@@ -234,6 +234,7 @@ class Trainer:
                     "num_epochs": self.training_config.num_epochs,
                     "batch_size": self.training_config.batch_size,
                     "learning_rate": self.training_config.learning_rate,
+                    "max_grad_norm": self.training_config.max_grad_norm,
                     "max_seq_length": self.training_config.max_seq_length,
                 },
                 "quantized": self._applied_quantization,

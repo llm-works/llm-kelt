@@ -141,7 +141,7 @@ class Runner:
             manifest_path: Path to manifest YAML file.
             skip_registration: If True, don't register adapter to registry.
             model_override: Override manifest model (path, HF ID, or name to resolve).
-            lora_profile: LoRA profile override ("small", "medium", "large").
+            lora_profile: LoRA profile override ("small", "medium", "large", "xlarge").
                 If None, auto-detects from model size (aborts if detection fails).
 
         Returns:
@@ -157,7 +157,12 @@ class Runner:
         # Resolve effective model and store in training config
         base_model = self._get_effective_model(manifest, model_override)
         manifest.training["base_model"] = base_model
-        if lora_profile:
+        if lora_profile is not None:
+            from .profiles import MODEL_SIZE_PROFILES
+
+            if lora_profile not in MODEL_SIZE_PROFILES:
+                valid = ", ".join(sorted(MODEL_SIZE_PROFILES.keys()))
+                raise ValueError(f"Invalid lora_profile '{lora_profile}'. Valid values: {valid}")
             manifest.training["lora_profile"] = lora_profile
 
         result = self._dispatch_training(manifest, skip_registration)

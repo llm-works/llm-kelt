@@ -93,10 +93,17 @@ class Client:
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         """Extract nested lora/training sections from config, returning flat remainder."""
         config = dict(config) if config else {}
-        nested_lora = config.pop("lora", {}) if isinstance(config.get("lora"), dict) else {}
-        nested_training = (
-            config.pop("training", {}) if isinstance(config.get("training"), dict) else {}
-        )
+
+        # Validate lora/training are dicts if present
+        if "lora" in config and not isinstance(config["lora"], dict):
+            raise ValueError(f"config.lora must be a dict, got {type(config['lora']).__name__}")
+        if "training" in config and not isinstance(config["training"], dict):
+            raise ValueError(
+                f"config.training must be a dict, got {type(config['training']).__name__}"
+            )
+
+        nested_lora = config.pop("lora", {})
+        nested_training = config.pop("training", {})
         return config, nested_lora, nested_training
 
     def _build_manifest_configs(
