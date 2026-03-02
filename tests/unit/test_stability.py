@@ -1,0 +1,137 @@
+"""Tests for training stability detection."""
+
+from llm_kelt.training.stability import check_training_stability
+
+
+class TestCheckTrainingStability:
+    """Tests for check_training_stability function."""
+
+    def test_stable_training(self):
+        """Stable training with decreasing loss."""
+        log_history = [
+            {"loss": 3.0, "grad_norm": 1.5, "step": 10},
+            {"loss": 2.5, "grad_norm": 1.3, "step": 20},
+            {"loss": 2.0, "grad_norm": 1.1, "step": 30},
+            {"loss": 1.5, "grad_norm": 0.9, "step": 40},
+            {"loss": 1.2, "grad_norm": 0.8, "step": 50},
+            {"loss": 1.0, "grad_norm": 0.7, "step": 60},
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is True
+        assert report.warnings == []
+        assert report.nan_grad_norm_count == 0
+        assert report.loss_spike_count == 0
+
+    def test_nan_grad_norm_detected(self):
+        """Detects NaN gradient norms (gradient explosion)."""
+        log_history = [
+            {"loss": 1.0, "grad_norm": 1.5, "step": 10},
+            {"loss": 1.0, "grad_norm": 1.3, "step": 20},
+            {"loss": 5.0, "grad_norm": float("nan"), "step": 30},
+            {"loss": 10.0, "grad_norm": float("nan"), "step": 40},
+            {"loss": 20.0, "grad_norm": float("nan"), "step": 50},
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is False
+        assert report.nan_grad_norm_count == 3
+        assert any("NaN gradient norm" in w for w in report.warnings)
+        assert any("CRITICAL" in w for w in report.warnings)
+
+    def test_nan_grad_norm_string_format(self):
+        """Handles .nan string format from YAML."""
+        log_history = [
+            {"loss": 1.0, "grad_norm": 1.5, "step": 10},
+            {"loss": 5.0, "grad_norm": ".nan", "step": 20},
+            {"loss": 10.0, "grad_norm": "nan", "step": 30},
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is False
+        assert report.nan_grad_norm_count == 2
+
+    def test_loss_spike_detected(self):
+        """Detects sudden loss spikes."""
+        log_history = [
+            {"loss": 1.0, "step": 10},
+            {"loss": 0.9, "step": 20},
+            {"loss": 0.85, "step": 30},
+            {"loss": 0.8, "step": 40},
+            {"loss": 0.75, "step": 50},
+            {"loss": 10.0, "step": 60},  # Spike: 10x increase
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is False
+        assert report.loss_spike_count >= 1
+        assert any("loss spike" in w.lower() for w in report.warnings)
+
+    def test_high_final_loss_warning(self):
+        """Warns when final loss is high."""
+        log_history = [
+            {"loss": 3.0, "step": 10},
+            {"loss": 4.0, "step": 20},
+            {"loss": 5.0, "step": 30},
+            {"loss": 6.0, "step": 40},
+            {"loss": 7.0, "step": 50},
+            {"loss": 8.0, "step": 60},  # High final loss
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is False
+        assert report.final_loss == 8.0
+        assert any("Final loss" in w and "high" in w.lower() for w in report.warnings)
+
+    def test_divergence_detected(self):
+        """Detects when training diverges (final loss >> min loss)."""
+        log_history = [
+            {"loss": 2.0, "step": 10},
+            {"loss": 1.5, "step": 20},
+            {"loss": 1.0, "step": 30},
+            {"loss": 0.8, "step": 40},
+            {"loss": 0.5, "step": 50},  # Minimum
+            {"loss": 2.0, "step": 60},  # Diverging: 4x min
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is False
+        assert report.min_loss == 0.5
+        assert report.final_loss == 2.0
+        assert any("higher than minimum" in w for w in report.warnings)
+
+    def test_empty_history(self):
+        """Handles empty log history."""
+        report = check_training_stability([])
+        assert report.stable is True
+        assert report.warnings == []
+        assert report.final_loss is None
+        assert report.min_loss is None
+
+    def test_missing_grad_norm(self):
+        """Handles logs without grad_norm field."""
+        log_history = [
+            {"loss": 1.0, "step": 10},
+            {"loss": 0.8, "step": 20},
+            {"loss": 0.6, "step": 30},
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is True
+        assert report.nan_grad_norm_count == 0
+
+    def test_realistic_explosion_scenario(self):
+        """Simulates the actual failure mode from the jokester-p-sft training."""
+        # Recreate the pattern: stable -> NaN grad_norm -> loss explosion
+        log_history = [
+            {"loss": 1.0, "grad_norm": 1.2, "step": 10},
+            {"loss": 0.9, "grad_norm": 1.1, "step": 20},
+            {"loss": 0.87, "grad_norm": 1.0, "step": 30},
+            {"loss": 0.86, "grad_norm": 0.9, "step": 40},
+            {"loss": 0.865, "grad_norm": ".nan", "step": 50},  # NaN starts
+            {"loss": 4.34, "grad_norm": ".nan", "step": 60},
+            {"loss": 16.88, "grad_norm": ".nan", "step": 70},
+            {"loss": 41.6, "grad_norm": ".nan", "step": 80},
+            {"loss": 20.0, "grad_norm": ".nan", "step": 90},
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is False
+        assert report.nan_grad_norm_count == 5
+        assert report.loss_spike_count >= 1
+        # Should have multiple warnings
+        assert len(report.warnings) >= 2
+        # Critical warning for NaN
+        assert any("CRITICAL" in w for w in report.warnings)

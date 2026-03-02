@@ -59,6 +59,10 @@ TRAINING_DEFAULTS = DotDict(
     seed=42,
 )
 
+# Keys to persist in completed manifests for reproducibility.
+# All effective training parameters (defaults + profile + user overrides) should be stored.
+TRAINING_CONFIG_KEYS = tuple(TRAINING_DEFAULTS.keys())
+
 
 class Adapter(FieldDict):
     """Adapter identity."""

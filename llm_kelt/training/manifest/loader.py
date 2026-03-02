@@ -174,14 +174,29 @@ def _build_data_section(manifest: Manifest) -> dict[str, Any]:
 
 
 def _build_training_section(manifest: Manifest) -> dict[str, Any]:
-    """Build training section dict for YAML serialization."""
+    """Build training section dict for YAML serialization (config only)."""
     _, training_config = _get_effective_config(manifest)
-    # Make a copy to avoid mutating the manifest's config
-    training_dict: dict[str, Any] = dict(training_config)
-    output = manifest.get("output")
-    if output is not None:
-        training_dict["output"] = _build_output_dict(output)
-    return training_dict
+    return dict(training_config)
+
+
+def _add_provenance_fields(data: dict[str, Any], manifest: Manifest) -> None:
+    """Add source and parent fields to data dict if present."""
+    source = manifest.get("source")
+    if source and (source.get("context_key") or source.get("description")):
+        data["source"] = dict(source)
+    parent = manifest.get("parent")
+    if parent is not None:
+        data["parent"] = dict(parent)
+
+
+def _add_method_and_deployment(data: dict[str, Any], manifest: Manifest) -> None:
+    """Add method-specific config and deployment fields to data dict if present."""
+    method_config = manifest.get("method_config")
+    if method_config:
+        data[manifest.get("method")] = dict(method_config)
+    deployment = manifest.get("deployment")
+    if deployment and deployment.get("policy"):
+        data["deployment"] = dict(deployment)
 
 
 def _build_manifest_dict(manifest: Manifest) -> dict[str, Any]:
@@ -193,27 +208,16 @@ def _build_manifest_dict(manifest: Manifest) -> dict[str, Any]:
         "method": manifest.get("method"),
         "adapter": manifest.get("adapter"),
     }
-
-    source = manifest.get("source")
-    if source and (source.get("context_key") or source.get("description")):
-        data["source"] = dict(source)
-
-    parent = manifest.get("parent")
-    if parent is not None:
-        data["parent"] = dict(parent)
+    _add_provenance_fields(data, manifest)
 
     lora_config, _ = _get_effective_config(manifest)
     data["lora"] = lora_config
     data["training"] = _build_training_section(manifest)
+    _add_method_and_deployment(data, manifest)
 
-    method_config = manifest.get("method_config")
-    if method_config:
-        data[manifest.get("method")] = dict(method_config)
-
-    deployment = manifest.get("deployment")
-    if deployment and deployment.get("policy"):
-        data["deployment"] = dict(deployment)
-
+    output = manifest.get("output")
+    if output is not None:
+        data["output"] = _build_output_dict(output)
     data["data"] = _build_data_section(manifest)
     return data
 
