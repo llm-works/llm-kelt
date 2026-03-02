@@ -105,36 +105,13 @@ def _coerce_types(config: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def build_training_config(
-    lg: Logger,
-    base_model: str,
-    overrides: DotDict | dict | None = None,
-) -> DotDict:
-    """Build training config with model-aware defaults.
-
-    Detects pre-quantized models (BNB, GPTQ, AWQ) and disables fp16/bf16
-    to avoid AMP conflicts.
-
-    Args:
-        lg: Logger instance.
-        base_model: Path or HuggingFace ID of base model.
-        overrides: User-provided config overrides.
-
-    Returns:
-        DotDict with merged training config.
-    """
-    config = dict(TRAINING_DEFAULTS)
-    overrides = dict(overrides) if overrides else {}
-    config.update(overrides)
-
-    # Coerce string values to proper types
-    config = _coerce_types(config)
-
-    # Check if model is pre-quantized
+def _apply_quantized_model_settings(
+    lg: Logger, base_model: str, config: dict, overrides: dict
+) -> None:
+    """Disable AMP for pre-quantized models (modifies config in-place)."""
     try:
         meta = get_model_metadata(path=base_model)
         if meta.quantization:
-            # Pre-quantized models don't work with AMP
             if "fp16" not in overrides:
                 config["fp16"] = False
             if "bf16" not in overrides:
@@ -144,7 +121,42 @@ def build_training_config(
                 extra={"quantization": meta.quantization, "bits": meta.quantization_bits},
             )
     except (FileNotFoundError, ValueError):
-        # Can't detect, use config values as-is
-        pass
+        pass  # Can't detect, use config values as-is
+
+
+def build_training_config(
+    lg: Logger,
+    base_model: str,
+    overrides: DotDict | dict | None = None,
+) -> DotDict:
+    """Build training config with model-aware defaults."""
+    from .profiles import get_model_size_profile
+
+    overrides = dict(overrides) if overrides else {}
+    profile_override = overrides.pop("lora_profile", None)
+
+    # Start with static defaults, apply size profile, then user overrides
+    config = dict(TRAINING_DEFAULTS)
+    profile_name, profile = get_model_size_profile(
+        base_model, profile_override=profile_override, require_detection=True
+    )
+    config.update(profile.get("training", {}))
+    config.update(overrides)
+    config = _coerce_types(config)
+
+    _apply_quantized_model_settings(lg, base_model, config, overrides)
+
+    lg.info(
+        f"training config (profile={profile_name})",
+        extra={
+            "learning_rate": config["learning_rate"],
+            "num_epochs": config["num_epochs"],
+            "batch_size": config["batch_size"],
+            "max_grad_norm": config["max_grad_norm"],
+            "max_seq_length": config["max_seq_length"],
+            "fp16": config["fp16"],
+            "bf16": config["bf16"],
+        },
+    )
 
     return DotDict(config)

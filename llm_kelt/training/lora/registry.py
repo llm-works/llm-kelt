@@ -81,7 +81,7 @@ class AdapterRegistry:
             if existing:
                 self._lg.info(
                     "adapter already exists, returning existing",
-                    extra={"key": key, "md5": e.md5[:8]},
+                    extra={"key": key, "md5": e.md5},
                 )
                 return existing
             raise

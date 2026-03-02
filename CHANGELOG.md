@@ -7,8 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Model-size-aware LoRA profiles with automatic detection (small/medium/large/xlarge)
+- Gradient clipping support (`max_grad_norm`) in training config
+- `--lora-profile` CLI option for manual profile override
+- Symlink from adapter directory to completed manifest for traceability
+- `ProfileDetectionError` exception for explicit handling of detection failures
+
+### Changed
+- `create_server()` now requires `lg: Logger` as first parameter
+- Adapter version IDs now use full MD5 hash instead of truncated
+
 ### Fixed
 - Add `readme` field to pyproject.toml so PyPI displays the README
+- Update `create_server` docstring and architecture docs with new signature
+- Add `max_grad_norm` to `_TRAINING_KEYS` for flat config override support
 
 ## [0.1.0] - 2026-02-25
 
