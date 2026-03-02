@@ -237,14 +237,27 @@ class EmbeddingAdapter:
         """Build effective filter by merging filter param with legacy params.
 
         If both filter and legacy params are provided, they are ANDed together.
+        Does not mutate the input filter.
         """
         if not filter and not fact_type and not categories:
             return None
 
-        # Start with provided filter or create new one
-        f = filter if filter is not None else EmbeddingFilter()
+        # No legacy params to merge - return filter as-is
+        needs_merge = (fact_type or categories) and filter is not None
+        if filter is not None and not needs_merge:
+            return filter
 
-        # Merge legacy params (only if not already set on filter)
+        # Create new filter, copying state from input filter if present
+        f = EmbeddingFilter()
+        if filter is not None:
+            if filter._fact_type:
+                f.fact_type(filter._fact_type)
+            if filter._categories:
+                f.categories(*filter._categories)
+            for clause in filter._clauses:
+                f.where(clause)
+
+        # Merge legacy params (only if not already set)
         if fact_type and f._fact_type is None:
             f.fact_type(fact_type)
         if categories and f._categories is None:
@@ -303,12 +316,19 @@ class EmbeddingAdapter:
 
         Returns:
             List of facts with similarity scores, sorted by similarity.
+
+        Raises:
+            ValueError: If top_k is less than 1.
         """
+        if top_k < 1:
+            raise ValueError(f"top_k must be at least 1, got {top_k}")
+
         effective_filter = self._build_filter(filter, fact_type, categories)
 
         # Adaptive fetch widening: start with top_k, widen if filter reduces results
         max_fetch = top_k * 8
         fetch_k = top_k
+        scored: list[ScoredEntity[Fact]] = []
 
         while fetch_k <= max_fetch:
             scored = self._search_and_score(
