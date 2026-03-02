@@ -21,7 +21,7 @@ from .clients import (
     PreferencesClient,
     SolutionsClient,
 )
-from .embedding import EmbeddingAdapter
+from .embedding import EmbeddingAdapter, EmbeddingFilter
 from .models import (
     DirectiveDetails,
     Fact,
@@ -54,4 +54,5 @@ __all__ = [
     "PreferencesClient",
     # Embedding
     "EmbeddingAdapter",
+    "EmbeddingFilter",
 ]

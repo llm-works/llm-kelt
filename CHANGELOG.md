@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `EmbeddingFilter` for flexible similarity search filtering with SQLAlchemy clause support
 - Training stability detection: detects NaN gradients, loss spikes, and divergence
 - Stability warnings in completed manifests (`unstable`, `stability_warnings` fields)
 - Training parameter reproducibility: all effective params now persisted via `TRAINING_CONFIG_KEYS`
