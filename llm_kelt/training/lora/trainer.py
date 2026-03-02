@@ -15,7 +15,8 @@ from appinfra.log import Logger
 from llm_kelt.core.base import utc_now
 
 from ..model import build_training_config
-from ..schema import Adapter, RunResult
+from ..schema import TRAINING_CONFIG_KEYS, Adapter, RunResult
+from ..stability import check_training_stability, log_stability_warnings
 from .config import Config as LoraConfig
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
@@ -181,36 +182,43 @@ class Trainer:
             formatting_func=_format_sft_example,
         )
 
+    def _collect_metrics(self) -> dict:
+        """Extract training metrics from trainer state."""
+        if self.trainer is None or not self.trainer.state.log_history:
+            return {}
+
+        metrics: dict = {"history": self.trainer.state.log_history[-100:]}
+        final = self.trainer.state.log_history[-1]
+        metrics["train_loss"] = final.get("train_loss", 0.0)
+        metrics["train_runtime"] = final.get("train_runtime", 0.0)
+        metrics["train_samples_per_second"] = final.get("train_samples_per_second", 0.0)
+        metrics["epoch"] = final.get("epoch", 0.0)
+
+        stability_report = check_training_stability(self.trainer.state.log_history)
+        log_stability_warnings(self._lg, stability_report)
+        if not stability_report.stable:
+            metrics["unstable"] = True
+            metrics["stability_warnings"] = stability_report.warnings
+
+        return metrics
+
     def _save_and_collect_metrics(self) -> tuple[Path, dict]:
         """Save adapter and collect training metrics."""
         if self.trainer is None:
-            raise RuntimeError(
-                "_create_trainer() must be called before _save_and_collect_metrics()"
-            )
+            raise RuntimeError("_create_trainer() must be called first")
         if self.tokenizer is None:
-            raise RuntimeError("_load_model() must be called before _save_and_collect_metrics()")
+            raise RuntimeError("_load_model() must be called first")
 
         final_path = self.output_dir / "final"
         self.trainer.save_model(str(final_path))
         self.tokenizer.save_pretrained(str(final_path))
         self._lg.info(f"saved adapter to {final_path}")
 
-        metrics: dict = {}
-
-        # Run evaluation first so eval entries are in log_history
+        metrics = self._collect_metrics()
         if self.eval_dataset:
             metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
-
-        # Capture training history after evaluate() so it includes eval entries
-        if self.trainer.state.log_history:
-            # Capped to avoid bloating manifests
+            # Re-capture history to include eval entries added by evaluate()
             metrics["history"] = self.trainer.state.log_history[-100:]
-            # Extract final summary metrics (TRL appends summary as last entry)
-            final = self.trainer.state.log_history[-1]
-            metrics["train_loss"] = final.get("train_loss", 0.0)
-            metrics["train_runtime"] = final.get("train_runtime", 0.0)
-            metrics["train_samples_per_second"] = final.get("train_samples_per_second", 0.0)
-            metrics["epoch"] = final.get("epoch", 0.0)
 
         return final_path, metrics
 
@@ -230,13 +238,7 @@ class Trainer:
                     "lora_dropout": self.lora_config.lora_dropout,
                     "target_modules": self.lora_config.target_modules,
                 },
-                "training": {
-                    "num_epochs": self.training_config.num_epochs,
-                    "batch_size": self.training_config.batch_size,
-                    "learning_rate": self.training_config.learning_rate,
-                    "max_grad_norm": self.training_config.max_grad_norm,
-                    "max_seq_length": self.training_config.max_seq_length,
-                },
+                "training": {k: self.training_config[k] for k in TRAINING_CONFIG_KEYS},
                 "quantized": self._applied_quantization,
             },
             started_at=started_at,
