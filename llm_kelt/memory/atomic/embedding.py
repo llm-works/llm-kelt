@@ -234,17 +234,50 @@ class EmbeddingAdapter:
         fact_type: str | None,
         categories: list[str] | None,
     ) -> EmbeddingFilter | None:
-        """Build effective filter from new filter param or legacy params."""
-        if filter is not None:
-            return filter
-        if fact_type or categories:
-            f = EmbeddingFilter()
-            if fact_type:
-                f.fact_type(fact_type)
-            if categories:
-                f.categories(*categories)
-            return f
-        return None
+        """Build effective filter by merging filter param with legacy params.
+
+        If both filter and legacy params are provided, they are ANDed together.
+        """
+        if not filter and not fact_type and not categories:
+            return None
+
+        # Start with provided filter or create new one
+        f = filter if filter is not None else EmbeddingFilter()
+
+        # Merge legacy params (only if not already set on filter)
+        if fact_type and f._fact_type is None:
+            f.fact_type(fact_type)
+        if categories and f._categories is None:
+            f.categories(*categories)
+
+        return f
+
+    def _search_and_score(
+        self,
+        query: list[float],
+        model_name: str,
+        fetch_k: int,
+        min_similarity: float,
+        effective_filter: EmbeddingFilter | None,
+    ) -> list[ScoredEntity[Fact]]:
+        """Search embedding store and return scored, filtered facts."""
+        results = self._store.search(
+            query=query,
+            entity_type=self.ENTITY_TYPE,
+            model_name=model_name,
+            top_k=fetch_k,
+            min_similarity=min_similarity,
+        )
+        if not results:
+            return []
+
+        fact_ids = [int(entity_id) for entity_id, _ in results]
+        score_map = {int(entity_id): score for entity_id, score in results}
+        facts = self._hydrate_facts(fact_ids, effective_filter)
+
+        scored = [ScoredEntity(entity=f, score=score_map[f.id]) for f in facts if f.id in score_map]
+        scored.sort(key=lambda x: x.score, reverse=True)
+        return scored
 
     def search_similar(
         self,
@@ -272,26 +305,19 @@ class EmbeddingAdapter:
             List of facts with similarity scores, sorted by similarity.
         """
         effective_filter = self._build_filter(filter, fact_type, categories)
-        fetch_k = top_k * 2 if effective_filter else top_k
 
-        results = self._store.search(
-            query=query,
-            entity_type=self.ENTITY_TYPE,
-            model_name=model_name,
-            top_k=fetch_k,
-            min_similarity=min_similarity,
-        )
-        if not results:
-            return []
+        # Adaptive fetch widening: start with top_k, widen if filter reduces results
+        max_fetch = top_k * 8
+        fetch_k = top_k
 
-        # Build score map and hydrate facts
-        fact_ids = [int(entity_id) for entity_id, _ in results]
-        score_map = {int(entity_id): score for entity_id, score in results}
-        facts = self._hydrate_facts(fact_ids, effective_filter)
+        while fetch_k <= max_fetch:
+            scored = self._search_and_score(
+                query, model_name, fetch_k, min_similarity, effective_filter
+            )
+            if not scored or not effective_filter or len(scored) >= top_k or fetch_k >= max_fetch:
+                return scored[:top_k]
+            fetch_k *= 2
 
-        # Build scored results, sorted by similarity
-        scored = [ScoredEntity(entity=f, score=score_map[f.id]) for f in facts if f.id in score_map]
-        scored.sort(key=lambda x: x.score, reverse=True)
         return scored[:top_k]
 
     def delete_embedding(self, fact_id: int) -> int:
