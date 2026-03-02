@@ -94,6 +94,20 @@ class TestCheckTrainingStability:
         assert report.final_loss == 2.0
         assert any("higher than minimum" in w for w in report.warnings)
 
+    def test_divergence_from_zero_min(self):
+        """Detects divergence when minimum loss is zero and final rebounds."""
+        log_history = [
+            {"loss": 1.0, "step": 10},
+            {"loss": 0.5, "step": 20},
+            {"loss": 0.0, "step": 30},  # Zero minimum
+            {"loss": 0.8, "step": 40},  # Rebounds
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is False
+        assert report.min_loss == 0.0
+        assert report.final_loss == 0.8
+        assert any("rebounded from zero" in w for w in report.warnings)
+
     def test_empty_history(self):
         """Handles empty log history."""
         report = check_training_stability([])

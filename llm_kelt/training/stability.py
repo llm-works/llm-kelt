@@ -80,6 +80,23 @@ def _count_loss_spikes(losses: list[float], threshold: float) -> int:
     return spike_count
 
 
+def _check_divergence(final_loss: float, min_loss: float) -> str | None:
+    """Check for training divergence and return warning message if detected."""
+    if min_loss == 0 and final_loss > 0:
+        return (
+            f"WARNING: Final loss ({final_loss:.2f}) rebounded from zero minimum. "
+            "Training may have diverged."
+        )
+    if min_loss > 0:
+        divergence_ratio = final_loss / min_loss
+        if divergence_ratio > 3.0:
+            return (
+                f"WARNING: Final loss ({final_loss:.2f}) is {divergence_ratio:.1f}x higher "
+                f"than minimum achieved ({min_loss:.2f}). Training may have diverged."
+            )
+    return None
+
+
 def _generate_warnings(
     nan_count: int,
     spike_count: int,
@@ -110,13 +127,10 @@ def _generate_warnings(
             "Model may not have converged properly."
         )
 
-    if final_loss is not None and min_loss is not None and min_loss > 0:
-        divergence_ratio = final_loss / min_loss
-        if divergence_ratio > 3.0:
-            warnings.append(
-                f"WARNING: Final loss ({final_loss:.2f}) is {divergence_ratio:.1f}x higher "
-                f"than minimum achieved ({min_loss:.2f}). Training may have diverged."
-            )
+    if final_loss is not None and min_loss is not None:
+        divergence_warning = _check_divergence(final_loss, min_loss)
+        if divergence_warning:
+            warnings.append(divergence_warning)
 
     return warnings
 
