@@ -217,6 +217,8 @@ class Trainer:
         metrics = self._collect_metrics()
         if self.eval_dataset:
             metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
+            # Re-capture history to include eval entries added by evaluate()
+            metrics["history"] = self.trainer.state.log_history[-100:]
 
         return final_path, metrics
 
