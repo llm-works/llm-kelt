@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `Client.with_schema()` for per-operation schema selection without client caches
+- `ScopedClient` for lazy-initializing schema-scoped operations
+- `Database.scoped()` returning `ScopedDatabase` for session-level schema isolation
+- `Source.schema_name` field for tracking training data provenance by schema
+- `ManifestClient.get_manifest(md5)` for looking up manifests by adapter hash
+- `kelt train deploy` CLI tool for deploying adapter versions
+- `kelt train run --list-models` option to list available models
 - `EmbeddingFilter` for flexible similarity search filtering with SQLAlchemy clause support
 - Training stability detection: detects NaN gradients, loss spikes, and divergence
 - Stability warnings in completed manifests (`unstable`, `stability_warnings` fields)

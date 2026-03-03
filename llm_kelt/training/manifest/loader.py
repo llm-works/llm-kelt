@@ -182,7 +182,9 @@ def _build_training_section(manifest: Manifest) -> dict[str, Any]:
 def _add_provenance_fields(data: dict[str, Any], manifest: Manifest) -> None:
     """Add source and parent fields to data dict if present."""
     source = manifest.get("source")
-    if source and (source.get("context_key") or source.get("description")):
+    if source and (
+        source.get("context_key") or source.get("schema_name") or source.get("description")
+    ):
         data["source"] = dict(source)
     parent = manifest.get("parent")
     if parent is not None:

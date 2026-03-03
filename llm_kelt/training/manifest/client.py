@@ -87,6 +87,7 @@ class Client:
         self._lg = lg
         self._storage = storage
         self._default_profiles = default_profiles or {}
+        self._manifest_cache: dict[str, Manifest] = {}  # md5 -> Manifest cache
 
     def _extract_nested_configs(
         self, config: dict[str, Any]
@@ -149,6 +150,7 @@ class Client:
         model: str | None = None,
         parent: Adapter | None = None,
         context_key: str | None = None,
+        schema_name: str | None = None,
         description: str | None = None,
         config: dict[str, Any] | None = None,
         deployment_policy: Literal["skip", "add", "replace"] | None = None,
@@ -162,6 +164,7 @@ class Client:
             model: Optional base model (can be specified at training time via --model).
             parent: Parent adapter for lineage (continue training from this).
             context_key: Agent context key for provenance.
+            schema_name: Database schema where training data originated.
             description: Human-readable description.
             config: Override training configuration (num_epochs, etc.).
             deployment_policy: Deployment policy after training:
@@ -172,7 +175,7 @@ class Client:
         Returns:
             Manifest instance.
         """
-        source = Source(context_key=context_key, description=description)
+        source = Source(context_key=context_key, schema_name=schema_name, description=description)
         lora_config, training_config, method_config = self._build_manifest_configs(
             method, model, config
         )
@@ -298,6 +301,32 @@ class Client:
             adapter: Adapter = manifest.output.adapter
             return adapter
         return None
+
+    def get_manifest(self, md5: str) -> Manifest | None:
+        """Get a completed manifest by adapter md5.
+
+        Use this to look up the manifest for a deployed adapter, e.g., to
+        determine which schema the adapter's training data came from.
+
+        Results are cached since manifests don't change at runtime.
+
+        Args:
+            md5: MD5 hash of adapter weights (12 char hex).
+
+        Returns:
+            Manifest if found, None otherwise.
+
+        Example:
+            manifest = client.get_manifest("e6a8a798834d")
+            schema = manifest.source.schema_name if manifest and manifest.source else None
+        """
+        if md5 in self._manifest_cache:
+            return self._manifest_cache[md5]
+
+        manifest = self._storage.find_adapter_by_md5(md5)
+        if manifest:
+            self._manifest_cache[md5] = manifest
+        return manifest
 
     def get_latest_completed(
         self, adapter: str | None = None, context_key: str | None = None
