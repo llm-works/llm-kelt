@@ -57,7 +57,8 @@ class ScopedDatabase:
     @property
     def schema(self) -> str:
         """Get the schema name for this scoped database."""
-        return self._scoped_pg.schema
+        schema: str = self._scoped_pg.schema
+        return schema
 
     @property
     def engine(self) -> Any:

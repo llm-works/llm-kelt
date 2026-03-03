@@ -116,7 +116,8 @@ class Database:
     @property
     def schema(self) -> str | None:
         """Get the configured PostgreSQL schema name, if any."""
-        return self._pg.schema
+        schema: str | None = self._pg.schema
+        return schema
 
     def health_check(self) -> dict[str, Any]:
         """Check database connectivity."""
