@@ -50,13 +50,13 @@ client.with_schema("playground").atomic.assertions.add(
 )
 
 # Schema from training manifest
-schema = manifest.source.schema_name or "default"
+schema = manifest.source.schema_name if manifest.source else "default"
 client.with_schema(schema).atomic.facts.add(...)
 ```
 
 **Key behaviors:**
 
-- **Lazy initialization** - Schema and tables created on first `.atomic` access
+- **Lazy initialization** - Schema and tables created on first `.atomic` access (when `ensure_schema=True`)
 - **Lightweight** - `ScopedClient` shares resources (embedder, logger) with parent
 - **Independent scopes** - Each `with_schema()` call returns a fresh `ScopedClient`
 - **Context key preserved** - All scoped operations use the parent's `context_key`

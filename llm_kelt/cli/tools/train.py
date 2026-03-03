@@ -67,11 +67,17 @@ class _ConfigMixin:
         print("\nAvailable models (in locations):")
         found_any = False
         for loc in locations:
-            if loc.exists():
-                for model_dir in sorted(loc.iterdir()):
-                    if model_dir.is_dir() and not model_dir.name.startswith("."):
-                        print(f"  - {model_dir.name}")
-                        found_any = True
+            try:
+                if loc.exists():
+                    for model_dir in sorted(loc.iterdir()):
+                        try:
+                            if model_dir.is_dir() and not model_dir.name.startswith("."):
+                                print(f"  - {model_dir.name}")
+                                found_any = True
+                        except OSError:
+                            continue  # Skip unreadable entries
+            except OSError:
+                continue  # Skip unreadable directories
         if not found_any:
             print("  (none found)")
 
