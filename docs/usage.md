@@ -50,7 +50,7 @@ client.with_schema("playground").atomic.assertions.add(
 )
 
 # Schema from training manifest
-schema = manifest.source.schema or "default"
+schema = manifest.source.schema_name or "default"
 client.with_schema(schema).atomic.facts.add(...)
 ```
 

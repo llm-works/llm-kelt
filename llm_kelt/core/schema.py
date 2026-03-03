@@ -32,7 +32,8 @@ _ADVISORY_LOCK_KEY = 7829104563218907456
 
 # Schema name validation pattern - must be a valid SQL identifier.
 # Must start with lowercase letter, can contain lowercase letters, numbers, and underscores.
-_SCHEMA_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+# Limited to 63 chars (PostgreSQL identifier limit) to prevent truncation.
+_SCHEMA_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 
 
 class SchemaState(Enum):
@@ -98,8 +99,8 @@ class SchemaManager:
         if not _SCHEMA_NAME_PATTERN.match(self._schema_name):
             raise ValueError(
                 f"Invalid schema name '{self._schema_name}'. "
-                "Must start with lowercase letter and contain only lowercase letters, "
-                "numbers, and underscores."
+                "Must be 1-63 chars, start with a lowercase letter, and contain only "
+                "lowercase letters, numbers, and underscores."
             )
 
         if migrations_path is None:
@@ -215,8 +216,12 @@ class SchemaManager:
         conn.commit()
 
     def _set_search_path(self, conn) -> None:
-        """Set search_path to target schema for DDL operations."""
-        conn.execute(text(f'SET search_path TO "{self._schema_name}", public'))
+        """Set search_path to target schema for DDL operations.
+
+        Uses SET LOCAL to scope the change to the current transaction,
+        preventing search_path leakage on pooled connections.
+        """
+        conn.execute(text(f'SET LOCAL search_path TO "{self._schema_name}", public'))
 
     def _create_tables_in_schema(self, conn) -> None:
         """Create all tables in the target schema.

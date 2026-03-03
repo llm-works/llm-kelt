@@ -311,13 +311,13 @@ class Client:
         Results are cached since manifests don't change at runtime.
 
         Args:
-            md5: MD5 hash of adapter weights (12 char hex).
+            md5: MD5 hash of adapter weights (32 char hex).
 
         Returns:
             Manifest if found, None otherwise.
 
         Example:
-            manifest = client.get_manifest("e6a8a798834d")
+            manifest = client.get_manifest("e6a8a798834d1c5f9b2a3e4d5f6a7b8c")
             schema = manifest.source.schema_name if manifest and manifest.source else None
         """
         if md5 in self._manifest_cache:

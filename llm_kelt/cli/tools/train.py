@@ -486,6 +486,9 @@ class DeployTool(_ConfigMixin, Tool):
         except ValueError as e:
             self.lg.error(str(e))
             return 1
+        except Exception as e:
+            self.lg.error(f"{e.__class__.__name__}: {e}")
+            return 1
 
 
 class AdaptersTool(_ConfigMixin, Tool):

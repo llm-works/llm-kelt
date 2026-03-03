@@ -369,6 +369,14 @@ class Client:
         if context_schema is None or context_schema == db_schema:
             return
 
+        # Schema conflict: context and DB have different schemas
+        if db_schema is not None and context_schema != db_schema:
+            raise ValueError(
+                f"Schema conflict: context specifies '{context_schema}' but "
+                f"database is configured for '{db_schema}'. Use with_schema() "
+                "for per-operation schema selection instead."
+            )
+
         # Context has a schema but DB doesn't - configure it (backward compat)
         if db_schema is None and ensure:
             self._db.configure_schema(context_schema)

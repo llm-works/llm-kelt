@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 
 from appinfra.log import Logger
@@ -56,32 +57,43 @@ class ScopedClient:
         self._scoped_db: ScopedDatabase | None = None
         self._atomic: Protocol | None = None
         self._initialized = False
+        self._init_lock = threading.Lock()
 
     def _ensure_initialized(self) -> None:
-        """Lazy initialization: create schema + tables on first use."""
+        """Lazy initialization: create schema + tables on first use.
+
+        Thread-safe via double-checked locking pattern.
+        """
         if self._initialized:
             return
 
-        self._scoped_db = self._parent._db.scoped(self._schema_name)
+        with self._init_lock:
+            # Double-check after acquiring lock
+            if self._initialized:
+                return
 
-        if self._ensure_schema:
-            # Create PostgreSQL schema if needed
-            self._scoped_db.ensure_schema()
+            self._scoped_db = self._parent._db.scoped(self._schema_name)
 
-            # Run Alembic migrations for this schema
-            manager = SchemaManager(self._lg, self._scoped_db.engine, schema_name=self._schema_name)
-            manager.ensure_schema()
+            if self._ensure_schema:
+                # Create PostgreSQL schema if needed
+                self._scoped_db.ensure_schema()
 
-        # Create stores with scoped database
-        embedding_store = EmbeddingStore(self._scoped_db.session)
-        self._atomic = atomic.Protocol(
-            self._lg,
-            self._scoped_db.session,
-            self._parent._context.context_key,
-            embedder=self._parent._embedder,
-            embedding_store=embedding_store,
-        )
-        self._initialized = True
+                # Run Alembic migrations for this schema
+                manager = SchemaManager(
+                    self._lg, self._scoped_db.engine, schema_name=self._schema_name
+                )
+                manager.ensure_schema()
+
+            # Create stores with scoped database
+            embedding_store = EmbeddingStore(self._scoped_db.session)
+            self._atomic = atomic.Protocol(
+                self._lg,
+                self._scoped_db.session,
+                self._parent._context.context_key,
+                embedder=self._parent._embedder,
+                embedding_store=embedding_store,
+            )
+            self._initialized = True
 
     @property
     def atomic(self) -> Protocol:
