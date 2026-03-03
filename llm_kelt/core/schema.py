@@ -4,6 +4,7 @@ Provides SchemaManager for safe, concurrent schema initialization
 using PostgreSQL advisory locks.
 """
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -28,6 +29,10 @@ if TYPE_CHECKING:
 # hash() uses a randomized seed (since 3.3) that differs between processes.
 # Value chosen arbitrarily but must remain stable across all library versions.
 _ADVISORY_LOCK_KEY = 7829104563218907456
+
+# Schema name validation pattern - must be a valid SQL identifier.
+# Must start with lowercase letter, can contain lowercase letters, numbers, and underscores.
+_SCHEMA_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 class SchemaState(Enum):
@@ -82,10 +87,20 @@ class SchemaManager:
             engine: SQLAlchemy engine
             migrations_path: Path to migrations directory. Defaults to package migrations dir.
             schema_name: PostgreSQL schema name (for logging). Defaults to "public".
+
+        Raises:
+            ValueError: If schema_name is not a valid SQL identifier.
         """
         self._lg = lg
         self._engine = engine
         self._schema_name = schema_name or "public"
+
+        if not _SCHEMA_NAME_PATTERN.match(self._schema_name):
+            raise ValueError(
+                f"Invalid schema name '{self._schema_name}'. "
+                "Must start with lowercase letter and contain only lowercase letters, "
+                "numbers, and underscores."
+            )
 
         if migrations_path is None:
             # Default: llm_kelt/migrations (inside the package)
