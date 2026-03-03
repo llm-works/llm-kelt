@@ -18,7 +18,7 @@ def ensure_alembic_version(logger, database):
     and when running in parallel, the table might not exist if another test hasn't
     called ensure_schema() first.
     """
-    manager = SchemaManager(logger, database.engine)
+    manager = SchemaManager(logger, database.engine, schema_name=database.schema)
     manager.ensure_schema()
     yield
 
@@ -30,7 +30,7 @@ class TestSchemaManager:
 
     def test_get_status_current(self, logger, database):
         """Test that get_status returns CURRENT after ensure_schema."""
-        manager = SchemaManager(logger, database.engine)
+        manager = SchemaManager(logger, database.engine, schema_name=database.schema)
 
         # First ensure schema is initialized (stamps alembic_version)
         manager.ensure_schema()
@@ -44,7 +44,7 @@ class TestSchemaManager:
 
     def test_ensure_schema_idempotent(self, logger, database):
         """Test that ensure_schema is idempotent - multiple calls succeed."""
-        manager = SchemaManager(logger, database.engine)
+        manager = SchemaManager(logger, database.engine, schema_name=database.schema)
 
         # Call multiple times
         status1 = manager.ensure_schema()
@@ -70,7 +70,7 @@ class TestSchemaManager:
 
         def call_ensure_schema():
             try:
-                manager = SchemaManager(logger, database.engine)
+                manager = SchemaManager(logger, database.engine, schema_name=database.schema)
                 status = manager.ensure_schema()
                 with lock:
                     results.append(status)
@@ -90,7 +90,7 @@ class TestSchemaManager:
 
     def test_downgrade_protection(self, logger, database):
         """Test that SchemaVersionError is raised for unknown (future) versions."""
-        manager = SchemaManager(logger, database.engine)
+        manager = SchemaManager(logger, database.engine, schema_name=database.schema)
 
         # Insert a fake future version
         with database.engine.connect() as conn:
@@ -119,7 +119,7 @@ class TestSchemaManager:
 
     def test_get_status_missing(self, logger, database):
         """Test that get_status returns MISSING when alembic_version is empty."""
-        manager = SchemaManager(logger, database.engine)
+        manager = SchemaManager(logger, database.engine, schema_name=database.schema)
         head = manager._get_head_version()
 
         # Clear alembic_version
@@ -145,7 +145,7 @@ class TestSchemaManager:
         """Test that non-blocking lock fails fast when lock is held."""
         from llm_kelt.core.schema import _ADVISORY_LOCK_KEY
 
-        manager = SchemaManager(logger, database.engine)
+        manager = SchemaManager(logger, database.engine, schema_name=database.schema)
 
         # Acquire lock manually using the same fixed key as SchemaManager
         with database.engine.connect() as holder_conn:

@@ -21,6 +21,8 @@ class Source(FieldDict):
 
     # Agent context key that created this manifest
     context_key: str | None = None
+    # Database schema where training data originated (for workspace isolation)
+    schema_name: str | None = None
     # Human-readable description of the training goal
     description: str | None = None
 

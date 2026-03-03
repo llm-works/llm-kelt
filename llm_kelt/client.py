@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .memory.atomic import Protocol
+    from .scoped_client import ScopedClient
     from .training import Factory as TrainFactory
 
 
@@ -106,7 +107,9 @@ class Client:
         self._llm_client = llm_client
         self._kelt_config = kelt_config
         self._training_config = training_config
+        self._ensure_schema = ensure_schema
 
+        self._ensure_schema_config(ensure=ensure_schema)
         self._verify_schema(ensure=ensure_schema)
         self._setup_stores()
         self._setup_query_interface()
@@ -212,6 +215,42 @@ class Client:
             ensure_schema=False,  # Don't re-run schema checks
         )
 
+    def with_schema(self, schema_name: str) -> ScopedClient:
+        """
+        Get a client scoped to a specific schema.
+
+        All operations on the returned client use the specified schema.
+        If ensure_schema was True at client construction, the schema and
+        tables are created lazily on first use.
+
+        This is the preferred way to perform multi-schema operations from
+        a single Client instance. Unlike with_isolation(), this does not
+        create a new Client - it creates a lightweight ScopedClient that
+        shares resources with the parent.
+
+        Args:
+            schema_name: PostgreSQL schema name
+
+        Returns:
+            ScopedClient bound to the schema
+
+        Example:
+            # Schema-agnostic client
+            client = KeltClient(database=db, context_key="my-agent", ensure_schema=True)
+
+            # Schema specified at operation time
+            client.with_schema("hn_exp").atomic.solutions.record(...)
+            client.with_schema("playground").atomic.facts.add(...)
+        """
+        from .scoped_client import ScopedClient
+
+        return ScopedClient(
+            lg=self._lg,
+            parent=self,
+            schema_name=schema_name,
+            ensure_schema=self._ensure_schema,
+        )
+
     @property
     def atomic(self) -> Protocol:
         """Access atomic memory protocol."""
@@ -311,6 +350,41 @@ class Client:
             return ""
         return getattr(self._kelt_config, "default_system_prompt", "") or ""
 
+    def _ensure_schema_config(self, *, ensure: bool) -> None:
+        """Configure Database schema from ClientContext if needed.
+
+        When ClientContext.schema_name is set but Database wasn't configured with
+        a schema, this dynamically configures PG with the schema from context.
+
+        For schema-agnostic clients (context.schema_name is None), this is a no-op.
+        Schema selection happens at operation time via with_schema().
+
+        Args:
+            ensure: If True, configure PG with schema from context.
+        """
+        context_schema = self._context.schema_name
+        db_schema = self._db.schema
+
+        # Schema-agnostic or already configured - nothing to do
+        if context_schema is None or context_schema == db_schema:
+            return
+
+        # Schema conflict: context and DB have different schemas
+        if db_schema is not None and context_schema != db_schema:
+            raise ValueError(
+                f"Schema conflict: context specifies '{context_schema}' but "
+                f"database is configured for '{db_schema}'. Use with_schema() "
+                "for per-operation schema selection instead."
+            )
+
+        # Context has a schema but DB doesn't - configure it (backward compat)
+        if db_schema is None and ensure:
+            self._db.configure_schema(context_schema)
+            self._lg.info(
+                "configured database schema from context",
+                extra={"schema": context_schema},
+            )
+
     def _verify_schema(self, *, ensure: bool) -> None:
         """Verify database schema is current, optionally auto-migrating.
 
@@ -318,13 +392,15 @@ class Client:
             ensure: If True, create database and run migrations automatically.
                     If False, only verify — raise SchemaVersionError if not current.
         """
+        schema_name = self._context.schema_name or self._db.schema
         if ensure:
             self._db.ensure_database()
-            manager = SchemaManager(self._lg, self._db.engine)
+            self._db.ensure_pg_schema()  # Create PostgreSQL schema if configured
+            manager = SchemaManager(self._lg, self._db.engine, schema_name=schema_name)
             manager.ensure_schema()
             return
 
-        manager = SchemaManager(self._lg, self._db.engine)
+        manager = SchemaManager(self._lg, self._db.engine, schema_name=schema_name)
         status = manager.get_status()
         if status.state != SchemaState.CURRENT:
             raise SchemaVersionError(
@@ -335,7 +411,8 @@ class Client:
 
     def get_schema_status(self) -> SchemaStatus:
         """Get current schema status for diagnostics."""
-        manager = SchemaManager(self._lg, self._db.engine)
+        schema_name = self._context.schema_name or self._db.schema
+        manager = SchemaManager(self._lg, self._db.engine, schema_name=schema_name)
         return manager.get_status()
 
     def health_check(self) -> dict[str, Any]:

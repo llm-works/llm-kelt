@@ -55,6 +55,61 @@ class _ConfigMixin:
         """Get models config section."""
         return DotDict(getattr(self._config(), "models", {}))
 
+    def _print_model_locations(self, locations: list[Path]) -> None:
+        """Print model search locations."""
+        print("\nModel locations:")
+        for loc in locations:
+            marker = "" if loc.exists() else " (not found)"
+            print(f"  - {loc}{marker}")
+
+    def _print_available_models(self, locations: list[Path]) -> None:
+        """Print models found in location directories."""
+        print("\nAvailable models (in locations):")
+        found_any = False
+        for loc in locations:
+            try:
+                if loc.exists():
+                    for model_dir in sorted(loc.iterdir()):
+                        try:
+                            if model_dir.is_dir() and not model_dir.name.startswith("."):
+                                print(f"  - {model_dir.name}")
+                                found_any = True
+                        except OSError:
+                            continue  # Skip unreadable entries
+            except OSError:
+                continue  # Skip unreadable directories
+        if not found_any:
+            print("  (none found)")
+
+    def _list_models(self) -> int:
+        """List available models from config."""
+        models_cfg = self._models_config()
+        locations = self._model_locations()
+
+        self._print_model_locations(locations)
+
+        # List configured models
+        models = getattr(models_cfg, "models", {})
+        if models:
+            print("\nConfigured models:")
+            for name in sorted(models.keys()):
+                print(f"  - {name}")
+
+        # Show defaults
+        selection = getattr(models_cfg, "selection", None)
+        if selection:
+            gen = getattr(selection, "generate", None)
+            emb = getattr(selection, "embed", None)
+            print("\nDefaults:")
+            if gen and getattr(gen, "default", None):
+                print(f"  generate: {gen.default}")
+            if emb and getattr(emb, "default", None):
+                print(f"  embed: {emb.default}")
+
+        self._print_available_models(locations)
+        print()
+        return 0
+
     def _model_locations(self) -> list[Path]:
         """Get model search locations from config."""
         return [Path(loc) for loc in getattr(self._models_config(), "locations", [])]
@@ -272,6 +327,9 @@ class RunTool(_ConfigMixin, Tool):
     def add_args(self, parser) -> None:
         parser.add_argument("manifest", nargs="?", help="Manifest path (interactive if omitted)")
         parser.add_argument("--model", "-m", help="Override model (path, HF ID, or name)")
+        parser.add_argument(
+            "--list-models", action="store_true", help="List available models and exit"
+        )
         parser.add_argument("--skip-register", action="store_true", help="Skip registration")
         parser.add_argument(
             "--lora-profile",
@@ -314,6 +372,9 @@ class RunTool(_ConfigMixin, Tool):
         return self._select_interactive(registry_path / "pending")
 
     def run(self, **kwargs: Any) -> int:
+        if self.args.list_models:
+            return self._list_models()
+
         try:
             registry_path = self._registry_path()
         except ValueError as e:
@@ -347,6 +408,93 @@ class RunTool(_ConfigMixin, Tool):
         print(f"\nTraining complete! Adapter: {md5[:12]}")
         print(f"  Path: {adapter_path}, Duration: {result.duration_seconds:.1f}s")
         _print_adapter_metadata(adapter_path)
+
+
+class DeployTool(_ConfigMixin, Tool):
+    """Deploy an adapter version."""
+
+    def __init__(self, parent: Any = None) -> None:
+        super().__init__(
+            parent, ToolConfig(name="deploy", aliases=["dp"], help_text="Deploy adapter version")
+        )
+
+    def add_args(self, parser) -> None:
+        parser.add_argument("adapter", help="Adapter key (e.g., jokester-p-sft)")
+        parser.add_argument("--version", "-v", help="Version ID or md5 prefix (latest if omitted)")
+        parser.add_argument(
+            "--policy",
+            "-p",
+            choices=["add", "replace"],
+            default="replace",
+            help="Deployment policy (default: replace)",
+        )
+        parser.add_argument(
+            "--clear", "-c", action="store_true", help="Remove all deployments for adapter"
+        )
+
+    def _extract_md5(self, version_id: str) -> str:
+        """Extract md5 hash from version_id (format: YYYYMMDD-HHMMSS-md5)."""
+        parts = version_id.split("-")
+        return parts[-1] if len(parts) >= 3 else version_id
+
+    def _resolve_version(
+        self, storage: FileStorage, adapter: str, version: str | None
+    ) -> str | None:
+        """Resolve version argument to full version_id."""
+        if version is None:
+            return None
+
+        version_ids = storage.list_versions(adapter)
+        if not version_ids:
+            raise ValueError(f"No versions found for adapter '{adapter}'")
+
+        # Try exact match on version_id or md5
+        for vid in version_ids:
+            if vid == version or self._extract_md5(vid) == version:
+                return vid
+
+        # Try prefix match on md5
+        matches = [vid for vid in version_ids if self._extract_md5(vid).startswith(version)]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise ValueError(f"Ambiguous md5 prefix '{version}': {matches}")
+
+        raise ValueError(f"Version '{version}' not found for adapter '{adapter}'")
+
+    def _print_deployed(self, storage: FileStorage, adapter: str) -> None:
+        """Print currently deployed versions."""
+        deployed = storage.list_deployed(adapter)
+        if deployed:
+            print(f"\nDeployed {adapter}:")
+            for key, md5 in deployed:
+                print(f"  {key}-{md5}")
+        print()
+
+    def run(self, **kwargs: Any) -> int:
+        try:
+            storage = FileStorage(self.lg, self._registry_path())
+        except ValueError as e:
+            self.lg.error(str(e))
+            return 1
+
+        adapter = self.args.adapter
+        try:
+            if self.args.clear:
+                storage.undeploy_adapter(adapter)
+                print(f"\nCleared all deployments for {adapter}")
+                return 0
+
+            version_id = self._resolve_version(storage, adapter, self.args.version)
+            storage.deploy_adapter(adapter, version_id, policy=self.args.policy)
+            self._print_deployed(storage, adapter)
+            return 0
+        except ValueError as e:
+            self.lg.error(str(e))
+            return 1
+        except Exception as e:
+            self.lg.error(f"{e.__class__.__name__}: {e}")
+            return 1
 
 
 class AdaptersTool(_ConfigMixin, Tool):
@@ -399,6 +547,7 @@ class TrainTool(Tool):
         self.add_tool(DpoTool(self))
         self.add_tool(SftTool(self))
         self.add_tool(AdaptersTool(self))
+        self.add_tool(DeployTool(self))
 
     def run(self, **kwargs: Any) -> int:
         result: int = self.group.run(**kwargs)
