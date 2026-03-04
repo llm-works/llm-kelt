@@ -47,7 +47,7 @@ def _is_nan(value: float | None) -> bool:
 
 
 def _get_float(log: dict, key: str) -> float | None:
-    """Extract float value from log entry, handling NaN strings."""
+    """Extract float value from log entry, handling NaN strings and invalid types."""
     value = log.get(key)
     if value is None:
         return None
@@ -58,7 +58,11 @@ def _get_float(log: dict, key: str) -> float | None:
             return float(value)
         except ValueError:
             return None
-    return float(value)
+    # Guard against non-scalar types (dict, list) that would raise TypeError
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass
@@ -206,16 +210,22 @@ def _check_entropy_drop_rate(pairs: list[EntropyEpochPair]) -> str | None:
     """Check for rapid entropy drop (learning too aggressively).
 
     Uses aligned entropy/epoch pairs to ensure values come from the same log entries.
+    Scans consecutive intervals to detect sharp mid-training drops that might recover.
     """
     if len(pairs) < 2:
         return None
-    total_epochs = pairs[-1].epoch - pairs[0].epoch
-    if total_epochs <= 0:
-        return None
-    drop_rate = (pairs[0].entropy - pairs[-1].entropy) / total_epochs
-    if drop_rate > ENTROPY_DROP_RATE_THRESHOLD:
+    # Sort by epoch and find max per-interval drop rate
+    ordered = sorted(pairs, key=lambda p: p.epoch)
+    max_drop_rate = 0.0
+    for prev, curr in zip(ordered, ordered[1:]):
+        delta_epoch = curr.epoch - prev.epoch
+        if delta_epoch <= 0:
+            continue
+        interval_drop = (prev.entropy - curr.entropy) / delta_epoch
+        max_drop_rate = max(max_drop_rate, interval_drop)
+    if max_drop_rate > ENTROPY_DROP_RATE_THRESHOLD:
         return (
-            f"WARNING: Rapid entropy drop ({drop_rate:.2f}/epoch > "
+            f"WARNING: Rapid entropy drop ({max_drop_rate:.2f}/epoch > "
             f"{ENTROPY_DROP_RATE_THRESHOLD}/epoch). Model learning too aggressively. "
             "Consider lower learning rate."
         )

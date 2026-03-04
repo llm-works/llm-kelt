@@ -155,11 +155,13 @@ class TestOverfitDetection:
     """Tests for overfitting detection."""
 
     def test_healthy_training_no_overfit(self):
-        """Healthy training with entropy above threshold."""
+        """Healthy training with gradual entropy decline (< 0.3/epoch per interval)."""
+        # Each interval has drop < 0.3/epoch:
+        # epoch 1→2: (1.1 - 0.9) / 1.0 = 0.2/epoch
+        # epoch 2→3: (0.9 - 0.77) / 1.0 = 0.13/epoch
         log_history = [
-            {"loss": 1.3, "entropy": 1.3, "mean_token_accuracy": 0.68, "epoch": 0.5},
-            {"loss": 1.0, "entropy": 1.0, "mean_token_accuracy": 0.73, "epoch": 1.0},
-            {"loss": 0.8, "entropy": 0.8, "mean_token_accuracy": 0.78, "epoch": 2.0},
+            {"loss": 1.3, "entropy": 1.1, "mean_token_accuracy": 0.68, "epoch": 1.0},
+            {"loss": 1.0, "entropy": 0.9, "mean_token_accuracy": 0.73, "epoch": 2.0},
             {"loss": 0.7, "entropy": 0.77, "mean_token_accuracy": 0.79, "epoch": 3.0},
         ]
         report = check_training_stability(log_history)

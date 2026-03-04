@@ -191,8 +191,6 @@ class FileStorage(Storage):
         Args:
             md5: Hex MD5 hash (12 chars, lowercase). Invalid input returns None.
         """
-        import re
-
         from ..manifest.loader import load_manifest_metadata
 
         if not self.completed_path.exists():
