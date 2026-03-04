@@ -62,6 +62,14 @@ def _get_float(log: dict, key: str) -> float | None:
 
 
 @dataclass
+class EntropyEpochPair:
+    """Aligned entropy and epoch values from the same log entry."""
+
+    entropy: float
+    epoch: float
+
+
+@dataclass
 class LogAnalysis:
     """Extracted metrics from training log history."""
 
@@ -69,7 +77,7 @@ class LogAnalysis:
     losses: list[float]
     entropies: list[float]
     accuracies: list[float]
-    epochs: list[float]
+    entropy_epoch_pairs: list[EntropyEpochPair]  # Aligned pairs for drop rate calc
 
 
 def _extract_valid_floats(log_history: list[dict], key: str) -> list[float]:
@@ -92,6 +100,26 @@ def _count_nan_grad_norms(log_history: list[dict]) -> int:
     return count
 
 
+def _extract_entropy_epoch_pairs(log_history: list[dict]) -> list[EntropyEpochPair]:
+    """Extract aligned entropy/epoch pairs from entries that have both values.
+
+    Only includes entries where both entropy and epoch are valid floats,
+    ensuring the values are actually from the same training step.
+    """
+    pairs: list[EntropyEpochPair] = []
+    for log in log_history:
+        entropy = _get_float(log, "entropy")
+        epoch = _get_float(log, "epoch")
+        if (
+            entropy is not None
+            and epoch is not None
+            and not _is_nan(entropy)
+            and not _is_nan(epoch)
+        ):
+            pairs.append(EntropyEpochPair(entropy=entropy, epoch=epoch))
+    return pairs
+
+
 def _analyze_log_entries(log_history: list[dict]) -> LogAnalysis:
     """Extract metrics from log history for stability analysis."""
     return LogAnalysis(
@@ -99,7 +127,7 @@ def _analyze_log_entries(log_history: list[dict]) -> LogAnalysis:
         losses=_extract_valid_floats(log_history, "loss"),
         entropies=_extract_valid_floats(log_history, "entropy"),
         accuracies=_extract_valid_floats(log_history, "mean_token_accuracy"),
-        epochs=_extract_valid_floats(log_history, "epoch"),
+        entropy_epoch_pairs=_extract_entropy_epoch_pairs(log_history),
     )
 
 
@@ -174,17 +202,17 @@ def _check_high_accuracy(accuracies: list[float]) -> str | None:
     return None
 
 
-def _check_entropy_drop_rate(entropies: list[float], epochs: list[float]) -> str | None:
-    """Check for rapid entropy drop (learning too aggressively)."""
-    if len(entropies) < 2 or len(epochs) < 2:
+def _check_entropy_drop_rate(pairs: list[EntropyEpochPair]) -> str | None:
+    """Check for rapid entropy drop (learning too aggressively).
+
+    Uses aligned entropy/epoch pairs to ensure values come from the same log entries.
+    """
+    if len(pairs) < 2:
         return None
-    # Skip if lists are misaligned (extracted from different log entries)
-    if len(entropies) != len(epochs):
-        return None
-    total_epochs = epochs[-1] - epochs[0]
+    total_epochs = pairs[-1].epoch - pairs[0].epoch
     if total_epochs <= 0:
         return None
-    drop_rate = (entropies[0] - entropies[-1]) / total_epochs
+    drop_rate = (pairs[0].entropy - pairs[-1].entropy) / total_epochs
     if drop_rate > ENTROPY_DROP_RATE_THRESHOLD:
         return (
             f"WARNING: Rapid entropy drop ({drop_rate:.2f}/epoch > "
@@ -200,7 +228,7 @@ def _check_overfit(analysis: LogAnalysis) -> list[str]:
         _check_low_entropy(analysis.entropies),
         _check_low_loss(analysis.losses),
         _check_high_accuracy(analysis.accuracies),
-        _check_entropy_drop_rate(analysis.entropies, analysis.epochs),
+        _check_entropy_drop_rate(analysis.entropy_epoch_pairs),
     ]
     return [w for w in checks if w is not None]
 

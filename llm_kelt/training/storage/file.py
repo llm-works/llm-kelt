@@ -187,16 +187,27 @@ class FileStorage(Storage):
 
         Uses filename glob (*-{md5}.yaml.gz) for O(1) lookup, and streams only
         metadata (stops before data records) for fast lineage lookups.
+
+        Args:
+            md5: Hex MD5 hash (12 chars, lowercase). Invalid input returns None.
         """
+        import re
+
         from ..manifest.loader import load_manifest_metadata
 
         if not self.completed_path.exists():
             return None
 
+        # Normalize and validate md5 (12-char lowercase hex, truncated from full 32)
+        md5 = md5.lower()
+        if not re.fullmatch(r"[a-f0-9]{12}", md5):
+            self._lg.warning("invalid md5 format", extra={"md5": md5})
+            return None
+
         # md5 is in filename: {adapter}-{md5}.yaml.gz
-        matches = list(self.completed_path.glob(f"*-{md5}.yaml.gz"))
+        matches = sorted(self.completed_path.glob(f"*-{md5}.yaml.gz"))
         if not matches:
-            matches = list(self.completed_path.glob(f"*-{md5}.yaml"))
+            matches = sorted(self.completed_path.glob(f"*-{md5}.yaml"))
         if not matches:
             return None
 

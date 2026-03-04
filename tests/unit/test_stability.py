@@ -241,21 +241,41 @@ class TestOverfitDetection:
         assert report.final_entropy is None
         assert report.initial_entropy is None
 
-    def test_misaligned_entropy_epoch_skips_drop_rate_check(self):
-        """Skips entropy drop rate check when lists have different lengths.
+    def test_misaligned_entropy_epoch_uses_paired_entries_only(self):
+        """Uses only entries with both entropy AND epoch for drop rate calculation.
 
-        If some log entries have entropy but not epoch (or vice versa), the
-        extracted lists will have different lengths. The check should be
-        skipped rather than producing incorrect calculations.
+        Entries missing either value are excluded, ensuring the calculation
+        uses correctly aligned data points.
         """
-        # 3 entries with entropy, but only 2 with epoch - lists will be misaligned
+        # Entry 2 has entropy but no epoch - should be excluded from drop rate calc
+        # Only entries 1 and 3 have both, so drop rate = (1.5 - 0.5) / 2.0 = 0.5/epoch
         log_history = [
             {"loss": 1.3, "entropy": 1.5, "epoch": 0.0},
-            {"loss": 0.8, "entropy": 1.0},  # Missing epoch
-            {"loss": 0.5, "entropy": 0.5, "epoch": 2.0},  # Would trigger rapid drop if aligned
+            {"loss": 0.8, "entropy": 1.0},  # Missing epoch - excluded from pairs
+            {"loss": 0.5, "entropy": 0.5, "epoch": 2.0},
         ]
         report = check_training_stability(log_history)
-        # Should NOT produce "Rapid entropy drop" warning due to misaligned lists
+        # Should trigger rapid entropy drop (0.5/epoch > 0.3 threshold)
+        assert any("Rapid entropy drop" in w for w in report.warnings)
+        # Low entropy warning should also fire (independent check)
+        assert any("Low entropy" in w for w in report.warnings)
+
+    def test_same_length_different_rows_uses_aligned_pairs(self):
+        """Ensures drop rate uses aligned pairs even when list lengths would match.
+
+        When entropy and epoch appear in different rows (same count but different
+        entries), only entries with BOTH values are used for the calculation.
+        """
+        # 2 entries with entropy only, 2 entries with epoch only
+        # No entries have both -> no pairs -> no drop rate warning
+        log_history = [
+            {"loss": 1.3, "entropy": 1.5},  # Entropy only
+            {"loss": 1.0, "epoch": 0.5},  # Epoch only
+            {"loss": 0.8, "entropy": 0.4},  # Entropy only (would be "rapid" if misaligned)
+            {"loss": 0.6, "epoch": 2.0},  # Epoch only
+        ]
+        report = check_training_stability(log_history)
+        # No rapid entropy drop - no aligned pairs exist
         assert not any("Rapid entropy drop" in w for w in report.warnings)
-        # Low entropy warning should still fire (independent check)
+        # Low entropy warning should still fire (independent check on entropies list)
         assert any("Low entropy" in w for w in report.warnings)
