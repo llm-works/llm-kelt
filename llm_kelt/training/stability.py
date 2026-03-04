@@ -1,7 +1,7 @@
 """Training stability detection and warnings.
 
 Analyzes training metrics to detect instability patterns like gradient explosion,
-loss spikes, and training divergence.
+loss spikes, training divergence, and overfitting.
 """
 
 from __future__ import annotations
@@ -14,6 +14,13 @@ if TYPE_CHECKING:
     from appinfra.log import Logger
 
 
+# Overfitting thresholds
+LOW_ENTROPY_THRESHOLD = 0.6  # Below this = model too deterministic
+NEAR_ZERO_LOSS_THRESHOLD = 0.3  # Below this = likely memorizing
+HIGH_ACCURACY_THRESHOLD = 0.95  # Above this = likely memorization
+ENTROPY_DROP_RATE_THRESHOLD = 0.3  # Per epoch, above this = learning too aggressively
+
+
 @dataclass
 class StabilityReport:
     """Results of training stability analysis."""
@@ -24,6 +31,10 @@ class StabilityReport:
     loss_spike_count: int = 0
     final_loss: float | None = None
     min_loss: float | None = None
+    # Overfitting metrics
+    final_entropy: float | None = None
+    initial_entropy: float | None = None
+    final_accuracy: float | None = None
 
 
 def _is_nan(value: float | None) -> bool:
@@ -50,21 +61,46 @@ def _get_float(log: dict, key: str) -> float | None:
     return float(value)
 
 
-def _analyze_log_entries(log_history: list[dict]) -> tuple[int, list[float]]:
-    """Extract NaN grad_norm count and valid losses from log history."""
-    nan_grad_norm_count = 0
-    losses: list[float] = []
+@dataclass
+class LogAnalysis:
+    """Extracted metrics from training log history."""
 
+    nan_grad_norm_count: int
+    losses: list[float]
+    entropies: list[float]
+    accuracies: list[float]
+    epochs: list[float]
+
+
+def _extract_valid_floats(log_history: list[dict], key: str) -> list[float]:
+    """Extract valid (non-NaN) float values for a key from log history."""
+    values: list[float] = []
+    for log in log_history:
+        value = _get_float(log, key)
+        if value is not None and not _is_nan(value):
+            values.append(value)
+    return values
+
+
+def _count_nan_grad_norms(log_history: list[dict]) -> int:
+    """Count entries with NaN gradient norm."""
+    count = 0
     for log in log_history:
         grad_norm = _get_float(log, "grad_norm")
         if grad_norm is not None and _is_nan(grad_norm):
-            nan_grad_norm_count += 1
+            count += 1
+    return count
 
-        loss = _get_float(log, "loss")
-        if loss is not None and not _is_nan(loss):
-            losses.append(loss)
 
-    return nan_grad_norm_count, losses
+def _analyze_log_entries(log_history: list[dict]) -> LogAnalysis:
+    """Extract metrics from log history for stability analysis."""
+    return LogAnalysis(
+        nan_grad_norm_count=_count_nan_grad_norms(log_history),
+        losses=_extract_valid_floats(log_history, "loss"),
+        entropies=_extract_valid_floats(log_history, "entropy"),
+        accuracies=_extract_valid_floats(log_history, "mean_token_accuracy"),
+        epochs=_extract_valid_floats(log_history, "epoch"),
+    )
 
 
 def _count_loss_spikes(losses: list[float], threshold: float) -> int:
@@ -95,6 +131,75 @@ def _check_divergence(final_loss: float, min_loss: float) -> str | None:
                 f"than minimum achieved ({min_loss:.2f}). Training may have diverged."
             )
     return None
+
+
+def _check_low_entropy(entropies: list[float]) -> str | None:
+    """Check for low entropy (model too deterministic)."""
+    if not entropies:
+        return None
+    final = entropies[-1]
+    if final < LOW_ENTROPY_THRESHOLD:
+        return (
+            f"WARNING: Low entropy ({final:.2f} < {LOW_ENTROPY_THRESHOLD}). "
+            "Model may be overfitting - outputs will be repetitive/deterministic. "
+            "Consider fewer epochs or lower learning rate."
+        )
+    return None
+
+
+def _check_low_loss(losses: list[float]) -> str | None:
+    """Check for near-zero loss (memorization)."""
+    if not losses:
+        return None
+    final = losses[-1]
+    if final < NEAR_ZERO_LOSS_THRESHOLD:
+        return (
+            f"WARNING: Very low loss ({final:.2f} < {NEAR_ZERO_LOSS_THRESHOLD}). "
+            "Model may be memorizing training data instead of generalizing. "
+            "Consider fewer epochs or more training data."
+        )
+    return None
+
+
+def _check_high_accuracy(accuracies: list[float]) -> str | None:
+    """Check for high accuracy (memorization indicator)."""
+    if not accuracies:
+        return None
+    final = accuracies[-1]
+    if final > HIGH_ACCURACY_THRESHOLD:
+        return (
+            f"WARNING: Very high token accuracy ({final:.1%} > {HIGH_ACCURACY_THRESHOLD:.0%}). "
+            "Model may be memorizing training data. Consider fewer epochs."
+        )
+    return None
+
+
+def _check_entropy_drop_rate(entropies: list[float], epochs: list[float]) -> str | None:
+    """Check for rapid entropy drop (learning too aggressively)."""
+    if len(entropies) < 2 or len(epochs) < 2:
+        return None
+    total_epochs = epochs[-1] - epochs[0]
+    if total_epochs <= 0:
+        return None
+    drop_rate = (entropies[0] - entropies[-1]) / total_epochs
+    if drop_rate > ENTROPY_DROP_RATE_THRESHOLD:
+        return (
+            f"WARNING: Rapid entropy drop ({drop_rate:.2f}/epoch > "
+            f"{ENTROPY_DROP_RATE_THRESHOLD}/epoch). Model learning too aggressively. "
+            "Consider lower learning rate."
+        )
+    return None
+
+
+def _check_overfit(analysis: LogAnalysis) -> list[str]:
+    """Check for overfitting indicators and return warning messages."""
+    checks = [
+        _check_low_entropy(analysis.entropies),
+        _check_low_loss(analysis.losses),
+        _check_high_accuracy(analysis.accuracies),
+        _check_entropy_drop_rate(analysis.entropies, analysis.epochs),
+    ]
+    return [w for w in checks if w is not None]
 
 
 def _generate_warnings(
@@ -140,9 +245,10 @@ def check_training_stability(
     loss_spike_threshold: float = 5.0,
     high_loss_threshold: float = 5.0,
 ) -> StabilityReport:
-    """Analyze training log history for instability patterns.
+    """Analyze training log history for instability and overfitting patterns.
 
-    Detects: NaN gradient norms, loss spikes, high final loss, divergence.
+    Detects: NaN gradient norms, loss spikes, high final loss, divergence,
+    low entropy, near-zero loss, high accuracy, rapid entropy drop.
 
     Args:
         log_history: List of training log entries from trainer.state.log_history.
@@ -152,14 +258,15 @@ def check_training_stability(
     Returns:
         StabilityReport with stability status and any warnings.
     """
-    nan_grad_norm_count, losses = _analyze_log_entries(log_history)
-    loss_spike_count = _count_loss_spikes(losses, loss_spike_threshold)
+    analysis = _analyze_log_entries(log_history)
+    loss_spike_count = _count_loss_spikes(analysis.losses, loss_spike_threshold)
 
-    final_loss = losses[-1] if losses else None
-    min_loss = min(losses) if losses else None
+    final_loss = analysis.losses[-1] if analysis.losses else None
+    min_loss = min(analysis.losses) if analysis.losses else None
 
+    # Stability warnings (gradient explosion, divergence, etc.)
     warnings = _generate_warnings(
-        nan_grad_norm_count,
+        analysis.nan_grad_norm_count,
         loss_spike_count,
         final_loss,
         min_loss,
@@ -167,13 +274,19 @@ def check_training_stability(
         high_loss_threshold,
     )
 
+    # Overfitting warnings (low entropy, memorization, etc.)
+    warnings.extend(_check_overfit(analysis))
+
     return StabilityReport(
         stable=len(warnings) == 0,
         warnings=warnings,
-        nan_grad_norm_count=nan_grad_norm_count,
+        nan_grad_norm_count=analysis.nan_grad_norm_count,
         loss_spike_count=loss_spike_count,
         final_loss=final_loss,
         min_loss=min_loss,
+        final_entropy=analysis.entropies[-1] if analysis.entropies else None,
+        initial_entropy=analysis.entropies[0] if analysis.entropies else None,
+        final_accuracy=analysis.accuracies[-1] if analysis.accuracies else None,
     )
 
 

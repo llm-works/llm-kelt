@@ -161,13 +161,18 @@ class Client:
 
         description = (manifest.source.description if manifest.source else None) or "SFT adapter"
         deploy = get_deploy_setting(manifest)
-        self.registry.register(
+        info = self.registry.register(
             training_result=result,
             key=manifest.adapter,
             description=description,
             deploy=deploy,
             overwrite=True,
         )
+        # Update result.adapter.path to registered location (adapters/, not work/)
+        if result.adapter:
+            result.adapter = Adapter(
+                md5=result.adapter.md5, mtime=result.adapter.mtime, path=info.path
+            )
         self._lg.info("registered adapter", extra={"adapter": manifest.adapter})
 
     def train(self, manifest: Manifest, *, register: bool = True) -> RunResult:

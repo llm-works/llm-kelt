@@ -183,11 +183,30 @@ class FileStorage(Storage):
         return manifests
 
     def find_adapter_by_md5(self, md5: str) -> Manifest | None:
-        """Find a completed manifest by adapter MD5."""
-        for manifest in self.list_completed_manifests():
-            if manifest.output and manifest.output.adapter and manifest.output.adapter.md5 == md5:
-                return manifest
-        return None
+        """Find a completed manifest by adapter MD5.
+
+        Uses filename glob (*-{md5}.yaml.gz) for O(1) lookup, and streams only
+        metadata (stops before data records) for fast lineage lookups.
+        """
+        from ..manifest.loader import load_manifest_metadata
+
+        if not self.completed_path.exists():
+            return None
+
+        # md5 is in filename: {adapter}-{md5}.yaml.gz
+        matches = list(self.completed_path.glob(f"*-{md5}.yaml.gz"))
+        if not matches:
+            matches = list(self.completed_path.glob(f"*-{md5}.yaml"))
+        if not matches:
+            return None
+
+        try:
+            return load_manifest_metadata(matches[0])
+        except Exception as e:
+            self._lg.warning(
+                "failed to load manifest", extra={"path": str(matches[0]), "error": str(e)}
+            )
+            return None
 
     # =========================================================================
     # Adapter Operations (ABC implementation)

@@ -40,6 +40,27 @@ def _read_yaml_file(path: Path) -> Any:
         return yaml.safe_load(f)
 
 
+def _read_yaml_metadata(path: Path) -> Any:
+    """Read YAML metadata only, stopping before data records.
+
+    Streams gzip decompression and stops at 'data:' section to avoid
+    decompressing hundreds of training records when only metadata is needed.
+    """
+    import gzip
+
+    lines: list[str] = []
+    opener = gzip.open if path.suffix == ".gz" else open
+
+    with opener(path, "rt", encoding="utf-8") as f:  # type: ignore[call-overload]
+        for line in f:
+            # Stop when we hit the data section (top-level key, no indent)
+            if line.startswith("data:"):
+                break
+            lines.append(line)
+
+    return yaml.safe_load("".join(lines))
+
+
 def _validate_required_fields(data: dict[str, Any]) -> None:
     """Validate required manifest fields."""
     if not data.get("adapter"):
@@ -114,6 +135,29 @@ def load_manifest(path: Path) -> Manifest:
     if not isinstance(data, dict):
         raise CorruptedManifestError(path, f"expected dict, got {type(data).__name__}")
 
+    return _build_manifest(data, source_path=path.resolve())
+
+
+def load_manifest_metadata(path: Path) -> Manifest:
+    """Load manifest metadata only, skipping training data records.
+
+    Much faster than load_manifest() for large files - streams gzip and stops
+    before decompressing the data section. Use when you only need adapter info,
+    parent lineage, or output metadata.
+
+    The returned Manifest has data=Data() (empty) and should not be used for training.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"Manifest not found: {path}")
+    if path.stat().st_size == 0:
+        raise CorruptedManifestError(path, "file is empty")
+
+    data = _read_yaml_metadata(path)
+    if not isinstance(data, dict):
+        raise CorruptedManifestError(path, f"expected dict, got {type(data).__name__}")
+
+    # Build manifest with empty data (metadata-only)
+    data["data"] = {"format": "external", "path": "(metadata-only)"}
     return _build_manifest(data, source_path=path.resolve())
 
 

@@ -32,6 +32,32 @@ def is_model_quantized(base_model: str) -> bool:
         return False
 
 
+def _load_stored_quantization_config(base_model: str) -> Any | None:
+    """Load BitsAndBytesConfig from a pre-quantized model's config.json.
+
+    Transformers has a bug where loading pre-quantized models without explicitly
+    passing the quantization_config causes 'NoneType has no attribute to_dict'.
+    This reconstructs the config from the stored JSON.
+    """
+    import json
+    from pathlib import Path
+
+    from transformers import BitsAndBytesConfig
+
+    config_path = Path(base_model) / "config.json"
+    if not config_path.exists():
+        return None
+
+    model_config = json.loads(config_path.read_text())
+    quant_dict = model_config.get("quantization_config")
+    if not quant_dict or quant_dict.get("quant_method") != "bitsandbytes":
+        return None
+
+    # Filter out private keys (start with _) that aren't BitsAndBytesConfig params
+    filtered = {k: v for k, v in quant_dict.items() if not k.startswith("_")}
+    return BitsAndBytesConfig(**filtered)
+
+
 def get_quantization_config(
     lg: Logger,
     base_model: str,
@@ -39,7 +65,7 @@ def get_quantization_config(
 ) -> tuple[Any, bool]:
     """Get BitsAndBytes quantization config based on model and override.
 
-    Auto-detects: quantizes full-precision models, skips if already quantized.
+    Auto-detects: quantizes full-precision models, loads stored config if pre-quantized.
 
     Args:
         lg: Logger instance.
@@ -47,16 +73,19 @@ def get_quantization_config(
         quantize_override: Force quantization on/off. None = auto-detect.
 
     Returns:
-        Tuple of (BitsAndBytesConfig or None, whether quantization was applied).
+        Tuple of (BitsAndBytesConfig or None, whether NEW quantization was applied).
+        For pre-quantized models, returns (stored_config, False).
     """
     if quantize_override is not None:
         apply_quantization = quantize_override
     else:
-        # Auto: quantize full-precision models, skip if already quantized
+        # Auto: quantize full-precision models, load stored config if already quantized
         is_prequantized = is_model_quantized(base_model)
         if is_prequantized:
-            lg.info("model already quantized, skipping BNB quantization")
-        apply_quantization = not is_prequantized
+            lg.info("model already quantized, loading stored config")
+            stored_config = _load_stored_quantization_config(base_model)
+            return stored_config, False  # Config loaded, but no new quantization applied
+        apply_quantization = True
 
     if not apply_quantization:
         return None, False

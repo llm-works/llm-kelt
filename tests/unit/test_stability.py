@@ -149,3 +149,94 @@ class TestCheckTrainingStability:
         assert len(report.warnings) >= 2
         # Critical warning for NaN
         assert any("CRITICAL" in w for w in report.warnings)
+
+
+class TestOverfitDetection:
+    """Tests for overfitting detection."""
+
+    def test_healthy_training_no_overfit(self):
+        """Healthy training with entropy above threshold."""
+        log_history = [
+            {"loss": 1.3, "entropy": 1.3, "mean_token_accuracy": 0.68, "epoch": 0.5},
+            {"loss": 1.0, "entropy": 1.0, "mean_token_accuracy": 0.73, "epoch": 1.0},
+            {"loss": 0.8, "entropy": 0.8, "mean_token_accuracy": 0.78, "epoch": 2.0},
+            {"loss": 0.7, "entropy": 0.77, "mean_token_accuracy": 0.79, "epoch": 3.0},
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is True
+        assert report.warnings == []
+        assert report.final_entropy == 0.77
+        assert report.final_accuracy == 0.79
+
+    def test_low_entropy_warning(self):
+        """Warns when entropy drops below threshold (model too deterministic)."""
+        log_history = [
+            {"loss": 1.3, "entropy": 1.3, "epoch": 0.5},
+            {"loss": 0.8, "entropy": 0.8, "epoch": 1.0},
+            {"loss": 0.5, "entropy": 0.5, "epoch": 2.0},  # Below 0.6 threshold
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is False
+        assert any("Low entropy" in w for w in report.warnings)
+        assert report.final_entropy == 0.5
+
+    def test_near_zero_loss_warning(self):
+        """Warns when loss approaches zero (memorization)."""
+        log_history = [
+            {"loss": 1.0, "entropy": 1.0, "epoch": 0.5},
+            {"loss": 0.5, "entropy": 0.8, "epoch": 1.0},
+            {"loss": 0.2, "entropy": 0.7, "epoch": 2.0},  # Below 0.3 threshold
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is False
+        assert any("Very low loss" in w for w in report.warnings)
+
+    def test_high_accuracy_warning(self):
+        """Warns when token accuracy exceeds threshold (memorization)."""
+        log_history = [
+            {"loss": 1.0, "mean_token_accuracy": 0.70, "entropy": 1.0, "epoch": 0.5},
+            {"loss": 0.5, "mean_token_accuracy": 0.85, "entropy": 0.8, "epoch": 1.0},
+            {"loss": 0.4, "mean_token_accuracy": 0.96, "entropy": 0.7, "epoch": 2.0},  # >95%
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is False
+        assert any("Very high token accuracy" in w for w in report.warnings)
+        assert report.final_accuracy == 0.96
+
+    def test_rapid_entropy_drop_warning(self):
+        """Warns when entropy drops too fast per epoch."""
+        log_history = [
+            {"loss": 1.3, "entropy": 1.5, "epoch": 0.0},  # Start high
+            {"loss": 0.5, "entropy": 0.7, "epoch": 2.0},  # Drop 0.4/epoch (> 0.3 threshold)
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is False
+        assert any("Rapid entropy drop" in w for w in report.warnings)
+
+    def test_multiple_overfit_warnings(self):
+        """Detects multiple overfitting indicators simultaneously."""
+        log_history = [
+            {"loss": 1.3, "entropy": 1.3, "mean_token_accuracy": 0.68, "epoch": 0.5},
+            {"loss": 0.8, "entropy": 0.8, "mean_token_accuracy": 0.78, "epoch": 1.0},
+            {"loss": 0.4, "entropy": 0.5, "mean_token_accuracy": 0.88, "epoch": 2.0},
+            {"loss": 0.2, "entropy": 0.4, "mean_token_accuracy": 0.96, "epoch": 3.0},
+        ]
+        report = check_training_stability(log_history)
+        assert report.stable is False
+        # Should have all 4 overfit warnings
+        assert any("Low entropy" in w for w in report.warnings)
+        assert any("Very low loss" in w for w in report.warnings)
+        assert any("Very high token accuracy" in w for w in report.warnings)
+        assert any("Rapid entropy drop" in w for w in report.warnings)
+
+    def test_missing_entropy_no_crash(self):
+        """Handles logs without entropy field gracefully."""
+        log_history = [
+            {"loss": 1.0, "epoch": 0.5},
+            {"loss": 0.8, "epoch": 1.0},
+            {"loss": 0.6, "epoch": 2.0},
+        ]
+        report = check_training_stability(log_history)
+        # Should not crash, just skip entropy checks
+        assert report.final_entropy is None
+        assert report.initial_entropy is None
