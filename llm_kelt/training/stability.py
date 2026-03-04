@@ -84,54 +84,50 @@ class LogAnalysis:
     entropy_epoch_pairs: list[EntropyEpochPair]  # Aligned pairs for drop rate calc
 
 
-def _extract_valid_floats(log_history: list[dict], key: str) -> list[float]:
-    """Extract valid (non-NaN) float values for a key from log history."""
-    values: list[float] = []
-    for log in log_history:
-        value = _get_float(log, key)
-        if value is not None and not _is_nan(value):
-            values.append(value)
-    return values
+def _valid_float(log: dict, key: str) -> float | None:
+    """Get valid (non-NaN) float from log entry, or None."""
+    value = _get_float(log, key)
+    return value if value is not None and not _is_nan(value) else None
 
 
-def _count_nan_grad_norms(log_history: list[dict]) -> int:
-    """Count entries with NaN gradient norm."""
-    count = 0
-    for log in log_history:
-        grad_norm = _get_float(log, "grad_norm")
-        if grad_norm is not None and _is_nan(grad_norm):
-            count += 1
-    return count
-
-
-def _extract_entropy_epoch_pairs(log_history: list[dict]) -> list[EntropyEpochPair]:
-    """Extract aligned entropy/epoch pairs from entries that have both values.
-
-    Only includes entries where both entropy and epoch are valid floats,
-    ensuring the values are actually from the same training step.
-    """
-    pairs: list[EntropyEpochPair] = []
-    for log in log_history:
-        entropy = _get_float(log, "entropy")
-        epoch = _get_float(log, "epoch")
-        if (
-            entropy is not None
-            and epoch is not None
-            and not _is_nan(entropy)
-            and not _is_nan(epoch)
-        ):
-            pairs.append(EntropyEpochPair(entropy=entropy, epoch=epoch))
-    return pairs
+def _process_log_entry(
+    log: dict,
+    losses: list[float],
+    entropies: list[float],
+    accuracies: list[float],
+    entropy_epoch_pairs: list[EntropyEpochPair],
+) -> bool:
+    """Process single log entry, appending valid values. Returns True if grad_norm is NaN."""
+    if (loss := _valid_float(log, "loss")) is not None:
+        losses.append(loss)
+    if (entropy := _valid_float(log, "entropy")) is not None:
+        entropies.append(entropy)
+    if (accuracy := _valid_float(log, "mean_token_accuracy")) is not None:
+        accuracies.append(accuracy)
+    # Aligned pair: both entropy and epoch valid in same entry
+    if entropy is not None and (epoch := _valid_float(log, "epoch")) is not None:
+        entropy_epoch_pairs.append(EntropyEpochPair(entropy=entropy, epoch=epoch))
+    # Check for NaN gradient norm
+    grad_norm = _get_float(log, "grad_norm")
+    return grad_norm is not None and _is_nan(grad_norm)
 
 
 def _analyze_log_entries(log_history: list[dict]) -> LogAnalysis:
-    """Extract metrics from log history for stability analysis."""
+    """Extract metrics from log history for stability analysis (single pass)."""
+    losses: list[float] = []
+    entropies: list[float] = []
+    accuracies: list[float] = []
+    entropy_epoch_pairs: list[EntropyEpochPair] = []
+    nan_count = sum(
+        _process_log_entry(log, losses, entropies, accuracies, entropy_epoch_pairs)
+        for log in log_history
+    )
     return LogAnalysis(
-        nan_grad_norm_count=_count_nan_grad_norms(log_history),
-        losses=_extract_valid_floats(log_history, "loss"),
-        entropies=_extract_valid_floats(log_history, "entropy"),
-        accuracies=_extract_valid_floats(log_history, "mean_token_accuracy"),
-        entropy_epoch_pairs=_extract_entropy_epoch_pairs(log_history),
+        nan_grad_norm_count=nan_count,
+        losses=losses,
+        entropies=entropies,
+        accuracies=accuracies,
+        entropy_epoch_pairs=entropy_epoch_pairs,
     )
 
 

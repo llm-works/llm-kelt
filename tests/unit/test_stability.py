@@ -281,3 +281,29 @@ class TestOverfitDetection:
         assert not any("Rapid entropy drop" in w for w in report.warnings)
         # Low entropy warning should still fire (independent check on entropies list)
         assert any("Low entropy" in w for w in report.warnings)
+
+    def test_non_scalar_metrics_ignored(self):
+        """Non-scalar metric values (dict/list) are gracefully ignored.
+
+        Ensures the function doesn't crash on malformed log data and still
+        computes warnings from valid scalar entries.
+        """
+        log_history = [
+            {"loss": 1.3, "entropy": 1.1, "mean_token_accuracy": 0.68, "epoch": 1.0},
+            # Non-scalar values that should be ignored
+            {"loss": {"nested": "dict"}, "entropy": [1, 2, 3], "epoch": 2.0},
+            {"loss": 0.8, "entropy": {"bad": "data"}, "mean_token_accuracy": [0.9], "epoch": 3.0},
+            # Valid entry with low values to trigger warnings
+            {"loss": 0.2, "entropy": 0.5, "mean_token_accuracy": 0.96, "epoch": 4.0},
+        ]
+        report = check_training_stability(log_history)
+        # Should not crash, return valid report
+        assert report is not None
+        # Final values should be from last valid scalar entries
+        assert report.final_entropy == 0.5
+        assert report.final_accuracy == 0.96
+        assert report.final_loss == 0.2
+        # Warnings should fire based on valid scalar data
+        assert any("Low entropy" in w for w in report.warnings)
+        assert any("Very high token accuracy" in w for w in report.warnings)
+        assert any("Very low loss" in w for w in report.warnings)

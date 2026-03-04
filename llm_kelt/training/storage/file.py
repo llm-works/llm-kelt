@@ -182,6 +182,19 @@ class FileStorage(Storage):
                 )
         return manifests
 
+    def _normalize_md5(self, md5: object) -> str | None:
+        """Normalize and validate MD5 input. Returns 12-char hex or None if invalid."""
+        if not isinstance(md5, str):
+            self._lg.warning("invalid md5 type", extra={"md5": md5, "type": type(md5).__name__})
+            return None
+        md5 = md5.lower()
+        if re.fullmatch(r"[a-f0-9]{32}", md5):
+            return md5[:12]  # Truncate full MD5 to 12-char prefix used in filenames
+        if re.fullmatch(r"[a-f0-9]{12}", md5):
+            return md5
+        self._lg.warning("invalid md5 format", extra={"md5": md5})
+        return None
+
     def find_adapter_by_md5(self, md5: str) -> Manifest | None:
         """Find a completed manifest by adapter MD5.
 
@@ -189,23 +202,19 @@ class FileStorage(Storage):
         metadata (stops before data records) for fast lineage lookups.
 
         Args:
-            md5: Hex MD5 hash (12 chars, lowercase). Invalid input returns None.
+            md5: Hex MD5 hash (12 or 32 chars). Invalid input returns None.
         """
         from ..manifest.loader import load_manifest_metadata
 
         if not self.completed_path.exists():
             return None
-
-        # Normalize and validate md5 (12-char lowercase hex, truncated from full 32)
-        md5 = md5.lower()
-        if not re.fullmatch(r"[a-f0-9]{12}", md5):
-            self._lg.warning("invalid md5 format", extra={"md5": md5})
+        if (normalized := self._normalize_md5(md5)) is None:
             return None
 
         # md5 is in filename: {adapter}-{md5}.yaml.gz
-        matches = sorted(self.completed_path.glob(f"*-{md5}.yaml.gz"))
+        matches = sorted(self.completed_path.glob(f"*-{normalized}.yaml.gz"))
         if not matches:
-            matches = sorted(self.completed_path.glob(f"*-{md5}.yaml"))
+            matches = sorted(self.completed_path.glob(f"*-{normalized}.yaml"))
         if not matches:
             return None
 
