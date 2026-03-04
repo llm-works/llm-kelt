@@ -240,3 +240,22 @@ class TestOverfitDetection:
         # Should not crash, just skip entropy checks
         assert report.final_entropy is None
         assert report.initial_entropy is None
+
+    def test_misaligned_entropy_epoch_skips_drop_rate_check(self):
+        """Skips entropy drop rate check when lists have different lengths.
+
+        If some log entries have entropy but not epoch (or vice versa), the
+        extracted lists will have different lengths. The check should be
+        skipped rather than producing incorrect calculations.
+        """
+        # 3 entries with entropy, but only 2 with epoch - lists will be misaligned
+        log_history = [
+            {"loss": 1.3, "entropy": 1.5, "epoch": 0.0},
+            {"loss": 0.8, "entropy": 1.0},  # Missing epoch
+            {"loss": 0.5, "entropy": 0.5, "epoch": 2.0},  # Would trigger rapid drop if aligned
+        ]
+        report = check_training_stability(log_history)
+        # Should NOT produce "Rapid entropy drop" warning due to misaligned lists
+        assert not any("Rapid entropy drop" in w for w in report.warnings)
+        # Low entropy warning should still fire (independent check)
+        assert any("Low entropy" in w for w in report.warnings)

@@ -178,6 +178,9 @@ def _check_entropy_drop_rate(entropies: list[float], epochs: list[float]) -> str
     """Check for rapid entropy drop (learning too aggressively)."""
     if len(entropies) < 2 or len(epochs) < 2:
         return None
+    # Skip if lists are misaligned (extracted from different log entries)
+    if len(entropies) != len(epochs):
+        return None
     total_epochs = epochs[-1] - epochs[0]
     if total_epochs <= 0:
         return None
