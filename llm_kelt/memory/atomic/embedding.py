@@ -337,21 +337,7 @@ class EmbeddingAdapter:
             raise ValueError(f"top_k must be at least 1, got {top_k}")
 
         effective_filter = self._build_filter(filter, fact_type, categories)
-
-        # Adaptive fetch widening: start with top_k, widen if filter reduces results
-        max_fetch = top_k * 8
-        fetch_k = top_k
-        scored: list[ScoredEntity[Fact]] = []
-
-        while fetch_k <= max_fetch:
-            scored = self._search_and_score(
-                query, model_name, fetch_k, min_similarity, effective_filter
-            )
-            if not scored or not effective_filter or len(scored) >= top_k or fetch_k >= max_fetch:
-                return scored[:top_k]
-            fetch_k *= 2
-
-        return scored[:top_k]
+        return self._search_and_score(query, model_name, top_k, min_similarity, effective_filter)
 
     def delete_embedding(self, fact_id: int) -> int:
         """
