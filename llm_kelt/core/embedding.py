@@ -235,6 +235,7 @@ class EmbeddingStore:
         *,
         top_k: int = 10,
         min_similarity: float = 0.0,
+        entity_id_subquery: Any | None = None,
     ) -> list[tuple[str, float]]:
         """
         Search for similar entities by vector similarity.
@@ -248,6 +249,9 @@ class EmbeddingStore:
             model_name: Embedding model to search.
             top_k: Maximum results to return.
             min_similarity: Minimum similarity threshold (0.0-1.0).
+            entity_id_subquery: Optional SQLAlchemy subquery that returns entity_id strings.
+                When provided, the vector search is constrained to entities matching
+                the subquery (pre-filter), enabling filtered similarity search.
 
         Returns:
             List of (entity_id, similarity) tuples, ordered by similarity descending.
@@ -265,6 +269,10 @@ class EmbeddingStore:
                 .order_by(Embedding.embedding.cosine_distance(query))
                 .limit(top_k)
             )
+
+            # Apply pre-filter subquery constraint
+            if entity_id_subquery is not None:
+                stmt = stmt.where(Embedding.entity_id.in_(entity_id_subquery))
 
             results = session.execute(stmt).all()
 

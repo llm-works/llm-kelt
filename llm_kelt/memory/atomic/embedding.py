@@ -6,7 +6,8 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from appinfra.db.utils import detach_all
-from sqlalchemy import and_, select
+from sqlalchemy import String, and_, select
+from sqlalchemy import cast as sa_cast
 from sqlalchemy.sql.elements import ColumnElement
 
 from llm_kelt.core.embedding import EmbeddingStore
@@ -203,28 +204,36 @@ class EmbeddingAdapter:
         """
         return self._store.get(self.ENTITY_TYPE, str(fact_id), model_name)
 
-    def _hydrate_facts(
+    def _build_entity_id_subquery(
         self,
-        fact_ids: list[int],
-        filter: EmbeddingFilter | None,
-    ) -> list[Fact]:
-        """Fetch facts from DB with optional filters."""
+        effective_filter: EmbeddingFilter | None,
+    ) -> Any:
+        """Build subquery that selects fact IDs matching all filter criteria.
+
+        Returns a SQLAlchemy subquery selecting Fact.id cast to string,
+        constrained by: active=True, context_key filter, and EmbeddingFilter.
+        This subquery is passed to EmbeddingStore.search() for pre-filtering
+        the vector search.
+        """
+        stmt = select(sa_cast(Fact.id, String)).where(Fact.active == True)  # noqa: E712
+
+        # Apply context filtering
+        context_filter = build_context_filter(self._context_key, Fact.context_key)
+        if context_filter is not None:
+            stmt = stmt.where(context_filter)
+
+        # Apply user-provided filter
+        if effective_filter:
+            clause = effective_filter.build()
+            if clause is not None:
+                stmt = stmt.where(clause)
+
+        return stmt.scalar_subquery()
+
+    def _hydrate_facts(self, fact_ids: list[int]) -> list[Fact]:
+        """Fetch facts from DB by ID. Filtering already done at search time."""
         with self._session_factory() as session:
-            stmt = select(Fact).where(
-                Fact.id.in_(fact_ids),
-                Fact.active == True,  # noqa: E712
-            )
-
-            # Apply context filtering with glob pattern support
-            context_filter = build_context_filter(self._context_key, Fact.context_key)
-            if context_filter is not None:
-                stmt = stmt.where(context_filter)
-
-            if filter:
-                clause = filter.build()
-                if clause is not None:
-                    stmt = stmt.where(clause)
-
+            stmt = select(Fact).where(Fact.id.in_(fact_ids))
             facts = list(session.scalars(stmt).all())
             return cast(list[Fact], detach_all(facts, session))
 
@@ -273,20 +282,24 @@ class EmbeddingAdapter:
         min_similarity: float,
         effective_filter: EmbeddingFilter | None,
     ) -> list[ScoredEntity[Fact]]:
-        """Search embedding store and return scored, filtered facts."""
+        """Search embedding store with pre-filtered vector search."""
+        # Build subquery for pre-filtering (context + active + user filter)
+        entity_id_subquery = self._build_entity_id_subquery(effective_filter)
+
         results = self._store.search(
             query=query,
             entity_type=self.ENTITY_TYPE,
             model_name=model_name,
             top_k=fetch_k,
             min_similarity=min_similarity,
+            entity_id_subquery=entity_id_subquery,
         )
         if not results:
             return []
 
         fact_ids = [int(entity_id) for entity_id, _ in results]
         score_map = {int(entity_id): score for entity_id, score in results}
-        facts = self._hydrate_facts(fact_ids, effective_filter)
+        facts = self._hydrate_facts(fact_ids)
 
         scored = [ScoredEntity(entity=f, score=score_map[f.id]) for f in facts if f.id in score_map]
         scored.sort(key=lambda x: x.score, reverse=True)
