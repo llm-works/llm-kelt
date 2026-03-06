@@ -44,8 +44,12 @@ def _load_sft_dataset(data_path: Path, eval_split: float):
     return dataset, None
 
 
-def _format_sft_example(example: dict) -> str:
-    """Format a single SFT example for training."""
+def _format_sft_example_alpaca(example: dict) -> str:
+    """Format a single SFT example using Alpaca format (legacy fallback).
+
+    DEPRECATED: Only used when tokenizer lacks chat_template.
+    Prefer chat template formatting for proper EOS token learning.
+    """
     instruction = example.get("instruction", "")
     input_text = example.get("input", "")
     output = example.get("output", "")
@@ -94,6 +98,39 @@ class Trainer:
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+
+    def _make_formatting_func(self):
+        """Create a formatting function using the tokenizer's chat template.
+
+        Uses the model's native chat template for proper EOS token learning.
+        Falls back to Alpaca format if tokenizer lacks chat_template.
+        """
+        if not hasattr(self.tokenizer, "chat_template") or self.tokenizer.chat_template is None:
+            self._lg.warning("tokenizer lacks chat_template, falling back to Alpaca format")
+            return _format_sft_example_alpaca
+
+        tokenizer = self.tokenizer  # capture for closure
+
+        def format_example(example: dict) -> str:
+            instruction = example.get("instruction", "")
+            input_text = example.get("input", "")
+            output = example.get("output", "")
+
+            if input_text:
+                user_content = f"{instruction}\n\n{input_text}"
+            else:
+                user_content = instruction
+
+            messages = [
+                {"role": "user", "content": user_content},
+                {"role": "assistant", "content": output},
+            ]
+            result: str = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=False
+            )
+            return result
+
+        return format_example
 
     def _apply_lora(self):
         """Apply LoRA adapter to the loaded model."""
@@ -179,7 +216,7 @@ class Trainer:
             train_dataset=self.train_dataset,
             eval_dataset=self.eval_dataset,
             processing_class=self.tokenizer,
-            formatting_func=_format_sft_example,
+            formatting_func=self._make_formatting_func(),
         )
 
     def _collect_metrics(self) -> dict:
