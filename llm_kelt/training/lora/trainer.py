@@ -44,20 +44,6 @@ def _load_sft_dataset(data_path: Path, eval_split: float):
     return dataset, None
 
 
-def _format_sft_example(example: dict) -> str:
-    """Format a single SFT example for training."""
-    instruction = example.get("instruction", "")
-    input_text = example.get("input", "")
-    output = example.get("output", "")
-
-    if input_text:
-        user_content = f"{instruction}\n\n{input_text}"
-    else:
-        user_content = instruction
-
-    return f"### Instruction:\n{user_content}\n\n### Response:\n{output}"
-
-
 class Trainer:
     """Trainer for LoRA adapters using supervised fine-tuning."""
 
@@ -94,6 +80,46 @@ class Trainer:
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+
+    def _make_formatting_func(self):
+        """Create a formatting function using the tokenizer's chat template.
+
+        Uses the model's native chat template for proper EOS token learning.
+        Requires tokenizer to have chat_template - all modern instruct models do.
+
+        If supporting legacy models without chat_template is needed, a fallback
+        could use Alpaca format with explicit EOS:
+            eos = tokenizer.eos_token or ""
+            return f"### Instruction:\\n{user_content}\\n\\n### Response:\\n{output}{eos}"
+        """
+        if not getattr(self.tokenizer, "chat_template", None):
+            raise ValueError(
+                f"Tokenizer for {self.base_model} lacks chat_template. "
+                "SFT training requires a model with chat template support for proper EOS learning."
+            )
+
+        tokenizer = self.tokenizer  # capture for closure
+
+        def format_example(example: dict) -> str:
+            instruction = example.get("instruction", "")
+            input_text = example.get("input", "")
+            output = example.get("output", "")
+
+            if input_text:
+                user_content = f"{instruction}\n\n{input_text}"
+            else:
+                user_content = instruction
+
+            messages = [
+                {"role": "user", "content": user_content},
+                {"role": "assistant", "content": output},
+            ]
+            result: str = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=False
+            )
+            return result
+
+        return format_example
 
     def _apply_lora(self):
         """Apply LoRA adapter to the loaded model."""
@@ -179,7 +205,7 @@ class Trainer:
             train_dataset=self.train_dataset,
             eval_dataset=self.eval_dataset,
             processing_class=self.tokenizer,
-            formatting_func=_format_sft_example,
+            formatting_func=self._make_formatting_func(),
         )
 
     def _collect_metrics(self) -> dict:

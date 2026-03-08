@@ -21,6 +21,24 @@ from ..stability import check_training_stability, log_stability_warnings
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
 
+def _to_chat_format(record: dict) -> dict:
+    """Convert raw prompt/chosen/rejected strings to chat message format.
+
+    TRL's DPOTrainer expects message lists for proper chat template handling:
+    - prompt: list of user messages
+    - chosen: list of assistant messages (the preferred response)
+    - rejected: list of assistant messages (the rejected response)
+
+    This ensures consistent tokenization when DPOTrainer compares
+    prompt vs prompt+response.
+    """
+    return {
+        "prompt": [{"role": "user", "content": record["prompt"]}],
+        "chosen": [{"role": "assistant", "content": record["chosen"]}],
+        "rejected": [{"role": "assistant", "content": record["rejected"]}],
+    }
+
+
 def _load_dpo_dataset(data_path: Path, eval_split: float):
     """Load and optionally split DPO dataset from JSONL file."""
     from datasets import Dataset
@@ -29,7 +47,8 @@ def _load_dpo_dataset(data_path: Path, eval_split: float):
     with data_path.open("r", encoding="utf-8") as f:
         for line in f:
             if line.strip():
-                records.append(json.loads(line))
+                raw = json.loads(line)
+                records.append(_to_chat_format(raw))
 
     if not records:
         raise ValueError(f"No records found in {data_path}")
