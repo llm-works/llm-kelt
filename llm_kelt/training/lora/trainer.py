@@ -44,24 +44,6 @@ def _load_sft_dataset(data_path: Path, eval_split: float):
     return dataset, None
 
 
-def _format_sft_example_alpaca(example: dict) -> str:
-    """Format a single SFT example using Alpaca format (legacy fallback).
-
-    DEPRECATED: Only used when tokenizer lacks chat_template.
-    Prefer chat template formatting for proper EOS token learning.
-    """
-    instruction = example.get("instruction", "")
-    input_text = example.get("input", "")
-    output = example.get("output", "")
-
-    if input_text:
-        user_content = f"{instruction}\n\n{input_text}"
-    else:
-        user_content = instruction
-
-    return f"### Instruction:\n{user_content}\n\n### Response:\n{output}"
-
-
 class Trainer:
     """Trainer for LoRA adapters using supervised fine-tuning."""
 
@@ -103,11 +85,18 @@ class Trainer:
         """Create a formatting function using the tokenizer's chat template.
 
         Uses the model's native chat template for proper EOS token learning.
-        Falls back to Alpaca format if tokenizer lacks chat_template.
+        Requires tokenizer to have chat_template - all modern instruct models do.
+
+        If supporting legacy models without chat_template is needed, a fallback
+        could use Alpaca format with explicit EOS:
+            eos = tokenizer.eos_token or ""
+            return f"### Instruction:\\n{user_content}\\n\\n### Response:\\n{output}{eos}"
         """
-        if not hasattr(self.tokenizer, "chat_template") or self.tokenizer.chat_template is None:
-            self._lg.warning("tokenizer lacks chat_template, falling back to Alpaca format")
-            return _format_sft_example_alpaca
+        if not getattr(self.tokenizer, "chat_template", None):
+            raise ValueError(
+                f"Tokenizer for {self.base_model} lacks chat_template. "
+                "SFT training requires a model with chat template support for proper EOS learning."
+            )
 
         tokenizer = self.tokenizer  # capture for closure
 

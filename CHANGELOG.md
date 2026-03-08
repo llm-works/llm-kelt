@@ -28,12 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `create_server()` now requires `lg: Logger` as first parameter
 - Adapter version IDs now use full MD5 hash instead of truncated
+- Minimum TRL version bumped to 0.12 (required for conversational DPO format)
 
 ### Fixed
 - Add `readme` field to pyproject.toml so PyPI displays the README
 - Update `create_server` docstring and architecture docs with new signature
 - Add `max_grad_norm` to `_TRAINING_KEYS` for flat config override support
-- SFT training now uses tokenizer's chat template for proper EOS token learning
+- SFT training now uses tokenizer's chat template for proper EOS token learning (errors if missing)
 - DPO training data now uses chat message format for proper template handling
 
 ## [0.1.0] - 2026-02-25
