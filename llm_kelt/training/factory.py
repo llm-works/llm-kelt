@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from .dpo import Client as DpoClient
     from .lora.registry import AdapterRegistry
     from .manifest import Client
+    from .prompt import Client as PromptClient
     from .sft import Client as SftClient
 
 
@@ -25,7 +26,8 @@ class Factory:
     Provides access to:
     - train.manifest: Create, load, save, submit manifests
     - train.dpo: Execute DPO training from manifests
-    - train.sft: Execute SFT training from manifests
+    - train.sft: Execute SFT training from manifests (LoRA)
+    - train.prompt: Execute Prompt Tuning training (extremely parameter-efficient)
     - train.registry: Adapter registry for listing/managing adapters
 
     Usage:
@@ -70,6 +72,7 @@ class Factory:
         self._manifest: Client | None = None
         self._dpo: DpoClient | None = None
         self._sft: SftClient | None = None
+        self._prompt: PromptClient | None = None
         self._registry: AdapterRegistry | None = None
 
     @property
@@ -98,6 +101,15 @@ class Factory:
 
             self._sft = SftClient(self._lg, self._storage)
         return self._sft
+
+    @property
+    def prompt(self) -> PromptClient:
+        """Access Prompt Tuning client."""
+        if self._prompt is None:
+            from .prompt import Client as PromptClient
+
+            self._prompt = PromptClient(self._lg, self._storage)
+        return self._prompt
 
     @property
     def registry(self) -> AdapterRegistry:

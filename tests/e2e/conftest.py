@@ -271,6 +271,18 @@ def fast_training_config():
 
 
 @pytest.fixture
+def fast_prompt_config():
+    """Minimal prompt tuning config for fast tests."""
+    from llm_kelt.training.prompt import Config as PromptConfig
+
+    return PromptConfig(
+        num_virtual_tokens=8,  # Small for fast tests
+        prompt_tuning_init="TEXT",
+        prompt_tuning_init_text="You are a helpful assistant.",
+    )
+
+
+@pytest.fixture
 def sft_training_data(tmp_path) -> Path:
     """Small SFT dataset for testing."""
     return _write_jsonl(tmp_path / "sft_data.jsonl", SFT_SAMPLES)

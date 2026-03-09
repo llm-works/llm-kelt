@@ -67,8 +67,8 @@ def _validate_required_fields(data: dict[str, Any]) -> None:
         raise ValueError("Manifest missing required field: adapter")
     if not data.get("method"):
         raise ValueError("Manifest missing required field: method")
-    if data["method"] not in ("dpo", "sft"):
-        raise ValueError(f"Invalid method: {data['method']}. Must be 'dpo' or 'sft'")
+    if data["method"] not in ("dpo", "sft", "prompt"):
+        raise ValueError(f"Invalid method: {data['method']}. Must be 'dpo', 'sft', or 'prompt'")
     if not data.get("data"):
         raise ValueError("Manifest missing required field: data")
 
@@ -371,18 +371,34 @@ def _validate_hyperparams(training: dict, lora: dict) -> list[str]:
 _VALID_DEPLOYMENT_POLICIES = frozenset(["skip", "add", "replace"])
 
 
-def validate_manifest(manifest: Manifest) -> list[str]:
-    """Validate a training manifest."""
+def _validate_prompt_config(method_config: dict) -> list[str]:
+    """Validate prompt tuning specific configuration."""
     errors: list[str] = []
+    num_virtual_tokens = method_config.get("num_virtual_tokens", 20)
+    prompt_tuning_init = method_config.get("prompt_tuning_init", "TEXT")
+    prompt_tuning_init_text = method_config.get("prompt_tuning_init_text", "")
+    if num_virtual_tokens <= 0:
+        errors.append(f"num_virtual_tokens must be positive, got {num_virtual_tokens}")
+    if prompt_tuning_init not in ("TEXT", "RANDOM"):
+        errors.append(f"prompt_tuning_init must be 'TEXT' or 'RANDOM', got {prompt_tuning_init}")
+    if prompt_tuning_init == "TEXT" and not prompt_tuning_init_text:
+        errors.append("prompt_tuning_init_text is required when prompt_tuning_init='TEXT'")
+    return errors
 
+
+def _validate_core_fields(manifest: Manifest) -> list[str]:
+    """Validate required manifest fields: adapter, method, deployment, data."""
+    errors: list[str] = []
     adapter = manifest.get("adapter", "")
     method = manifest.get("method", "")
     data = manifest.get("data") or Data()
 
     if not adapter:
         errors.append("adapter is required")
-    if method not in ("dpo", "sft"):
-        errors.append(f"method must be 'dpo' or 'sft', got '{method}'")
+    if method not in ("dpo", "sft", "prompt"):
+        errors.append(f"method must be 'dpo', 'sft', or 'prompt', got '{method}'")
+    if adapter and ("/" in adapter or "\\" in adapter or ".." in adapter):
+        errors.append(f"Invalid adapter key: {adapter}")
 
     deployment = manifest.get("deployment") or Deployment()
     policy = deployment.get("policy")
@@ -394,12 +410,19 @@ def validate_manifest(manifest: Manifest) -> list[str]:
     elif data.get("format") == "external" and not data.get("path"):
         errors.append("External data requires a path")
 
-    if adapter and ("/" in adapter or "\\" in adapter or ".." in adapter):
-        errors.append(f"Invalid adapter key: {adapter}")
+    return errors
+
+
+def validate_manifest(manifest: Manifest) -> list[str]:
+    """Validate a training manifest."""
+    errors = _validate_core_fields(manifest)
 
     training = manifest.get("training") or {}
     lora = manifest.get("lora") or {}
     errors.extend(_validate_hyperparams(training, lora))
+
+    if manifest.get("method") == "prompt":
+        errors.extend(_validate_prompt_config(manifest.get("method_config") or {}))
 
     return errors
 
