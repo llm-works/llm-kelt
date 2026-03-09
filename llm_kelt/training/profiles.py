@@ -170,6 +170,7 @@ def build_lora_config(
         target_modules=lora.get("target_modules", static_defaults.target_modules),
         bias=lora.get("bias", static_defaults.bias),
         task_type=lora.get("task_type", static_defaults.task_type),
+        use_rslora=lora.get("use_rslora", static_defaults.use_rslora),
     )
 
     return profile_name, config
