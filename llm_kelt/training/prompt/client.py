@@ -46,7 +46,7 @@ class Client:
         return self._registry
 
     def _validate_records(self, manifest: Manifest) -> None:
-        """Validate SFT record structure."""
+        """Validate prompt tuning record structure."""
         errors: list[str] = []
         for i, record in enumerate(manifest.data.records):
             if "instruction" not in record and "prompt" not in record:

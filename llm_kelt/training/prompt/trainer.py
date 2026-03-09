@@ -129,6 +129,11 @@ class Trainer:
             model_kwargs["quantization_config"] = quant_config
         self.model = AutoModelForCausalLM.from_pretrained(self.base_model, **model_kwargs)
 
+        if self._applied_quantization:
+            from peft import prepare_model_for_kbit_training
+
+            self.model = prepare_model_for_kbit_training(self.model)
+
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
 
@@ -170,7 +175,7 @@ class Trainer:
             eval_steps=tc.save_steps if self.eval_dataset else None,
             load_best_model_at_end=self.eval_dataset is not None,
             report_to="none",
-            optim="adamw_torch",
+            optim="paged_adamw_8bit",
             max_length=tc.max_seq_length,
         )
 
