@@ -168,7 +168,7 @@ def _check_low_entropy(entropies: list[float]) -> str | None:
     final = entropies[-1]
     if final < LOW_ENTROPY_THRESHOLD:
         return (
-            f"WARNING: Low entropy ({final} < {LOW_ENTROPY_THRESHOLD}). "
+            f"WARNING: Low entropy ({final:.4f} < {LOW_ENTROPY_THRESHOLD}). "
             "Model may be overfitting - outputs will be repetitive/deterministic. "
             "Consider fewer epochs or lower learning rate."
         )
@@ -182,7 +182,7 @@ def _check_low_loss(losses: list[float]) -> str | None:
     final = losses[-1]
     if final < NEAR_ZERO_LOSS_THRESHOLD:
         return (
-            f"WARNING: Very low loss ({final} < {NEAR_ZERO_LOSS_THRESHOLD}). "
+            f"WARNING: Very low loss ({final:.4f} < {NEAR_ZERO_LOSS_THRESHOLD}). "
             "Model may be memorizing training data instead of generalizing. "
             "Consider fewer epochs or more training data."
         )
@@ -221,7 +221,7 @@ def _check_entropy_drop_rate(pairs: list[EntropyEpochPair]) -> str | None:
         max_drop_rate = max(max_drop_rate, interval_drop)
     if max_drop_rate > ENTROPY_DROP_RATE_THRESHOLD:
         return (
-            f"WARNING: Rapid entropy drop ({max_drop_rate}/epoch > "
+            f"WARNING: Rapid entropy drop ({max_drop_rate:.4f}/epoch > "
             f"{ENTROPY_DROP_RATE_THRESHOLD}/epoch). Model learning too aggressively. "
             "Consider lower learning rate."
         )
