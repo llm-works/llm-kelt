@@ -140,7 +140,8 @@ class Trainer:
         peft_config = self.prompt_config.to_peft_config(self.base_model)
         self.model = get_peft_model(self.model, peft_config)
         trainable, total = self.model.get_nb_trainable_parameters()
-        self._lg.info(f"Trainable: {trainable:,} / {total:,} ({100 * trainable / total:.6f}%)")
+        pct = 100 * trainable / total if total > 0 else 0.0
+        self._lg.info(f"Trainable: {trainable:,} / {total:,} ({pct:.6f}%)")
 
     def _load_data(self):
         """Load training and eval datasets."""
