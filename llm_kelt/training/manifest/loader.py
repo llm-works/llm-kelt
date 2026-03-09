@@ -67,8 +67,8 @@ def _validate_required_fields(data: dict[str, Any]) -> None:
         raise ValueError("Manifest missing required field: adapter")
     if not data.get("method"):
         raise ValueError("Manifest missing required field: method")
-    if data["method"] not in ("dpo", "sft"):
-        raise ValueError(f"Invalid method: {data['method']}. Must be 'dpo' or 'sft'")
+    if data["method"] not in ("dpo", "sft", "prompt"):
+        raise ValueError(f"Invalid method: {data['method']}. Must be 'dpo', 'sft', or 'prompt'")
     if not data.get("data"):
         raise ValueError("Manifest missing required field: data")
 
@@ -381,8 +381,8 @@ def validate_manifest(manifest: Manifest) -> list[str]:
 
     if not adapter:
         errors.append("adapter is required")
-    if method not in ("dpo", "sft"):
-        errors.append(f"method must be 'dpo' or 'sft', got '{method}'")
+    if method not in ("dpo", "sft", "prompt"):
+        errors.append(f"method must be 'dpo', 'sft', or 'prompt', got '{method}'")
 
     deployment = manifest.get("deployment") or Deployment()
     policy = deployment.get("policy")

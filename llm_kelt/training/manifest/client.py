@@ -109,7 +109,7 @@ class Client:
 
     def _build_manifest_configs(
         self,
-        method: Literal["dpo", "sft"],
+        method: Literal["dpo", "sft", "prompt"],
         model: str | None,
         config: dict[str, Any] | None,
     ) -> tuple[DotDict, DotDict, DotDict]:
@@ -135,16 +135,24 @@ class Client:
         lora_config = DotDict(merged.get("lora", {}))
         lora_config.update(nested_lora)
 
-        method_config = DotDict()
-        if method == "dpo":
-            method_config = DotDict(self._extract_method_config(merged, ["beta", "reference_free"]))
-
+        method_config = self._build_method_config(method, merged)
         return lora_config, training_config, method_config
+
+    def _build_method_config(
+        self, method: Literal["dpo", "sft", "prompt"], merged: dict[str, Any]
+    ) -> DotDict:
+        """Build method-specific config (beta for DPO, virtual tokens for prompt, etc.)."""
+        if method == "dpo":
+            return DotDict(self._extract_method_config(merged, ["beta", "reference_free"]))
+        if method == "prompt":
+            keys = ["num_virtual_tokens", "prompt_tuning_init", "prompt_tuning_init_text"]
+            return DotDict(self._extract_method_config(merged, keys))
+        return DotDict()
 
     def create(
         self,
         adapter: str,
-        method: Literal["dpo", "sft"],
+        method: Literal["dpo", "sft", "prompt"],
         data: list[dict[str, Any]],
         *,
         model: str | None = None,
@@ -159,7 +167,7 @@ class Client:
 
         Args:
             adapter: Output adapter key (series name, e.g., "my-agent-sft").
-            method: Training method ("dpo" or "sft").
+            method: Training method ("dpo", "sft", or "prompt").
             data: List of training records (inline data).
             model: Optional base model (can be specified at training time via --model).
             parent: Parent adapter for lineage (continue training from this).

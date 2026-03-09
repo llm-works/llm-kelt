@@ -51,7 +51,7 @@ class Manifest(FieldDict):
     # Output adapter key (series name, e.g., "my-agent-sft")
     adapter: str
     # Training method
-    method: Literal["dpo", "sft"]
+    method: Literal["dpo", "sft", "prompt"]
     # Training data specification
     data: Data
     # Deployment configuration

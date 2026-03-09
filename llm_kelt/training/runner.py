@@ -1,7 +1,7 @@
 """Manifest runner - execute training from manifest files.
 
 Thin dispatcher that loads a manifest and delegates to the appropriate
-training client (DPO or SFT) based on the manifest method.
+training client (DPO, SFT, or Prompt Tuning) based on the manifest method.
 """
 
 from __future__ import annotations
@@ -95,6 +95,13 @@ class Runner:
             from .dpo import Client as DpoClient
 
             return DpoClient(self._lg, self._storage).train(
+                manifest, register=not skip_registration
+            )
+
+        if manifest.method == "prompt":
+            from .prompt import Client as PromptClient
+
+            return PromptClient(self._lg, self._storage).train(
                 manifest, register=not skip_registration
             )
 
