@@ -193,6 +193,7 @@ class Trainer:
             report_to="none",
             optim="paged_adamw_8bit",
             max_length=self.training_config.max_seq_length,
+            neftune_noise_alpha=self.training_config.neftune_noise_alpha,
         )
 
     def _create_trainer(self):
@@ -263,6 +264,7 @@ class Trainer:
                     "lora_alpha": self.lora_config.lora_alpha,
                     "lora_dropout": self.lora_config.lora_dropout,
                     "target_modules": self.lora_config.target_modules,
+                    "use_rslora": self.lora_config.use_rslora,
                 },
                 "training": {k: self.training_config[k] for k in TRAINING_CONFIG_KEYS},
                 "quantized": self._is_quantized,

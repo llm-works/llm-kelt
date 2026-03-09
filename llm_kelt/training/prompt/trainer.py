@@ -184,6 +184,7 @@ class Trainer:
             report_to="none",
             optim="paged_adamw_8bit",
             max_length=tc.max_seq_length,
+            neftune_noise_alpha=tc.neftune_noise_alpha,
         )
 
     def _create_trainer(self):

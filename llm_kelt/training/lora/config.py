@@ -31,6 +31,8 @@ class Config:
         target_modules: Which modules to apply LoRA to. Defaults to Qwen2.5 attention + MLP.
         bias: Bias training mode. "none" is most memory efficient.
         task_type: Task type for PEFT. "CAUSAL_LM" for language modeling.
+        use_rslora: Use rank-stabilized scaling (alpha/sqrt(r) instead of alpha/r).
+            Prevents gradient collapse on large models (32B+). See arXiv:2312.03732.
     """
 
     r: int = 16
@@ -39,6 +41,7 @@ class Config:
     target_modules: list[str] = field(default_factory=lambda: QWEN_TARGET_MODULES.copy())
     bias: Literal["none", "all", "lora_only"] = "none"
     task_type: Literal["CAUSAL_LM", "SEQ_CLS", "SEQ_2_SEQ_LM", "TOKEN_CLS"] = "CAUSAL_LM"
+    use_rslora: bool = False
 
     def __post_init__(self) -> None:
         """Validate configuration."""
@@ -78,4 +81,5 @@ class Config:
             target_modules=self.target_modules,
             bias=self.bias,
             task_type=task_type_map[self.task_type],
+            use_rslora=self.use_rslora,
         )

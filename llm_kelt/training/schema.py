@@ -57,6 +57,9 @@ TRAINING_DEFAULTS = DotDict(
     bf16=False,
     gradient_checkpointing=True,
     seed=42,
+    # NEFTune: adds noise to embeddings during training. Improves instruction following
+    # and helps prevent overfitting on small datasets. None = disabled. See arXiv:2310.05914.
+    neftune_noise_alpha=None,
 )
 
 # Keys to persist in completed manifests for reproducibility.
