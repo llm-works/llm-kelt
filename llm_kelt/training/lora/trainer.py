@@ -64,7 +64,6 @@ class Trainer:
         self.lora_config = lora_config or LoraConfig()
         self.training_config = build_training_config(lg, base_model, training_config)
         self._quantize_override = quantize  # None = auto-detect
-        self._applied_quantization = False  # Set during _load_model
         self._is_quantized = False  # True if model uses quantization (new or pre-existing)
 
         self.model = None
@@ -129,9 +128,8 @@ class Trainer:
         peft_config = self.lora_config.to_peft_config()
         self.model = get_peft_model(self.model, peft_config)
         trainable, total = self.model.get_nb_trainable_parameters()
-        self._lg.info(
-            f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
-        )
+        pct = 100 * trainable / total if total > 0 else 0.0
+        self._lg.info(f"Trainable params: {trainable:,} / {total:,} ({pct:.2f}%)")
 
     def _load_model(self):
         """Load base model with auto-detected quantization and apply LoRA."""
@@ -143,7 +141,7 @@ class Trainer:
         self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
 
-        quant_config, self._applied_quantization = get_quantization_config(
+        quant_config, _ = get_quantization_config(
             self._lg, self.base_model, self._quantize_override
         )
         self._is_quantized = quant_config is not None

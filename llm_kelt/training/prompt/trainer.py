@@ -73,7 +73,6 @@ class Trainer:
         self.prompt_config = prompt_config or PromptConfig()
         self.training_config = build_training_config(lg, base_model, training_config)
         self._quantize_override = quantize
-        self._applied_quantization = False
         self._is_quantized = False
 
         self.model = None
@@ -127,7 +126,7 @@ class Trainer:
         self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
 
-        quant_config, self._applied_quantization = get_quantization_config(
+        quant_config, _ = get_quantization_config(
             self._lg, self.base_model, self._quantize_override
         )
         self._is_quantized = quant_config is not None
@@ -136,7 +135,7 @@ class Trainer:
             model_kwargs["quantization_config"] = quant_config
         self.model = AutoModelForCausalLM.from_pretrained(self.base_model, **model_kwargs)
 
-        if quant_config is not None:
+        if self._is_quantized:
             from peft import prepare_model_for_kbit_training
 
             self.model = prepare_model_for_kbit_training(self.model)

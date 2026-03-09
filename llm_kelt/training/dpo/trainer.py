@@ -99,7 +99,6 @@ class Trainer:
         self.train_dataset = None
         self.eval_dataset = None
         self._quant_config = None
-        self._applied_quantization = False
         self._is_quantized = False
 
     def _load_tokenizer(self):
@@ -138,7 +137,7 @@ class Trainer:
         self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
 
-        self._quant_config, self._applied_quantization = get_quantization_config(
+        self._quant_config, _ = get_quantization_config(
             self._lg, self.base_model, self._quantize_override
         )
         self._is_quantized = self._quant_config is not None
