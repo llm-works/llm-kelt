@@ -37,11 +37,6 @@ class Config:
         """Validate configuration."""
         if self.num_virtual_tokens <= 0:
             raise ValueError(f"num_virtual_tokens must be positive, got {self.num_virtual_tokens}")
-        if self.num_virtual_tokens > 100:
-            raise ValueError(
-                f"num_virtual_tokens > 100 is unusual and may hurt performance, "
-                f"got {self.num_virtual_tokens}"
-            )
         if self.prompt_tuning_init not in ("TEXT", "RANDOM"):
             raise ValueError(
                 f"prompt_tuning_init must be 'TEXT' or 'RANDOM', got {self.prompt_tuning_init}"

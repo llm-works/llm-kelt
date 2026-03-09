@@ -95,9 +95,9 @@ class Trainer:
         tokenizer = self.tokenizer
 
         def format_example(example: dict) -> str:
-            instruction = example.get("instruction", "")
+            instruction = example.get("prompt") or example.get("instruction", "")
             input_text = example.get("input", "")
-            output = example.get("output", "")
+            output = example.get("response") or example.get("output", "")
 
             user_content = f"{instruction}\n\n{input_text}" if input_text else instruction
             messages = [

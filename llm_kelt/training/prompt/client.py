@@ -27,7 +27,7 @@ class Client:
     Ideal for large models (32B+) with small datasets where LoRA is unstable.
 
     Usage:
-        manifest = kelt.train.manifest.create(method="prompt_tuning", ...)
+        manifest = kelt.train.manifest.create(method="prompt", ...)
         result = kelt.train.prompt.train(manifest)
     """
 
@@ -60,8 +60,14 @@ class Client:
         """Build prompt.Config from manifest DotDict."""
         from .config import Config
 
+        num_virtual_tokens = prompt.get("num_virtual_tokens", 20)
+        if num_virtual_tokens > 100:
+            self._lg.warning(
+                "num_virtual_tokens > 100 is unusual and may hurt performance",
+                extra={"num_virtual_tokens": num_virtual_tokens},
+            )
         return Config(
-            num_virtual_tokens=prompt.get("num_virtual_tokens", 20),
+            num_virtual_tokens=num_virtual_tokens,
             prompt_tuning_init=prompt.get("prompt_tuning_init", "TEXT"),
             prompt_tuning_init_text=prompt.get(
                 "prompt_tuning_init_text", "You are a helpful assistant."
@@ -71,6 +77,8 @@ class Client:
     def _get_base_model(self, manifest: Manifest) -> str:
         """Get and validate base model from manifest."""
         base_model: str | None = manifest.training.get("base_model")
+        if not base_model:
+            base_model = manifest.training.get("requested_model")
         if not base_model:
             raise ValueError("Manifest missing 'base_model' in training config.")
         return base_model
@@ -134,10 +142,9 @@ class Client:
             deploy=deploy,
             overwrite=True,
         )
-        if result.adapter:
-            result.adapter = Adapter(
-                md5=result.adapter.md5, mtime=result.adapter.mtime, path=info.path
-            )
+        if result.adapter and info.path != result.adapter.path:
+            meta = compute_adapter_metadata(Path(info.path))
+            result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=info.path)
         self._lg.info("registered adapter", extra={"adapter": manifest.adapter})
 
     def train(self, manifest: Manifest, *, register: bool = True) -> RunResult:

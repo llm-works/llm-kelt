@@ -172,9 +172,10 @@ class TestPromptTuning:
         loaded_model = PeftModel.from_pretrained(base_model, result.adapter.path)
         assert loaded_model is not None, "Should be able to load adapter"
 
-        # Verify trainable params are much smaller than LoRA
-        trainable, total = loaded_model.get_nb_trainable_parameters()
-        assert trainable < 100_000, f"Prompt tuning should have <100K params, got {trainable}"
+        # Verify it's a prompt tuning adapter with correct config
+        peft_config = loaded_model.peft_config["default"]
+        assert peft_config.peft_type.value == "PROMPT_TUNING"
+        assert peft_config.num_virtual_tokens == fast_prompt_config.num_virtual_tokens
 
 
 @pytest.mark.training
