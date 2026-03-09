@@ -100,6 +100,7 @@ class Trainer:
         self.eval_dataset = None
         self._quant_config = None
         self._applied_quantization = False
+        self._is_quantized = False
 
     def _load_tokenizer(self):
         """Load tokenizer for the base model."""
@@ -140,6 +141,7 @@ class Trainer:
         self._quant_config, self._applied_quantization = get_quantization_config(
             self._lg, self.base_model, self._quantize_override
         )
+        self._is_quantized = self._quant_config is not None
         self.model = AutoModelForCausalLM.from_pretrained(
             self.base_model,
             quantization_config=self._quant_config,
@@ -150,7 +152,7 @@ class Trainer:
 
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
-        if self._applied_quantization:
+        if self._is_quantized:
             self.model = prepare_model_for_kbit_training(self.model)
 
         self._apply_lora_adapter()
@@ -322,7 +324,7 @@ class Trainer:
                 },
                 "training": {k: self.training_config[k] for k in TRAINING_CONFIG_KEYS},
                 "dpo": {"beta": self.beta, "reference_free": self.reference_free},
-                "quantized": self._applied_quantization,
+                "quantized": self._is_quantized,
             },
             started_at=started_at,
             completed_at=utc_now(),

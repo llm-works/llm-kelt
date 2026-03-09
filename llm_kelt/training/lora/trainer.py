@@ -65,6 +65,7 @@ class Trainer:
         self.training_config = build_training_config(lg, base_model, training_config)
         self._quantize_override = quantize  # None = auto-detect
         self._applied_quantization = False  # Set during _load_model
+        self._is_quantized = False  # True if model uses quantization (new or pre-existing)
 
         self.model = None
         self.tokenizer = None
@@ -145,6 +146,7 @@ class Trainer:
         quant_config, self._applied_quantization = get_quantization_config(
             self._lg, self.base_model, self._quantize_override
         )
+        self._is_quantized = quant_config is not None
         # Only pass quantization_config if we're applying it - passing None overwrites
         # pre-quantized model configs and breaks transformers' to_dict() serialization
         model_kwargs: dict[str, Any] = {"device_map": "auto", "trust_remote_code": True}
@@ -154,7 +156,7 @@ class Trainer:
 
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
-        if self._applied_quantization:
+        if self._is_quantized:
             self.model = prepare_model_for_kbit_training(self.model)
 
         self._apply_lora()
@@ -265,7 +267,7 @@ class Trainer:
                     "target_modules": self.lora_config.target_modules,
                 },
                 "training": {k: self.training_config[k] for k in TRAINING_CONFIG_KEYS},
-                "quantized": self._applied_quantization,
+                "quantized": self._is_quantized,
             },
             started_at=started_at,
             completed_at=utc_now(),

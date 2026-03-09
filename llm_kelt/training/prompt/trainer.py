@@ -74,6 +74,7 @@ class Trainer:
         self.training_config = build_training_config(lg, base_model, training_config)
         self._quantize_override = quantize
         self._applied_quantization = False
+        self._is_quantized = False
 
         self.model = None
         self.tokenizer = None
@@ -129,12 +130,13 @@ class Trainer:
         quant_config, self._applied_quantization = get_quantization_config(
             self._lg, self.base_model, self._quantize_override
         )
+        self._is_quantized = quant_config is not None
         model_kwargs: dict[str, Any] = {"device_map": "auto", "trust_remote_code": True}
         if quant_config is not None:
             model_kwargs["quantization_config"] = quant_config
         self.model = AutoModelForCausalLM.from_pretrained(self.base_model, **model_kwargs)
 
-        if self._applied_quantization:
+        if quant_config is not None:
             from peft import prepare_model_for_kbit_training
 
             self.model = prepare_model_for_kbit_training(self.model)
@@ -248,7 +250,7 @@ class Trainer:
             config={
                 "prompt_tuning": asdict(self.prompt_config),
                 "training": {k: self.training_config[k] for k in TRAINING_CONFIG_KEYS},
-                "quantized": self._applied_quantization,
+                "quantized": self._is_quantized,
             },
             started_at=started_at,
             completed_at=utc_now(),
