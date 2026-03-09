@@ -42,6 +42,11 @@ def load_sft_dataset(data_path: Path, eval_split: float):
     dataset = Dataset.from_list(records)
 
     if eval_split > 0:
+        num_records = len(dataset)
+        train_size = int(num_records * (1 - eval_split))
+        if train_size < 1:
+            # eval_split too large - would leave no training data
+            return dataset, None
         split = dataset.train_test_split(test_size=eval_split, seed=42)
         return split["train"], split["test"]
 
@@ -234,6 +239,7 @@ class Trainer:
 
     def _build_result(self, adapter_path: Path, metrics: dict, started_at: datetime) -> RunResult:
         """Build the training result."""
+        # Adapter md5/mtime populated by caller (client) after training
         return RunResult(
             status="completed",
             base_model=self.base_model,
