@@ -574,20 +574,15 @@ class MergeTool(_ConfigMixin, Tool):
         adapter_path = Path(adapter)
         if adapter_path.exists():
             return adapter_path
-        try:
-            storage = FileStorage(self.lg, self._registry_path())
-            # Try deployed name first
-            deployed = storage.list_deployed(adapter)
-            if deployed:
-                key, md5 = deployed[-1]
-                for vid in storage.list_versions(key):
-                    if md5_matches(vid, md5):
-                        return storage.get_adapter_path(key, vid)
-            # Try md5 lookup (search all adapters)
-            if path := self._find_by_md5(storage, adapter):
-                return path
-        except Exception as e:
-            self.lg.debug("storage lookup failed", extra={"exception": e})
+        storage = FileStorage(self.lg, self._registry_path())
+        # Try deployed name first - iterate all entries to find valid match
+        for key, md5 in storage.list_deployed(adapter):
+            for vid in storage.list_versions(key):
+                if md5_matches(vid, md5):
+                    return storage.get_adapter_path(key, vid)
+        # Try md5 lookup (search all adapters)
+        if path := self._find_by_md5(storage, adapter):
+            return path
         self.lg.error("adapter not found", extra={"adapter": adapter})
         return None
 
@@ -621,10 +616,24 @@ class MergeTool(_ConfigMixin, Tool):
     def _get_output_path(self, model_path: Path, adapter_path: Path) -> Path | None:
         """Determine output path, prompting for overwrite if exists."""
         if self.args.output:
-            output_path = Path(self.args.output)
+            output_path = Path(self.args.output).resolve()
         else:
             md5_suffix = self._extract_md5_suffix(adapter_path)
-            output_path = model_path.parent / f"{model_path.name}-{md5_suffix}"
+            output_path = (model_path.parent / f"{model_path.name}-{md5_suffix}").resolve()
+        # Safety check: ensure output doesn't overlap with source paths
+        model_resolved = model_path.resolve()
+        adapter_resolved = adapter_path.resolve()
+        if output_path == model_resolved or output_path == adapter_resolved:
+            self.lg.error("output path cannot be same as model or adapter path")
+            return None
+        try:
+            if model_resolved.is_relative_to(output_path) or adapter_resolved.is_relative_to(
+                output_path
+            ):
+                self.lg.error("output path cannot be ancestor of model or adapter path")
+                return None
+        except ValueError:
+            pass  # Not relative, which is fine
         if output_path.exists() and not self.args.overwrite:
             response = input(f"Output path exists: {output_path}\nOverwrite? [y/N] ")
             if response.lower() not in ("y", "yes"):
