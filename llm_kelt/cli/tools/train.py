@@ -580,14 +580,14 @@ class MergeTool(_ConfigMixin, Tool):
             deployed = storage.list_deployed(adapter)
             if deployed:
                 key, md5 = deployed[-1]
-                for vid in storage.list_versions(adapter):
+                for vid in storage.list_versions(key):
                     if md5_matches(vid, md5):
-                        return storage.get_adapter_path(adapter, vid)
+                        return storage.get_adapter_path(key, vid)
             # Try md5 lookup (search all adapters)
             if path := self._find_by_md5(storage, adapter):
                 return path
-        except Exception:
-            pass
+        except Exception as e:
+            self.lg.debug("storage lookup failed", extra={"exception": e})
         self.lg.error("adapter not found", extra={"adapter": adapter})
         return None
 
@@ -703,6 +703,8 @@ class MergeTool(_ConfigMixin, Tool):
         dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
         merged = self._load_and_merge(model_path, adapter_path, dtype_map[self.args.dtype])
         self.lg.info("saving merged model", extra={"output": str(output_path)})
+        if output_path.exists():
+            shutil.rmtree(output_path)
         merged.save_pretrained(output_path)
         # Copy config files from base model (PEFT may alter architecture, miss VLM configs)
         for cfg in model_path.glob("*.json"):

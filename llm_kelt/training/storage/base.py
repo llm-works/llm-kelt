@@ -40,6 +40,7 @@ def md5_matches(version_id: str, pattern: str) -> bool:
     """Check if version's md5 matches pattern.
 
     Supports:
+    - Prefix match: "7c00" matches "20260310-123456-7c0023e8"
     - Suffix match: "23e8" matches "20260310-123456-7c0023e8"
     - Prefix..suffix: "7c..23e8" matches "20260310-123456-7c0023e8"
     - Full md5: "7c0023e8abcd" matches exactly
@@ -49,7 +50,7 @@ def md5_matches(version_id: str, pattern: str) -> bool:
     if ".." in pattern:
         prefix, suffix = pattern.split("..", 1)
         return md5.startswith(prefix) and md5.endswith(suffix)
-    return md5.endswith(pattern) or md5 == pattern
+    return md5.startswith(pattern) or md5.endswith(pattern) or md5 == pattern
 
 
 class Storage(ABC):
