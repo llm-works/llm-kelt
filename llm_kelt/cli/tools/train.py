@@ -14,7 +14,7 @@ from ...training.manifest.loader import load_manifest
 from ...training.profiles import build_training_config, get_registry_path, load_default_profile
 from ...training.runner import Runner
 from ...training.schema import Adapter
-from ...training.storage import FileStorage
+from ...training.storage import FileStorage, extract_md5, md5_matches
 
 
 def _print_adapter_metadata(adapter_path: Path) -> None:
@@ -432,11 +432,6 @@ class DeployTool(_ConfigMixin, Tool):
             "--clear", "-c", action="store_true", help="Remove all deployments for adapter"
         )
 
-    def _extract_md5(self, version_id: str) -> str:
-        """Extract md5 hash from version_id (format: YYYYMMDD-HHMMSS-md5)."""
-        parts = version_id.split("-")
-        return parts[-1] if len(parts) >= 3 else version_id
-
     def _resolve_version(
         self, storage: FileStorage, adapter: str, version: str | None
     ) -> str | None:
@@ -450,15 +445,15 @@ class DeployTool(_ConfigMixin, Tool):
 
         # Try exact match on version_id or md5
         for vid in version_ids:
-            if vid == version or self._extract_md5(vid) == version:
+            if vid == version or extract_md5(vid) == version.lower():
                 return vid
 
-        # Try prefix match on md5
-        matches = [vid for vid in version_ids if self._extract_md5(vid).startswith(version)]
+        # Try pattern match (supports prefix, suffix, and prefix..suffix)
+        matches = [vid for vid in version_ids if md5_matches(vid, version)]
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
-            raise ValueError(f"Ambiguous md5 prefix '{version}': {matches}")
+            raise ValueError(f"Ambiguous md5 pattern '{version}': {matches}")
 
         raise ValueError(f"Version '{version}' not found for adapter '{adapter}'")
 
@@ -534,6 +529,207 @@ class AdaptersTool(_ConfigMixin, Tool):
         return 0
 
 
+class MergeTool(_ConfigMixin, Tool):
+    """Merge LoRA adapter into base model weights."""
+
+    def __init__(self, parent: Any = None) -> None:
+        super().__init__(
+            parent, ToolConfig(name="merge", aliases=["m"], help_text="Merge adapter into model")
+        )
+
+    def add_args(self, parser) -> None:
+        parser.add_argument("adapter", help="Adapter path, deployed name, or md5 hash")
+        parser.add_argument("--model", "-m", help="Base model name (auto-detected if omitted)")
+        parser.add_argument("--output", "-o", help="Output path (default: <model>-<adapter>)")
+        parser.add_argument(
+            "--dtype",
+            choices=["bfloat16", "float16", "float32"],
+            default="bfloat16",
+            help="Output dtype (default: bfloat16)",
+        )
+        parser.add_argument(
+            "--overwrite", action="store_true", help="Overwrite existing output without prompting"
+        )
+
+    def _find_by_md5(self, storage: FileStorage, pattern: str) -> Path | None:
+        """Search all adapters for a version matching md5 pattern."""
+        matches: list[tuple[str, str]] = []  # (key, version_id)
+        for key in storage.list_adapters():
+            for vid in storage.list_versions(key):
+                if md5_matches(vid, pattern):
+                    matches.append((key, vid))
+        if not matches:
+            return None
+        if len(matches) > 1:
+            match_strs = [f"{k}/{v}" for k, v in matches]
+            self.lg.error(
+                "ambiguous md5 pattern", extra={"pattern": pattern, "matches": match_strs}
+            )
+            return None
+        key, vid = matches[0]
+        return storage.get_adapter_path(key, vid)
+
+    def _resolve_adapter_path(self, adapter: str) -> Path | None:
+        """Resolve adapter argument to path, deployed name, or md5."""
+        adapter_path = Path(adapter)
+        if adapter_path.exists():
+            return adapter_path
+        try:
+            storage = FileStorage(self.lg, self._registry_path())
+            # Try deployed name first
+            deployed = storage.list_deployed(adapter)
+            if deployed:
+                key, md5 = deployed[-1]
+                for vid in storage.list_versions(adapter):
+                    if md5_matches(vid, md5):
+                        return storage.get_adapter_path(adapter, vid)
+            # Try md5 lookup (search all adapters)
+            if path := self._find_by_md5(storage, adapter):
+                return path
+        except Exception:
+            pass
+        self.lg.error("adapter not found", extra={"adapter": adapter})
+        return None
+
+    def _get_base_model_from_adapter(self, adapter_path: Path) -> str | None:
+        """Extract base model path from adapter config."""
+        import json
+
+        config_path = adapter_path / "adapter_config.json"
+        if not config_path.exists():
+            return None
+        with open(config_path) as f:
+            result: str | None = json.load(f).get("base_model_name_or_path")
+            return result
+
+    def _resolve_base_model(self, adapter_path: Path) -> Path | None:
+        """Resolve base model from args or adapter config."""
+        if self.args.model:
+            return self._resolve_model(self.args.model)
+        base_model = self._get_base_model_from_adapter(adapter_path)
+        if not base_model:
+            self.lg.error("could not detect base model, use --model")
+            return None
+        model_path = Path(base_model)
+        return model_path if model_path.exists() else self._resolve_model(model_path.name)
+
+    def _extract_md5_suffix(self, adapter_path: Path) -> str:
+        """Extract md5 suffix from adapter path (format: YYYYMMDD-HHMMSS-md5)."""
+        name = adapter_path.name if adapter_path.is_dir() else adapter_path.stem
+        return extract_md5(name)
+
+    def _get_output_path(self, model_path: Path, adapter_path: Path) -> Path | None:
+        """Determine output path, prompting for overwrite if exists."""
+        if self.args.output:
+            output_path = Path(self.args.output)
+        else:
+            md5_suffix = self._extract_md5_suffix(adapter_path)
+            output_path = model_path.parent / f"{model_path.name}-{md5_suffix}"
+        if output_path.exists() and not self.args.overwrite:
+            response = input(f"Output path exists: {output_path}\nOverwrite? [y/N] ")
+            if response.lower() not in ("y", "yes"):
+                self.lg.info("aborted by user")
+                return None
+        return output_path
+
+    def _load_visual_weights(self, model_path: Path) -> dict[str, Any]:
+        """Load visual tower weights from base model's sharded safetensors."""
+        import json
+
+        from safetensors.torch import load_file
+
+        index_path = model_path / "model.safetensors.index.json"
+        if not index_path.exists():
+            return {}
+        with open(index_path) as f:
+            weight_map = json.load(f).get("weight_map", {})
+        # Visual weights may be "visual." or "model.visual." depending on model
+        visual_files = {
+            f for k, f in weight_map.items() if ".visual." in k or k.startswith("visual.")
+        }
+        weights: dict[str, Any] = {}
+        for filename in visual_files:
+            for key, tensor in load_file(model_path / filename).items():
+                if ".visual." in key or key.startswith("visual."):
+                    weights[key] = tensor
+        return weights
+
+    def _copy_visual_weights(self, model_path: Path, output_path: Path) -> None:
+        """Copy visual tower weights from base model (for VLM architectures)."""
+        import json
+
+        from safetensors.torch import save_file
+
+        visual_weights = self._load_visual_weights(model_path)
+        if not visual_weights:
+            return
+        save_file(visual_weights, output_path / "visual.safetensors")
+        self.lg.info("copied visual tower weights", extra={"count": len(visual_weights)})
+        # Update output index to include visual weights
+        out_index_path = output_path / "model.safetensors.index.json"
+        if out_index_path.exists():
+            with open(out_index_path) as f:
+                out_index = json.load(f)
+            for key in visual_weights:
+                out_index["weight_map"][key] = "visual.safetensors"
+            with open(out_index_path, "w") as f:
+                json.dump(out_index, f, indent=2)
+
+    def _load_and_merge(self, model_path: Path, adapter_path: Path, dtype: Any) -> Any:
+        """Load base model, apply adapter, and return merged model."""
+        from peft import PeftModel
+        from transformers import AutoModelForCausalLM
+
+        self.lg.info("loading base model", extra={"model": str(model_path)})
+        model = AutoModelForCausalLM.from_pretrained(
+            str(model_path),
+            torch_dtype=dtype,
+            device_map="cpu",
+            trust_remote_code=True,
+            low_cpu_mem_usage=True,
+        )
+        self.lg.info("loading adapter", extra={"adapter": str(adapter_path)})
+        peft_model = PeftModel.from_pretrained(model, str(adapter_path))
+        self.lg.info("merging adapter into base model")
+        return peft_model.merge_and_unload()  # type: ignore[operator]
+
+    def _merge_and_save(self, model_path: Path, adapter_path: Path, output_path: Path) -> None:
+        """Load model, merge adapter, and save result."""
+        import shutil
+
+        import torch
+        from transformers import AutoTokenizer
+
+        dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
+        merged = self._load_and_merge(model_path, adapter_path, dtype_map[self.args.dtype])
+        self.lg.info("saving merged model", extra={"output": str(output_path)})
+        merged.save_pretrained(output_path)
+        # Copy config files from base model (PEFT may alter architecture, miss VLM configs)
+        for cfg in model_path.glob("*.json"):
+            if "index" not in cfg.name:  # Skip weight index files
+                shutil.copy(cfg, output_path / cfg.name)
+        self.lg.info("restored base model configs")
+        # Copy visual tower weights for VLM models
+        self._copy_visual_weights(model_path, output_path)
+        self.lg.info("copying tokenizer")
+        tokenizer = AutoTokenizer.from_pretrained(str(model_path), trust_remote_code=True)
+        tokenizer.save_pretrained(output_path)
+
+    def run(self, **kwargs: Any) -> int:
+        adapter_path = self._resolve_adapter_path(self.args.adapter)
+        if adapter_path is None:
+            return 1
+        model_path = self._resolve_base_model(adapter_path)
+        if model_path is None:
+            return 1
+        output_path = self._get_output_path(model_path, adapter_path)
+        if output_path is None:
+            return 1
+        self._merge_and_save(model_path, adapter_path, output_path)
+        print(f"\nMerged model saved to: {output_path}")
+        return 0
+
+
 class TrainTool(Tool):
     """Training commands."""
 
@@ -548,6 +744,7 @@ class TrainTool(Tool):
         self.add_tool(SftTool(self))
         self.add_tool(AdaptersTool(self))
         self.add_tool(DeployTool(self))
+        self.add_tool(MergeTool(self))
 
     def run(self, **kwargs: Any) -> int:
         result: int = self.group.run(**kwargs)

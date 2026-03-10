@@ -19,8 +19,11 @@ defaults:
 
 models:
   # ---------------------------------------------------------------------------
-  # Qwen2.5 instruct models
+  # Qwen* instruct models
   # ---------------------------------------------------------------------------
   qwen2.5-coder-3b-instruct-bnb-4bit: {}
   qwen2.5-3b-instruct-bnb-4bit: {}
   qwen2.5-3b-instruct-unsloth-bnb-4bit: {}
+  qwen3.5-4b: {}
+  qwen3.5-9b: {}
+  qwen3.5-27b-bnb-4bit-cyberenchanter: {}
