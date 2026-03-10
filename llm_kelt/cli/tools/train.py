@@ -641,26 +641,34 @@ class MergeTool(_ConfigMixin, Tool):
                 return None
         return output_path
 
+    def _is_visual_key(self, key: str) -> bool:
+        """Check if a weight key belongs to the visual tower."""
+        return ".visual." in key or key.startswith("visual.")
+
     def _load_visual_weights(self, model_path: Path) -> dict[str, Any]:
-        """Load visual tower weights from base model's sharded safetensors."""
+        """Load visual tower weights from base model safetensors."""
         import json
 
         from safetensors.torch import load_file
 
-        index_path = model_path / "model.safetensors.index.json"
-        if not index_path.exists():
-            return {}
-        with open(index_path) as f:
-            weight_map = json.load(f).get("weight_map", {})
-        # Visual weights may be "visual." or "model.visual." depending on model
-        visual_files = {
-            f for k, f in weight_map.items() if ".visual." in k or k.startswith("visual.")
-        }
         weights: dict[str, Any] = {}
-        for filename in visual_files:
-            for key, tensor in load_file(model_path / filename).items():
-                if ".visual." in key or key.startswith("visual."):
-                    weights[key] = tensor
+        index_path = model_path / "model.safetensors.index.json"
+        if index_path.exists():
+            # Sharded checkpoint: load only files containing visual weights
+            with open(index_path) as f:
+                weight_map = json.load(f).get("weight_map", {})
+            visual_files = {f for k, f in weight_map.items() if self._is_visual_key(k)}
+            for filename in visual_files:
+                for key, tensor in load_file(model_path / filename).items():
+                    if self._is_visual_key(key):
+                        weights[key] = tensor
+        else:
+            # Non-sharded checkpoint: single model.safetensors file
+            single_file = model_path / "model.safetensors"
+            if single_file.exists():
+                for key, tensor in load_file(single_file).items():
+                    if self._is_visual_key(key):
+                        weights[key] = tensor
         return weights
 
     def _copy_visual_weights(self, model_path: Path, output_path: Path) -> None:
@@ -674,15 +682,17 @@ class MergeTool(_ConfigMixin, Tool):
             return
         save_file(visual_weights, output_path / "visual.safetensors")
         self.lg.info("copied visual tower weights", extra={"count": len(visual_weights)})
-        # Update output index to include visual weights
+        # Update or create output index to include visual weights
         out_index_path = output_path / "model.safetensors.index.json"
         if out_index_path.exists():
             with open(out_index_path) as f:
                 out_index = json.load(f)
-            for key in visual_weights:
-                out_index["weight_map"][key] = "visual.safetensors"
-            with open(out_index_path, "w") as f:
-                json.dump(out_index, f, indent=2)
+        else:
+            out_index = {"metadata": {}, "weight_map": {}}
+        for key in visual_weights:
+            out_index["weight_map"][key] = "visual.safetensors"
+        with open(out_index_path, "w") as f:
+            json.dump(out_index, f, indent=2)
 
     def _load_and_merge(self, model_path: Path, adapter_path: Path, dtype: Any) -> Any:
         """Load base model, apply adapter, and return merged model."""
@@ -736,7 +746,11 @@ class MergeTool(_ConfigMixin, Tool):
         output_path = self._get_output_path(model_path, adapter_path)
         if output_path is None:
             return 1
-        self._merge_and_save(model_path, adapter_path, output_path)
+        try:
+            self._merge_and_save(model_path, adapter_path, output_path)
+        except Exception as e:
+            self.lg.error("merge failed", extra={"exception": e})
+            return 1
         print(f"\nMerged model saved to: {output_path}")
         return 0
 
