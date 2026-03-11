@@ -8,6 +8,7 @@ dynamic = ["version"]
 description = "Framework for collecting and managing LLM context"
 readme = "README.md"
 license = {text = "Apache-2.0"}
+authors = [{name = "LLM Works LLC", email = "info@llm-works.ai"}]
 requires-python = ">=3.11"
 dependencies = [
     # Core infrastructure
@@ -21,7 +22,7 @@ dependencies = [
     "alembic>=1.12,<2.0",
 
     # Inference - llm-infer commented out to prefer local editable install
-    # "llm-infer @ git+https://github.com/serendip-ml/llm-infer.git@develop",
+    # "llm-infer @ git+https://github.com/llm-works/llm-infer.git@develop",
     "httpx>=0.27,<1.0",
 
     # Serving
