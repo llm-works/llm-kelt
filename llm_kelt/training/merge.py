@@ -113,15 +113,15 @@ def _load_quant_tensor(
 
 
 def _build_quant_state(
-    absmax: Any, quant_map: Any, nested_absmax: Any, nested_quant_map: Any, nested_offset: Any
+    absmax: Any,
+    quant_map: Any,
+    nested_absmax: Any,
+    nested_quant_map: Any,
+    metadata: dict[str, Any],
 ) -> Any:
-    """Build BNB QuantState from component tensors."""
+    """Build BNB QuantState from component tensors and JSON metadata."""
     import torch
     from bitsandbytes.functional import QuantState
-
-    blocksize = 64
-    n_blocks = absmax.numel()
-    total_elements = n_blocks * blocksize
 
     # Build nested state for double quantization if present
     state2 = None
@@ -129,19 +129,19 @@ def _build_quant_state(
     if nested_absmax is not None:
         state2 = QuantState(
             absmax=nested_absmax,
-            blocksize=256,
+            blocksize=metadata["nested_blocksize"],
             code=nested_quant_map,
-            dtype=torch.float16,
+            dtype=getattr(torch, metadata["nested_dtype"]),
         )
-        offset = nested_offset if nested_offset is not None else torch.zeros(1)
+        offset = torch.tensor(metadata["nested_offset"])
 
     return QuantState(
         absmax=absmax,
-        shape=torch.Size([total_elements]),
+        shape=torch.Size(metadata["shape"]),
         code=quant_map,
-        blocksize=blocksize,
-        quant_type="nf4",
-        dtype=torch.float16,
+        blocksize=metadata["blocksize"],
+        quant_type=metadata["quant_type"],
+        dtype=getattr(torch, metadata["dtype"]),
         offset=offset,
         state2=state2,
     )
@@ -160,15 +160,16 @@ def _dequantize_bnb_weight(
             f"{weight_name}.{suffix}", weight_name, file_handle, weight_map, model_path
         )
 
+    # Load and parse quant_state JSON metadata
+    qs_tensor = load("quant_state.bitsandbytes__nf4")
+    metadata = json.loads(bytes(qs_tensor.numpy()).decode("utf-8"))
+
     absmax = load("absmax")
     quant_map = load("quant_map")
     nested_absmax = load("nested_absmax")
     nested_quant_map = load("nested_quant_map")
-    nested_offset = load("nested_offset")
 
-    quant_state = _build_quant_state(
-        absmax, quant_map, nested_absmax, nested_quant_map, nested_offset
-    )
+    quant_state = _build_quant_state(absmax, quant_map, nested_absmax, nested_quant_map, metadata)
     return dequantize_4bit(quant_weight, quant_state)
 
 
