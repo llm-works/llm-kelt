@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- DPO stacked adapters: VRAM-efficient reference model via adapter copying instead of loading a second model
 - `kelt train merge` CLI tool for baking LoRA adapters into base model weights (required for VLM models where vLLM doesn't apply LoRA correctly)
 - `extract_md5()` and `md5_matches()` utilities in storage module for flexible adapter version lookup (supports prefix..suffix notation)
 - `Client.with_schema()` for per-operation schema selection without client caches

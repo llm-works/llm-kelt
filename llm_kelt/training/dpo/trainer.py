@@ -115,11 +115,14 @@ class Trainer:
     def _apply_lora_adapter(self):
         """Apply LoRA adapter - load existing or create new.
 
-        When parent adapter exists, uses adapter copying for VRAM efficiency:
+        When parent adapter exists and not reference_free, uses adapter copying
+        for VRAM efficiency:
         - Parent loaded as "default" adapter (policy, trainable)
         - Copy created as "ref" adapter (reference, frozen)
         - TRL automatically uses "ref" for reference logits
         - Single model, no second model needed
+
+        When reference_free=True, only loads parent as trainable without ref copy.
         """
         from peft import PeftModel, get_peft_model
 
@@ -130,11 +133,12 @@ class Trainer:
                 self.model, self.parent.path, adapter_name="default", is_trainable=True
             )
 
-            # Copy to frozen "ref" for TRL's reference logits
-            self._lg.info("copying to 'ref' adapter (frozen) for reference")
-            self.model.load_adapter(self.parent.path, adapter_name="ref", is_trainable=False)
+            # Copy to frozen "ref" for TRL's reference logits (skip if reference_free)
+            if not self.reference_free:
+                self._lg.info("copying to 'ref' adapter (frozen) for reference")
+                self.model.load_adapter(self.parent.path, adapter_name="ref", is_trainable=False)
+                self._use_stacked_adapters = True
             self.model.set_adapter("default")  # Ensure default is active
-            self._use_stacked_adapters = True
         else:
             peft_config = self.lora_config.to_peft_config()
             self.model = get_peft_model(self.model, peft_config)
@@ -212,40 +216,60 @@ class Trainer:
     def _calculate_warmup_steps(self) -> int:
         """Calculate warmup steps from warmup ratio and training config."""
         tc = self.training_config
-        steps_per_epoch = math.ceil(
-            len(self.train_dataset) / (tc.batch_size * tc.gradient_accumulation_steps)
+        if tc.batch_size <= 0 or tc.gradient_accumulation_steps <= 0:
+            raise ValueError("batch_size and gradient_accumulation_steps must be positive")
+
+        steps_per_epoch = max(
+            1, math.ceil(len(self.train_dataset) / (tc.batch_size * tc.gradient_accumulation_steps))
         )
         total_steps = steps_per_epoch * tc.num_epochs
-        return int(total_steps * tc.warmup_ratio)
+        warmup_steps = int(total_steps * tc.warmup_ratio)
+        # Ensure at least 1 warmup step when ratio > 0
+        if tc.warmup_ratio > 0 and warmup_steps == 0:
+            warmup_steps = 1
+        return warmup_steps
+
+    def _base_training_args(self) -> dict:
+        """Build base training arguments from config."""
+        tc = self.training_config
+        return dict(
+            output_dir=str(self.output_dir),
+            num_train_epochs=tc.num_epochs,
+            per_device_train_batch_size=tc.batch_size,
+            gradient_accumulation_steps=tc.gradient_accumulation_steps,
+            learning_rate=tc.learning_rate,
+            warmup_steps=self._calculate_warmup_steps(),
+            max_grad_norm=tc.max_grad_norm,
+            logging_steps=tc.logging_steps,
+            save_steps=tc.save_steps,
+            save_total_limit=2,
+            fp16=tc.fp16,
+            bf16=tc.bf16,
+            gradient_checkpointing=tc.gradient_checkpointing,
+            seed=tc.seed,
+            report_to="none",
+            optim="paged_adamw_8bit",
+            max_length=tc.max_seq_length,
+            neftune_noise_alpha=tc.neftune_noise_alpha,
+        )
 
     def _create_training_args(self):
         """Create DPO training arguments."""
         from trl import DPOConfig
 
-        return DPOConfig(
-            output_dir=str(self.output_dir),
-            num_train_epochs=self.training_config.num_epochs,
-            per_device_train_batch_size=self.training_config.batch_size,
-            gradient_accumulation_steps=self.training_config.gradient_accumulation_steps,
-            learning_rate=self.training_config.learning_rate,
-            warmup_steps=self._calculate_warmup_steps(),
-            max_grad_norm=self.training_config.max_grad_norm,
-            logging_steps=self.training_config.logging_steps,
-            save_steps=self.training_config.save_steps,
-            save_total_limit=2,
-            fp16=self.training_config.fp16,
-            bf16=self.training_config.bf16,
-            gradient_checkpointing=self.training_config.gradient_checkpointing,
-            seed=self.training_config.seed,
+        config_args = self._base_training_args()
+        config_args.update(
             eval_strategy="steps" if self.eval_dataset else "no",
             eval_steps=self.training_config.save_steps if self.eval_dataset else None,
             load_best_model_at_end=self.eval_dataset is not None,
-            report_to="none",
-            optim="paged_adamw_8bit",
             beta=self.beta,
-            max_length=self.training_config.max_seq_length,
-            neftune_noise_alpha=self.training_config.neftune_noise_alpha,
+            reference_free=self.reference_free,
         )
+        if self._use_stacked_adapters:
+            config_args["model_adapter_name"] = "default"
+            config_args["ref_adapter_name"] = "ref"
+
+        return DPOConfig(**config_args)
 
     def _create_trainer(self):
         """Create the DPOTrainer."""
