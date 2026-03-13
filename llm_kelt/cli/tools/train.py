@@ -723,8 +723,12 @@ class MergeTool(_ConfigMixin, Tool):
             return bool(quant_config.get("quant_method") == "bitsandbytes")
         return False
 
-    def _copy_model_assets(self, model_path: Path, output_path: Path) -> None:
-        """Copy config files, visual weights, and tokenizer from base model."""
+    def _is_sharded_model(self, model_path: Path) -> bool:
+        """Check if model uses sharded safetensors (has index file)."""
+        return (model_path / "model.safetensors.index.json").exists()
+
+    def _copy_configs_and_tokenizer(self, model_path: Path, output_path: Path) -> None:
+        """Copy config files and tokenizer from base model."""
         import shutil
 
         from transformers import AutoTokenizer
@@ -733,7 +737,6 @@ class MergeTool(_ConfigMixin, Tool):
             if "index" not in cfg.name:
                 shutil.copy(cfg, output_path / cfg.name)
         self.lg.info("restored base model configs")
-        self._copy_visual_weights(model_path, output_path)
         tokenizer = AutoTokenizer.from_pretrained(str(model_path), trust_remote_code=True)
         tokenizer.save_pretrained(output_path)
         self.lg.info("copied tokenizer")
@@ -762,22 +765,16 @@ class MergeTool(_ConfigMixin, Tool):
             quantize_layerwise(self.lg, model_path, tmp_path)
             self._replace_safetensors(model_path, tmp_path)
 
-    def _merge_and_save(self, model_path: Path, adapter_path: Path, output_path: Path) -> None:
-        """Load model, merge adapter, and save result."""
-        import shutil
-
-        import torch
-
+    def _do_merge(
+        self, model_path: Path, adapter_path: Path, output_path: Path, dtype: Any
+    ) -> bool:
+        """Merge adapter into model. Returns True if layerwise merge was used."""
         from ...training.merge import merge_layerwise
 
-        dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
-        dtype = dtype_map[self.args.dtype]
+        # Use layerwise merge only for sharded BNB models (non-sharded fall back to standard)
+        use_layerwise = self._is_bnb_model_path(model_path) and self._is_sharded_model(model_path)
 
-        if output_path.exists():
-            shutil.rmtree(output_path)
-
-        is_bnb = self._is_bnb_model_path(model_path)
-        if is_bnb:
+        if use_layerwise:
             self.lg.info("using layerwise merge for BNB quantized model")
             merge_layerwise(self.lg, model_path, adapter_path, output_path, dtype)
         else:
@@ -785,10 +782,28 @@ class MergeTool(_ConfigMixin, Tool):
             self.lg.info("saving merged model", extra={"output": str(output_path)})
             merged.save_pretrained(output_path)
 
-        self._copy_model_assets(model_path, output_path)
+        return use_layerwise
 
-        if is_bnb:
+    def _merge_and_save(self, model_path: Path, adapter_path: Path, output_path: Path) -> None:
+        """Load model, merge adapter, and save result."""
+        import shutil
+
+        import torch
+
+        dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
+        dtype = dtype_map[self.args.dtype]
+
+        if output_path.exists():
+            shutil.rmtree(output_path)
+
+        use_layerwise = self._do_merge(model_path, adapter_path, output_path, dtype)
+        self._copy_configs_and_tokenizer(model_path, output_path)
+
+        if use_layerwise:
             self._requantize_bnb(output_path)
+
+        # Copy visual weights after requantization so index entries are preserved
+        self._copy_visual_weights(model_path, output_path)
 
     def run(self, **kwargs: Any) -> int:
         adapter_path = self._resolve_adapter_path(self.args.adapter)
