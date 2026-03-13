@@ -286,8 +286,8 @@ class Trainer:
 
         # Use implicit reference via disable_adapter() when no parent adapter
         # (TRL automatically uses "ref" adapter when it exists, so no action needed
-        # for stacked adapters case)
-        if self.ref_model is None and self.parent is None:
+        # for stacked adapters case; skip entirely if reference_free)
+        if self.ref_model is None and self.parent is None and not self.reference_free:
             self._enable_implicit_reference()
 
     def _enable_implicit_reference(self):
@@ -315,6 +315,10 @@ class Trainer:
 
         self._lg.info("using implicit reference: removing 'ref' adapter to use disable_adapter()")
         self.model.delete_adapter("ref")
+
+        # Clear trainer's ref_adapter_name so TRL uses disable_adapter() path
+        if self.trainer is not None and hasattr(self.trainer, "ref_adapter_name"):
+            self.trainer.ref_adapter_name = None
 
     def _extract_dpo_metrics(self, dpo_logs: list) -> dict:
         """Extract DPO-specific metrics (accuracy, margins, loss) from first/last logs."""
