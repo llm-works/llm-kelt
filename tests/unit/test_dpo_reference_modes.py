@@ -8,6 +8,8 @@ Tests the three reference model configurations:
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 class TestEnableImplicitReference:
     """Tests for _enable_implicit_reference method."""
@@ -57,13 +59,13 @@ class TestEnableImplicitReference:
 
     def test_implicit_reference_removes_ref_adapter(self):
         """When no parent and no ref_model, should remove ref adapter."""
-        from peft import PeftModel
+        peft = pytest.importorskip("peft")
 
         trainer = self._make_trainer(parent=None, ref_model=None, reference_free=False)
         trainer._use_stacked_adapters = False
 
         # Create mock that passes isinstance check for PeftModel
-        mock_model = MagicMock(spec=PeftModel)
+        mock_model = MagicMock(spec=peft.PeftModel)
         mock_model.peft_config = {"default": MagicMock(), "ref": MagicMock()}
         trainer.model = mock_model
 
@@ -81,13 +83,13 @@ class TestEnableImplicitReference:
 
     def test_implicit_reference_uses_configured_adapter_name(self):
         """Should use trainer.ref_adapter_name if set, not hardcoded 'ref'."""
-        from peft import PeftModel
+        peft = pytest.importorskip("peft")
 
         trainer = self._make_trainer(parent=None, ref_model=None, reference_free=False)
         trainer._use_stacked_adapters = False
 
         # Create mock that passes isinstance check for PeftModel
-        mock_model = MagicMock(spec=PeftModel)
+        mock_model = MagicMock(spec=peft.PeftModel)
         mock_model.peft_config = {"default": MagicMock(), "custom_ref": MagicMock()}
         trainer.model = mock_model
 
@@ -130,13 +132,13 @@ class TestEnableImplicitReference:
 
     def test_clears_trainer_binding_even_without_adapter(self):
         """Should always clear trainer.ref_adapter_name even if adapter doesn't exist."""
-        from peft import PeftModel
+        peft = pytest.importorskip("peft")
 
         trainer = self._make_trainer(parent=None, ref_model=None, reference_free=False)
         trainer._use_stacked_adapters = False
 
         # Create mock that passes isinstance check for PeftModel, but no ref adapter
-        mock_model = MagicMock(spec=PeftModel)
+        mock_model = MagicMock(spec=peft.PeftModel)
         mock_model.peft_config = {"default": MagicMock()}  # No "ref"
         trainer.model = mock_model
 
