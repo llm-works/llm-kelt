@@ -346,26 +346,21 @@ def _quantize_tensor_bnb(tensor: Any) -> tuple[Any, Any]:
     return quantized, quant_state
 
 
-def _add_bnb_weights(writer: ShardWriter, name: str, quantized: Any, qs: Any) -> None:
-    """Add BNB quantized weight and its quant state tensors to writer."""
+def _get_nested_offset(qs: Any) -> float | None:
+    """Extract nested offset value from quant state."""
     import torch
 
-    writer.add(name, quantized)
-    writer.add(f"{name}.absmax", qs.absmax)
-    writer.add(f"{name}.quant_map", qs.code)
+    if qs.state2 is None:
+        return None
+    offset_val = qs.offset
+    if isinstance(offset_val, torch.Tensor):
+        offset_val = offset_val.item()
+    return float(offset_val) if offset_val is not None else 0.0
 
-    # Pack quant state metadata into a tensor (BNB convention)
-    # nested_offset must be in the JSON, not as a separate tensor
-    qs_key = f"{name}.quant_state.bitsandbytes__nf4"
-    if qs.state2 is not None:
-        offset_val = qs.offset
-        if isinstance(offset_val, torch.Tensor):
-            offset_val = offset_val.item()
-        nested_offset = float(offset_val) if offset_val is not None else 0.0
-    else:
-        nested_offset = None
 
-    metadata = {
+def _build_bnb_metadata(qs: Any, nested_offset: float | None) -> dict:
+    """Build BNB quant state metadata dict."""
+    return {
         "blocksize": 64,
         "quant_type": "nf4",
         "dtype": str(qs.dtype).split(".")[-1],
@@ -374,9 +369,20 @@ def _add_bnb_weights(writer: ShardWriter, name: str, quantized: Any, qs: Any) ->
         "nested_dtype": str(qs.state2.dtype).split(".")[-1] if qs.state2 else None,
         "nested_offset": nested_offset,
     }
-    # Store metadata as a small tensor (BNB packs this as bytes)
+
+
+def _add_bnb_weights(writer: ShardWriter, name: str, quantized: Any, qs: Any) -> None:
+    """Add BNB quantized weight and its quant state tensors to writer."""
+    import torch
+
+    writer.add(name, quantized)
+    writer.add(f"{name}.absmax", qs.absmax)
+    writer.add(f"{name}.quant_map", qs.code)
+
+    nested_offset = _get_nested_offset(qs)
+    metadata = _build_bnb_metadata(qs, nested_offset)
     packed = torch.tensor([ord(c) for c in json.dumps(metadata)], dtype=torch.uint8)
-    writer.add(qs_key, packed)
+    writer.add(f"{name}.quant_state.bitsandbytes__nf4", packed)
 
     if qs.state2 is not None:
         writer.add(f"{name}.nested_absmax", qs.state2.absmax)
