@@ -100,6 +100,7 @@ class Trainer:
         self.eval_dataset = None
         self._quant_config = None
         self._is_quantized = False
+        self._use_stacked_adapters = False  # True when parent adapter is stacked with DPO
 
     def _load_tokenizer(self):
         """Load tokenizer for the base model."""
@@ -111,12 +112,28 @@ class Trainer:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
     def _apply_lora_adapter(self):
-        """Apply LoRA adapter - load existing or create new."""
+        """Apply LoRA adapter - load existing or create new.
+
+        When parent adapter exists, uses adapter copying for VRAM efficiency:
+        - Parent loaded as "default" adapter (policy, trainable)
+        - Copy created as "ref" adapter (reference, frozen)
+        - TRL automatically uses "ref" for reference logits
+        - Single model, no second model needed
+        """
         from peft import PeftModel, get_peft_model
 
         if self.parent is not None:
-            self._lg.info(f"loading existing adapter: {self.parent.path}")
-            self.model = PeftModel.from_pretrained(self.model, self.parent.path, is_trainable=True)
+            # Load parent as trainable "default" (policy)
+            self._lg.info(f"loading parent adapter as 'default' (trainable): {self.parent.path}")
+            self.model = PeftModel.from_pretrained(
+                self.model, self.parent.path, adapter_name="default", is_trainable=True
+            )
+
+            # Copy to frozen "ref" for TRL's reference logits
+            self._lg.info("copying to 'ref' adapter (frozen) for reference")
+            self.model.load_adapter(self.parent.path, adapter_name="ref", is_trainable=False)
+            self.model.set_adapter("default")  # Ensure default is active
+            self._use_stacked_adapters = True
         else:
             peft_config = self.lora_config.to_peft_config()
             self.model = get_peft_model(self.model, peft_config)
@@ -157,41 +174,29 @@ class Trainer:
         self._apply_lora_adapter()
 
     def _load_reference_model(self):
-        """Load reference model for DPO (unless reference-free mode).
+        """Configure reference model for DPO.
 
-        DPO requires comparing policy model outputs against a reference model.
-        Loading a separate reference model uses more VRAM but produces correct
-        gradients. The reference_free option skips this to save memory at the
-        cost of training quality.
-
-        IMPORTANT: When training on top of an existing adapter (parent),
-        the reference model MUST also have that adapter applied (frozen).
-        Otherwise DPO compares against the wrong baseline.
+        Reference model behavior:
+        - Parent adapter exists: "ref" adapter already created in _apply_lora_adapter().
+          TRL will automatically use it for reference logits. No second model needed.
+        - No parent (merged model): Use implicit reference via disable_adapter().
+          The base model (with merged SFT) serves as reference.
+        - reference_free=True: Skip reference entirely (not recommended).
         """
+        # Parent adapter: "ref" adapter already set up, TRL will use it automatically
+        if self._use_stacked_adapters:
+            self._lg.info("using 'ref' adapter for reference (frozen copy of parent)")
+            return
+
+        # No parent = use implicit reference (base model with merged adapters)
+        if self.parent is None:
+            self._lg.info("no parent adapter: using implicit reference via disable_adapter()")
+            return
+
+        # reference_free forced = skip reference (not recommended)
         if self.reference_free:
             self._lg.info("reference-free mode: skipping reference model")
             return
-
-        import torch
-        from transformers import AutoModelForCausalLM
-
-        self._lg.info("loading reference model for DPO")
-        self.ref_model = AutoModelForCausalLM.from_pretrained(
-            self.base_model,
-            quantization_config=self._quant_config,
-            device_map="auto",
-            torch_dtype=torch.bfloat16 if self._quant_config is None else None,
-            trust_remote_code=True,
-        )
-
-        # Apply the same adapter to reference model (frozen) if training on top of one
-        if self.parent is not None:
-            from peft import PeftModel
-
-            self._lg.info(f"applying adapter to reference model (frozen): {self.parent.path}")
-            self.ref_model = PeftModel.from_pretrained(
-                self.ref_model, self.parent.path, is_trainable=False
-            )
 
     def _load_data(self):
         """Load training and eval datasets."""
@@ -201,6 +206,17 @@ class Trainer:
         self._lg.info(f"loaded {len(self.train_dataset)} training preference pairs")
         if self.eval_dataset:
             self._lg.info(f"loaded {len(self.eval_dataset)} eval pairs")
+
+    def _calculate_warmup_steps(self) -> int:
+        """Calculate warmup steps from warmup ratio and training config."""
+        import math
+
+        tc = self.training_config
+        steps_per_epoch = math.ceil(
+            len(self.train_dataset) / (tc.batch_size * tc.gradient_accumulation_steps)
+        )
+        total_steps = steps_per_epoch * tc.num_epochs
+        return int(total_steps * tc.warmup_ratio)
 
     def _create_training_args(self):
         """Create DPO training arguments."""
@@ -212,7 +228,7 @@ class Trainer:
             per_device_train_batch_size=self.training_config.batch_size,
             gradient_accumulation_steps=self.training_config.gradient_accumulation_steps,
             learning_rate=self.training_config.learning_rate,
-            warmup_ratio=self.training_config.warmup_ratio,
+            warmup_steps=self._calculate_warmup_steps(),
             max_grad_norm=self.training_config.max_grad_norm,
             logging_steps=self.training_config.logging_steps,
             save_steps=self.training_config.save_steps,
@@ -243,6 +259,38 @@ class Trainer:
             eval_dataset=self.eval_dataset,
             processing_class=self.tokenizer,
         )
+
+        # Use implicit reference via disable_adapter() when no parent adapter
+        # (TRL automatically uses "ref" adapter when it exists, so no action needed
+        # for stacked adapters case)
+        if self.ref_model is None and self.parent is None:
+            self._enable_implicit_reference()
+
+    def _enable_implicit_reference(self):
+        """Enable implicit reference by removing TRL's 'ref' adapter.
+
+        When ref_model=None with a PeftModel, TRL creates a 'ref' adapter as a copy
+        of the 'default' adapter. During training, TRL uses this frozen 'ref' adapter
+        for reference logits.
+
+        For DPO on a merged model (SFT baked into base), we want the reference to be
+        the base model itself, not a copy of fresh adapter weights. By removing the
+        'ref' adapter, TRL falls back to using disable_adapter() which gives us the
+        correct reference: the base model with any merged weights.
+
+        See TRL's use_adapter() in trainer/utils.py - when adapter_name=None,
+        it calls model.disable_adapter() as a context manager.
+        """
+        from peft import PeftModel
+
+        if not isinstance(self.model, PeftModel):
+            return
+
+        if "ref" not in self.model.peft_config:
+            return
+
+        self._lg.info("using implicit reference: removing 'ref' adapter to use disable_adapter()")
+        self.model.delete_adapter("ref")
 
     def _extract_dpo_metrics(self, dpo_logs: list) -> dict:
         """Extract DPO-specific metrics (accuracy, margins, loss) from first/last logs."""
