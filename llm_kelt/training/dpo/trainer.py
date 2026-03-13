@@ -5,6 +5,7 @@ Trains the model to prefer "chosen" responses over "rejected" ones.
 """
 
 import json
+import math
 from datetime import datetime
 from pathlib import Path
 
@@ -174,15 +175,21 @@ class Trainer:
         self._apply_lora_adapter()
 
     def _load_reference_model(self):
-        """Configure reference model for DPO.
+        """Log reference model strategy for DPO.
 
-        Reference model behavior:
+        Determines which reference approach will be used (actual setup happens
+        in _create_trainer via _enable_implicit_reference if needed):
+        - reference_free=True: Skip reference entirely (not recommended).
         - Parent adapter exists: "ref" adapter already created in _apply_lora_adapter().
           TRL will automatically use it for reference logits. No second model needed.
         - No parent (merged model): Use implicit reference via disable_adapter().
           The base model (with merged SFT) serves as reference.
-        - reference_free=True: Skip reference entirely (not recommended).
         """
+        # reference_free takes priority - user explicitly opted out
+        if self.reference_free:
+            self._lg.info("reference-free mode: skipping reference model")
+            return
+
         # Parent adapter: "ref" adapter already set up, TRL will use it automatically
         if self._use_stacked_adapters:
             self._lg.info("using 'ref' adapter for reference (frozen copy of parent)")
@@ -191,11 +198,6 @@ class Trainer:
         # No parent = use implicit reference (base model with merged adapters)
         if self.parent is None:
             self._lg.info("no parent adapter: using implicit reference via disable_adapter()")
-            return
-
-        # reference_free forced = skip reference (not recommended)
-        if self.reference_free:
-            self._lg.info("reference-free mode: skipping reference model")
             return
 
     def _load_data(self):
@@ -209,8 +211,6 @@ class Trainer:
 
     def _calculate_warmup_steps(self) -> int:
         """Calculate warmup steps from warmup ratio and training config."""
-        import math
-
         tc = self.training_config
         steps_per_epoch = math.ceil(
             len(self.train_dataset) / (tc.batch_size * tc.gradient_accumulation_steps)
