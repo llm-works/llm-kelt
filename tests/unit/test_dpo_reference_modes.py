@@ -30,6 +30,7 @@ class TestEnableImplicitReference:
 
     def test_stacked_adapters_skips_implicit_reference(self):
         """When parent exists, _create_trainer should not call _enable_implicit_reference."""
+        pytest.importorskip("trl")
         trainer = self._make_trainer(parent=MagicMock(path="/some/path"))
         trainer.model = MagicMock()
         trainer.train_dataset = MagicMock()
@@ -93,6 +94,7 @@ class TestEnableImplicitReference:
 
     def test_reference_free_skips_implicit_reference(self):
         """When reference_free=True, _create_trainer should not call _enable_implicit_reference."""
+        pytest.importorskip("trl")
         trainer = self._make_trainer(parent=None, ref_model=None, reference_free=True)
         trainer.model = MagicMock()
         trainer.train_dataset = MagicMock()
@@ -109,6 +111,7 @@ class TestEnableImplicitReference:
 
     def test_implicit_reference_called_when_no_parent_no_ref_model(self):
         """When no parent and no ref_model, _create_trainer should call _enable_implicit_reference."""
+        pytest.importorskip("trl")
         trainer = self._make_trainer(parent=None, ref_model=None, reference_free=False)
         trainer.model = MagicMock()
         trainer.train_dataset = MagicMock()
@@ -125,6 +128,7 @@ class TestEnableImplicitReference:
 
     def test_explicit_ref_model_skips_implicit_reference(self):
         """When ref_model is provided, _create_trainer should not call _enable_implicit_reference."""
+        pytest.importorskip("trl")
         trainer = self._make_trainer(parent=None, ref_model=MagicMock(), reference_free=False)
         trainer.model = MagicMock()
         trainer.train_dataset = MagicMock()
