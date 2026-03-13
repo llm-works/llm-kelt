@@ -1,5 +1,6 @@
 """Training CLI tools - thin wrappers around training module."""
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -712,29 +713,97 @@ class MergeTool(_ConfigMixin, Tool):
         self.lg.info("merging adapter into base model")
         return peft_model.merge_and_unload()  # type: ignore[operator]
 
+    def _is_bnb_model_path(self, model_path: Path) -> bool:
+        """Check if model path contains BNB quantized weights."""
+        config_path = model_path / "config.json"
+        if config_path.exists():
+            with open(config_path) as f:
+                config = json.load(f)
+            quant_config = config.get("quantization_config", {})
+            return bool(quant_config.get("quant_method") == "bitsandbytes")
+        return False
+
+    def _is_sharded_model(self, model_path: Path) -> bool:
+        """Check if model uses sharded safetensors (has index file)."""
+        return (model_path / "model.safetensors.index.json").exists()
+
+    def _copy_configs_and_tokenizer(self, model_path: Path, output_path: Path) -> None:
+        """Copy config files and tokenizer from base model."""
+        import shutil
+
+        from transformers import AutoTokenizer
+
+        for cfg in model_path.glob("*.json"):
+            if "index" not in cfg.name:
+                shutil.copy(cfg, output_path / cfg.name)
+        self.lg.info("restored base model configs")
+        tokenizer = AutoTokenizer.from_pretrained(str(model_path), trust_remote_code=True)
+        tokenizer.save_pretrained(output_path)
+        self.lg.info("copied tokenizer")
+
+    def _replace_safetensors(self, target: Path, source: Path) -> None:
+        """Replace safetensor files in target with those from source."""
+        import shutil
+
+        for sf in target.glob("model*.safetensors"):
+            sf.unlink()
+        (target / "model.safetensors.index.json").unlink(missing_ok=True)
+        for sf in source.glob("*.safetensors"):
+            shutil.move(str(sf), target / sf.name)
+        idx = source / "model.safetensors.index.json"
+        if idx.exists():
+            shutil.move(str(idx), target / idx.name)
+
+    def _requantize_bnb(self, model_path: Path) -> None:
+        """Re-quantize a fp16 model to BNB 4-bit in place using layerwise quantization."""
+        import tempfile
+
+        from ...training.merge import quantize_layerwise
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp) / "model"
+            quantize_layerwise(self.lg, model_path, tmp_path)
+            self._replace_safetensors(model_path, tmp_path)
+
+    def _do_merge(
+        self, model_path: Path, adapter_path: Path, output_path: Path, dtype: Any
+    ) -> bool:
+        """Merge adapter into model. Returns True if layerwise merge was used."""
+        from ...training.merge import merge_layerwise
+
+        # Use layerwise merge only for sharded BNB models (non-sharded fall back to standard)
+        use_layerwise = self._is_bnb_model_path(model_path) and self._is_sharded_model(model_path)
+
+        if use_layerwise:
+            self.lg.info("using layerwise merge for BNB quantized model")
+            merge_layerwise(self.lg, model_path, adapter_path, output_path, dtype)
+        else:
+            merged = self._load_and_merge(model_path, adapter_path, dtype)
+            self.lg.info("saving merged model", extra={"output": str(output_path)})
+            merged.save_pretrained(output_path)
+
+        return use_layerwise
+
     def _merge_and_save(self, model_path: Path, adapter_path: Path, output_path: Path) -> None:
         """Load model, merge adapter, and save result."""
         import shutil
 
         import torch
-        from transformers import AutoTokenizer
 
         dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
-        merged = self._load_and_merge(model_path, adapter_path, dtype_map[self.args.dtype])
-        self.lg.info("saving merged model", extra={"output": str(output_path)})
+        dtype = dtype_map[self.args.dtype]
+
         if output_path.exists():
             shutil.rmtree(output_path)
-        merged.save_pretrained(output_path)
-        # Copy config files from base model (PEFT may alter architecture, miss VLM configs)
-        for cfg in model_path.glob("*.json"):
-            if "index" not in cfg.name:  # Skip weight index files
-                shutil.copy(cfg, output_path / cfg.name)
-        self.lg.info("restored base model configs")
-        # Copy visual tower weights for VLM models
+
+        use_layerwise = self._do_merge(model_path, adapter_path, output_path, dtype)
+        self._copy_configs_and_tokenizer(model_path, output_path)
+
+        if use_layerwise:
+            self._requantize_bnb(output_path)
+
+        # Copy visual weights after requantization so index entries are preserved
         self._copy_visual_weights(model_path, output_path)
-        self.lg.info("copying tokenizer")
-        tokenizer = AutoTokenizer.from_pretrained(str(model_path), trust_remote_code=True)
-        tokenizer.save_pretrained(output_path)
 
     def run(self, **kwargs: Any) -> int:
         adapter_path = self._resolve_adapter_path(self.args.adapter)
