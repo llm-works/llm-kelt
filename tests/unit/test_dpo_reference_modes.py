@@ -28,34 +28,21 @@ class TestEnableImplicitReference:
             trainer._lg = MagicMock()
         return trainer
 
-    def test_stacked_adapters_preserves_ref(self):
-        """When parent exists, _enable_implicit_reference should not be called.
-
-        The ref adapter is set up in _apply_lora_adapter and should be preserved.
-        """
+    def test_stacked_adapters_skips_implicit_reference(self):
+        """When parent exists, _create_trainer should not call _enable_implicit_reference."""
         trainer = self._make_trainer(parent=MagicMock(path="/some/path"))
-        trainer._use_stacked_adapters = True
+        trainer.model = MagicMock()
+        trainer.train_dataset = MagicMock()
+        trainer.eval_dataset = None
+        trainer.tokenizer = MagicMock()
 
-        # Create mock model with ref adapter
-        mock_model = MagicMock()
-        mock_model.peft_config = {"default": MagicMock(), "ref": MagicMock()}
-        trainer.model = mock_model
-
-        # Mock trainer with ref_adapter_name
-        mock_dpo_trainer = MagicMock()
-        mock_dpo_trainer.ref_adapter_name = "ref"
-        trainer.trainer = mock_dpo_trainer
-
-        # In _create_trainer, this condition prevents _enable_implicit_reference call
-        # when stacked adapters are used (parent is not None)
-        should_enable_implicit = (
-            trainer.ref_model is None and trainer.parent is None and not trainer.reference_free
-        )
-        assert not should_enable_implicit, "Should not enable implicit reference with parent"
-
-        # Verify ref adapter still exists
-        assert "ref" in mock_model.peft_config
-        mock_model.delete_adapter.assert_not_called()
+        with (
+            patch("trl.DPOTrainer"),
+            patch.object(trainer, "_create_training_args", return_value=MagicMock()),
+            patch.object(trainer, "_enable_implicit_reference") as mock_enable,
+        ):
+            trainer._create_trainer()
+            mock_enable.assert_not_called()
 
     def test_implicit_reference_removes_ref_adapter(self):
         """When no parent and no ref_model, should remove ref adapter."""
@@ -105,30 +92,52 @@ class TestEnableImplicitReference:
         assert mock_dpo_trainer.ref_adapter_name is None
 
     def test_reference_free_skips_implicit_reference(self):
-        """When reference_free=True, should not call _enable_implicit_reference."""
+        """When reference_free=True, _create_trainer should not call _enable_implicit_reference."""
         trainer = self._make_trainer(parent=None, ref_model=None, reference_free=True)
-        trainer._use_stacked_adapters = False
+        trainer.model = MagicMock()
+        trainer.train_dataset = MagicMock()
+        trainer.eval_dataset = None
+        trainer.tokenizer = MagicMock()
 
-        mock_model = MagicMock()
-        mock_model.peft_config = {"default": MagicMock(), "ref": MagicMock()}
-        trainer.model = mock_model
+        with (
+            patch("trl.DPOTrainer"),
+            patch.object(trainer, "_create_training_args", return_value=MagicMock()),
+            patch.object(trainer, "_enable_implicit_reference") as mock_enable,
+        ):
+            trainer._create_trainer()
+            mock_enable.assert_not_called()
 
-        mock_dpo_trainer = MagicMock()
-        mock_dpo_trainer.ref_adapter_name = "ref"
-        trainer.trainer = mock_dpo_trainer
+    def test_implicit_reference_called_when_no_parent_no_ref_model(self):
+        """When no parent and no ref_model, _create_trainer should call _enable_implicit_reference."""
+        trainer = self._make_trainer(parent=None, ref_model=None, reference_free=False)
+        trainer.model = MagicMock()
+        trainer.train_dataset = MagicMock()
+        trainer.eval_dataset = None
+        trainer.tokenizer = MagicMock()
 
-        # The condition in _create_trainer should prevent the call
-        should_enable_implicit = (
-            trainer.ref_model is None and trainer.parent is None and not trainer.reference_free
-        )
-        assert not should_enable_implicit, (
-            "Should not enable implicit reference when reference_free"
-        )
+        with (
+            patch("trl.DPOTrainer"),
+            patch.object(trainer, "_create_training_args", return_value=MagicMock()),
+            patch.object(trainer, "_enable_implicit_reference") as mock_enable,
+        ):
+            trainer._create_trainer()
+            mock_enable.assert_called_once()
 
-        # Verify no adapter deletion occurred
-        mock_model.delete_adapter.assert_not_called()
-        # ref_adapter_name should remain unchanged
-        assert mock_dpo_trainer.ref_adapter_name == "ref"
+    def test_explicit_ref_model_skips_implicit_reference(self):
+        """When ref_model is provided, _create_trainer should not call _enable_implicit_reference."""
+        trainer = self._make_trainer(parent=None, ref_model=MagicMock(), reference_free=False)
+        trainer.model = MagicMock()
+        trainer.train_dataset = MagicMock()
+        trainer.eval_dataset = None
+        trainer.tokenizer = MagicMock()
+
+        with (
+            patch("trl.DPOTrainer"),
+            patch.object(trainer, "_create_training_args", return_value=MagicMock()),
+            patch.object(trainer, "_enable_implicit_reference") as mock_enable,
+        ):
+            trainer._create_trainer()
+            mock_enable.assert_not_called()
 
     def test_clears_trainer_binding_even_without_adapter(self):
         """Should always clear trainer.ref_adapter_name even if adapter doesn't exist."""
