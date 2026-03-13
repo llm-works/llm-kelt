@@ -310,13 +310,18 @@ class Trainer:
         if not isinstance(self.model, PeftModel):
             return
 
-        if "ref" not in self.model.peft_config:
-            return
+        # Derive ref adapter name from trainer config, fallback to "ref"
+        ref_name = None
+        if self.trainer is not None and hasattr(self.trainer, "ref_adapter_name"):
+            ref_name = self.trainer.ref_adapter_name
+        ref_name = ref_name or "ref"
 
-        self._lg.info("using implicit reference: removing 'ref' adapter to use disable_adapter()")
-        self.model.delete_adapter("ref")
+        # Delete the ref adapter if it exists
+        if ref_name in self.model.peft_config:
+            self._lg.info(f"using implicit reference: removing '{ref_name}' adapter")
+            self.model.delete_adapter(ref_name)
 
-        # Clear trainer's ref_adapter_name so TRL uses disable_adapter() path
+        # Always clear trainer binding so TRL uses disable_adapter() path
         if self.trainer is not None and hasattr(self.trainer, "ref_adapter_name"):
             self.trainer.ref_adapter_name = None
 
