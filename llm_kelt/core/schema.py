@@ -16,7 +16,7 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
-from .exceptions import SchemaVersionError
+from .errors import SchemaVersionError
 from .models import Base
 
 if TYPE_CHECKING:

@@ -7,7 +7,7 @@ This is a unified model where every piece of knowledge is a "fact" with
 a type discriminator and optional type-specific details.
 """
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     BigInteger,
@@ -26,7 +26,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from llm_kelt.core.base import Base, utc_now
+from llm_kelt.core.base import Base
 
 # =============================================================================
 # Base Fact Table
@@ -62,7 +62,7 @@ class Fact(Base):
     confidence: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utc_now, nullable=False
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

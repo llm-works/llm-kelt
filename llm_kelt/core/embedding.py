@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from pgvector.sqlalchemy import Vector
@@ -12,8 +12,8 @@ from sqlalchemy import DateTime, Index, Integer, String, UniqueConstraint, selec
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base, utc_now
-from .exceptions import ValidationError
+from .base import Base
+from .errors import ValidationError
 
 
 @contextmanager
@@ -92,7 +92,7 @@ class Embedding(Base):
     dimensions: Mapped[int] = mapped_column(Integer, nullable=False)
     embedding: Mapped[list[float]] = mapped_column(Vector(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utc_now, nullable=False
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
 
     __table_args__ = (

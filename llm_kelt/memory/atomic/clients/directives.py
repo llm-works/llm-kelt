@@ -1,13 +1,12 @@
 """Directives client for standing user instructions."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal, cast
 
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import select
 
-from llm_kelt.core.base import utc_now
-from llm_kelt.core.exceptions import ValidationError
+from llm_kelt.core.errors import ValidationError
 
 from ..models import DirectiveDetails, Fact
 from .base import FactClient
@@ -108,7 +107,7 @@ class DirectivesClient(FactClient[DirectiveDetails]):
 
             details.status = status
             fact.active = status == "active"
-            fact.updated_at = utc_now()
+            fact.updated_at = datetime.now(UTC)
             return True
 
     def _list_directives(
@@ -133,7 +132,7 @@ class DirectivesClient(FactClient[DirectiveDetails]):
             # Filter by active status and expiration
             if not include_inactive:
                 stmt = stmt.where(DirectiveDetails.status == "active")
-                now = utc_now()
+                now = datetime.now(UTC)
                 stmt = stmt.where(
                     (DirectiveDetails.expires_at.is_(None)) | (DirectiveDetails.expires_at > now)
                 )

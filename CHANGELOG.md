@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `create_server()` now requires `lg: Logger` as first parameter
 - Adapter version IDs now use full MD5 hash instead of truncated
 - Minimum TRL version bumped to 0.12 (required for conversational DPO format)
+- **Breaking:** `ConfigurationError` renamed to `ConfigError`
+- **Breaking:** `llm_kelt.core.exceptions` renamed to `llm_kelt.core.errors`
+- **Breaking:** Removed `utc_now()` helper; use `datetime.now(UTC)` directly
+- **Breaking:** Removed `reference_free` parameter from `train_dpo()` (TRL handles reference automatically)
 
 ### Fixed
 - Add `readme` field to pyproject.toml so PyPI displays the README

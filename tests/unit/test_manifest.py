@@ -542,8 +542,8 @@ class TestBuildOutputResult:
         assert result.base_model == "Qwen/Qwen2.5-7B"
         assert result.samples_trained == 1000
 
-    def test_missing_timestamps_use_utc_now(self):
-        """Test that missing timestamps use utc_now()."""
+    def test_missing_timestamps_default_to_now(self):
+        """Test that missing timestamps default to current UTC time."""
         data = {"status": "completed"}
         result = _build_output_result(data)
 

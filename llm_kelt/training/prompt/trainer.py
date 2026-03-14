@@ -7,14 +7,12 @@ This is ideal for large models (32B+) with small datasets where LoRA is unstable
 """
 
 from dataclasses import asdict
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from appinfra import DotDict
 from appinfra.log import Logger
-
-from llm_kelt.core.base import utc_now
 
 from ..model import build_training_config
 from ..schema import TRAINING_CONFIG_KEYS, Adapter, RunResult
@@ -253,14 +251,14 @@ class Trainer:
                 "quantized": self._is_quantized,
             },
             started_at=started_at,
-            completed_at=utc_now(),
+            completed_at=datetime.now(UTC),
             samples_trained=int(len(self.train_dataset) * self.training_config.num_epochs),  # type: ignore[arg-type]
             adapter=Adapter(md5="", mtime="", path=str(adapter_path)),
         )
 
     def train(self, resume_from: str | Path | None = None) -> RunResult:
         """Run the full training pipeline."""
-        started_at = utc_now()
+        started_at = datetime.now(UTC)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self._lg.info(f"starting prompt tuning: {self.data_path} -> {self.output_dir}")

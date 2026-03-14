@@ -5,7 +5,7 @@ Memory models (facts, predictions, etc.) are in memory/atomic.
 """
 
 # Base utilities
-from .base import Base, utc_now
+from .base import Base
 
 # Models
 from .content import Content, ContentStore
@@ -15,8 +15,8 @@ from .database import Database
 from .embedding import Embedding, EmbeddingStore
 
 # Exceptions
-from .exceptions import (
-    ConfigurationError,
+from .errors import (
+    ConfigError,
     DatabaseError,
     KeltError,
     NotFoundError,
@@ -33,7 +33,6 @@ from .types import PagedResult, ScoredEntity
 __all__ = [
     # Base
     "Base",
-    "utc_now",
     # Database
     "Database",
     # Models
@@ -53,6 +52,6 @@ __all__ = [
     "ValidationError",
     "NotFoundError",
     "DatabaseError",
-    "ConfigurationError",
+    "ConfigError",
     "SchemaVersionError",
 ]

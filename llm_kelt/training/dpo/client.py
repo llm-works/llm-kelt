@@ -148,7 +148,6 @@ class Client:
             lora_config=self._build_lora_config(manifest.lora, base_model, manifest.training),
             training_config=manifest.training,
             beta=manifest.method_config.get("beta", 0.1),
-            reference_free=manifest.method_config.get("reference_free", False),
             parent=manifest.parent,
         )
 

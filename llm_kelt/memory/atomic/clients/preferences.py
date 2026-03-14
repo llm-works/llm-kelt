@@ -5,7 +5,7 @@ from typing import cast
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import select
 
-from llm_kelt.core.exceptions import ValidationError
+from llm_kelt.core.errors import ValidationError
 
 from ..models import Fact, PreferenceDetails
 from .base import FactClient

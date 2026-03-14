@@ -8,7 +8,7 @@ from typing import Literal, cast
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import func, select
 
-from llm_kelt.core.exceptions import ValidationError
+from llm_kelt.core.errors import ValidationError
 
 from ..models import Fact, FeedbackDetails
 from .base import FactClient

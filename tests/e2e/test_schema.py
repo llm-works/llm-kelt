@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import pytest
 from sqlalchemy import text
 
-from llm_kelt.core.exceptions import SchemaVersionError
+from llm_kelt.core.errors import SchemaVersionError
 from llm_kelt.core.schema import SchemaManager, SchemaState
 
 

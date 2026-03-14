@@ -1,12 +1,12 @@
 """Assertions client for simple facts about the user."""
 
+from datetime import UTC, datetime
 from typing import cast
 
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import func, select
 
-from llm_kelt.core.base import utc_now
-from llm_kelt.core.exceptions import ValidationError
+from llm_kelt.core.errors import ValidationError
 
 from ..models import Fact
 from .base import FactClient
@@ -150,7 +150,7 @@ class AssertionsClient(FactClient[None]):
             if confidence is not None:
                 fact.confidence = confidence
 
-            fact.updated_at = utc_now()
+            fact.updated_at = datetime.now(UTC)
             return True
 
     def list_by_category(

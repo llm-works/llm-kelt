@@ -143,7 +143,7 @@ class Client:
     ) -> DotDict:
         """Build method-specific config (beta for DPO, virtual tokens for prompt, etc.)."""
         if method == "dpo":
-            return DotDict(self._extract_method_config(merged, ["beta", "reference_free"]))
+            return DotDict(self._extract_method_config(merged, ["beta"]))
         if method == "prompt":
             keys = ["num_virtual_tokens", "prompt_tuning_init", "prompt_tuning_init_text"]
             return DotDict(self._extract_method_config(merged, keys))
