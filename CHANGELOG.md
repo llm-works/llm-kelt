@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-14
+
 ### Added
 - DPO stacked adapters: VRAM-efficient reference model via adapter copying instead of loading a second model
 - `kelt train merge` CLI tool for baking LoRA adapters into base model weights (required for VLM models where vLLM doesn't apply LoRA correctly)
@@ -27,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--lora-profile` CLI option for manual profile override
 - Symlink from adapter directory to completed manifest for traceability
 - `ProfileDetectionError` exception for explicit handling of detection failures
+- Prompt tuning as alternative PEFT method for large models (32B+) where LoRA can be unstable
+- `use_rslora` parameter in LoRA config for rank-stabilized scaling (alpha/sqrt(r))
+- `neftune_noise_alpha` in training config for embedding noise regularization
 
 ### Changed
 - `create_server()` now requires `lg: Logger` as first parameter
@@ -88,5 +93,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Example scripts for common workflows
 - API reference documentation in README
 
-[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/llm-works/llm-kelt/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/llm-works/llm-kelt/releases/tag/v0.1.0
