@@ -6,13 +6,11 @@ Trains the model to prefer "chosen" responses over "rejected" ones.
 
 import json
 import math
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from appinfra import DotDict
 from appinfra.log import Logger
-
-from llm_kelt.core.base import utc_now
 
 from ..lora import Config as LoraConfig
 from ..model import build_training_config
@@ -76,7 +74,6 @@ class Trainer:
         training_config: DotDict | None = None,
         beta: float = 0.1,
         quantize: bool | None = None,
-        reference_free: bool = False,
         parent: Adapter | None = None,
     ):
         self._lg = lg
@@ -87,7 +84,6 @@ class Trainer:
         self.training_config = build_training_config(lg, base_model, training_config)
         self.beta = beta
         self._quantize_override = quantize  # None = auto-detect
-        self.reference_free = reference_free
         self.parent = parent
         self._init_state()
 
@@ -115,14 +111,11 @@ class Trainer:
     def _apply_lora_adapter(self):
         """Apply LoRA adapter - load existing or create new.
 
-        When parent adapter exists and not reference_free, uses adapter copying
-        for VRAM efficiency:
+        When parent adapter exists, uses adapter copying for VRAM efficiency:
         - Parent loaded as "default" adapter (policy, trainable)
         - Copy created as "ref" adapter (reference, frozen)
         - TRL automatically uses "ref" for reference logits
         - Single model, no second model needed
-
-        When reference_free=True, only loads parent as trainable without ref copy.
         """
         from peft import PeftModel, get_peft_model
 
@@ -133,11 +126,10 @@ class Trainer:
                 self.model, self.parent.path, adapter_name="default", is_trainable=True
             )
 
-            # Copy to frozen "ref" for TRL's reference logits (skip if reference_free)
-            if not self.reference_free:
-                self._lg.info("copying to 'ref' adapter (frozen) for reference")
-                self.model.load_adapter(self.parent.path, adapter_name="ref", is_trainable=False)
-                self._use_stacked_adapters = True
+            # Copy to frozen "ref" for TRL's reference logits
+            self._lg.info("copying to 'ref' adapter (frozen) for reference")
+            self.model.load_adapter(self.parent.path, adapter_name="ref", is_trainable=False)
+            self._use_stacked_adapters = True
             self.model.set_adapter("default")  # Ensure default is active
         else:
             peft_config = self.lora_config.to_peft_config()
@@ -178,31 +170,17 @@ class Trainer:
 
         self._apply_lora_adapter()
 
-    def _load_reference_model(self):
+    def _log_reference_strategy(self):
         """Log reference model strategy for DPO.
 
-        Determines which reference approach will be used (actual setup happens
-        in _create_trainer via _enable_implicit_reference if needed):
-        - reference_free=True: Skip reference entirely (not recommended).
         - Parent adapter exists: "ref" adapter already created in _apply_lora_adapter().
           TRL will automatically use it for reference logits. No second model needed.
-        - No parent (merged model): Use implicit reference via disable_adapter().
-          The base model (with merged SFT) serves as reference.
+        - No parent: TRL uses implicit reference via disable_adapter() automatically.
         """
-        # reference_free takes priority - user explicitly opted out
-        if self.reference_free:
-            self._lg.info("reference-free mode: skipping reference model")
-            return
-
-        # Parent adapter: "ref" adapter already set up, TRL will use it automatically
         if self._use_stacked_adapters:
             self._lg.info("using 'ref' adapter for reference (frozen copy of parent)")
-            return
-
-        # No parent = use implicit reference (base model with merged adapters)
-        if self.parent is None:
-            self._lg.info("no parent adapter: using implicit reference via disable_adapter()")
-            return
+        else:
+            self._lg.info("using implicit reference via disable_adapter()")
 
     def _load_data(self):
         """Load training and eval datasets."""
@@ -263,7 +241,6 @@ class Trainer:
             eval_steps=self.training_config.save_steps if self.eval_dataset else None,
             load_best_model_at_end=self.eval_dataset is not None,
             beta=self.beta,
-            reference_free=self.reference_free,
         )
         if self._use_stacked_adapters:
             config_args["model_adapter_name"] = "default"
@@ -286,8 +263,8 @@ class Trainer:
 
         # Use implicit reference via disable_adapter() when no parent adapter
         # (TRL automatically uses "ref" adapter when it exists, so no action needed
-        # for stacked adapters case; skip entirely if reference_free)
-        if self.ref_model is None and self.parent is None and not self.reference_free:
+        # for stacked adapters case)
+        if self.ref_model is None and self.parent is None:
             self._enable_implicit_reference()
 
     def _enable_implicit_reference(self):
@@ -405,11 +382,11 @@ class Trainer:
                     "use_rslora": self.lora_config.use_rslora,
                 },
                 "training": {k: self.training_config[k] for k in TRAINING_CONFIG_KEYS},
-                "dpo": {"beta": self.beta, "reference_free": self.reference_free},
+                "dpo": {"beta": self.beta},
                 "quantized": self._is_quantized,
             },
             started_at=started_at,
-            completed_at=utc_now(),
+            completed_at=datetime.now(UTC),
             samples_trained=int(len(self.train_dataset) * self.training_config.num_epochs),  # type: ignore[arg-type]
             adapter=adapter,
             parent=self.parent,
@@ -417,14 +394,14 @@ class Trainer:
 
     def train(self) -> RunResult:
         """Run the full training pipeline."""
-        started_at = utc_now()
+        started_at = datetime.now(UTC)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self._lg.info(f"starting DPO training: {self.data_path} -> {self.output_dir}")
 
         self._load_data()
         self._load_model()
-        self._load_reference_model()
+        self._log_reference_strategy()
         self._create_trainer()
         if self.trainer is None:
             raise RuntimeError("Failed to create trainer")
@@ -444,7 +421,6 @@ def train_dpo(
     training_config: DotDict | None = None,
     beta: float = 0.1,
     quantize: bool | None = None,
-    reference_free: bool = False,
     parent: Adapter | None = None,
 ) -> RunResult:
     """Train a LoRA adapter using Direct Preference Optimization.
@@ -458,7 +434,6 @@ def train_dpo(
         training_config: Training hyperparameters. Uses sensible defaults if not provided.
         beta: DPO beta parameter (higher = more conservative).
         quantize: Force quantization on/off. None = auto-detect from model metadata.
-        reference_free: Skip reference model to save VRAM (may reduce quality).
         parent: Parent adapter to train on top of (for lineage).
 
     Returns:
@@ -473,7 +448,6 @@ def train_dpo(
         training_config=training_config,
         beta=beta,
         quantize=quantize,
-        reference_free=reference_free,
         parent=parent,
     )
     return trainer.train()

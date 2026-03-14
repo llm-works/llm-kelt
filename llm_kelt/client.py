@@ -11,7 +11,7 @@ from llm_infer.client import ChatClient
 from .core.content import ContentStore
 from .core.database import Database
 from .core.embedding import EmbeddingStore
-from .core.exceptions import SchemaVersionError
+from .core.errors import SchemaVersionError
 from .core.schema import SchemaManager, SchemaState, SchemaStatus
 from .inference.context import ContextBuilder
 from .inference.embedder import Embedder

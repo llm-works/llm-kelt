@@ -6,13 +6,12 @@ Exports atomic preferences to DPO training format.
 import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...core.utils import utc_now
 from ...memory.atomic.models import Fact, PreferenceDetails
 from ...memory.isolation import build_context_filter
 from ..export import ExportResult
@@ -89,5 +88,9 @@ def export_preferences(
                 count += 1
 
     return ExportResult(
-        path=output_path, count=count, context_key=context_key, format="dpo", exported_at=utc_now()
+        path=output_path,
+        count=count,
+        context_key=context_key,
+        format="dpo",
+        exported_at=datetime.now(UTC),
     )

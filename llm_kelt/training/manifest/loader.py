@@ -6,14 +6,12 @@ Handles YAML serialization of training manifests and data resolution.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
 from appinfra import DotDict
-
-from llm_kelt.core.base import utc_now
 
 from ..schema import Adapter, RunResult
 from .errors import CorruptedManifestError
@@ -23,7 +21,7 @@ from .schema import Data, Deployment, Manifest, Source
 def _parse_datetime(value: str | datetime | None) -> datetime:
     """Parse datetime from string or pass through."""
     if value is None:
-        return utc_now()
+        return datetime.now(UTC)
     if isinstance(value, datetime):
         return value
     return datetime.fromisoformat(value)
@@ -247,7 +245,7 @@ def _add_method_and_deployment(data: dict[str, Any], manifest: Manifest) -> None
 
 def _build_manifest_dict(manifest: Manifest) -> dict[str, Any]:
     """Build dict from Manifest for YAML serialization."""
-    created_at = manifest.get("created_at") or utc_now()
+    created_at = manifest.get("created_at") or datetime.now(UTC)
     data: dict[str, Any] = {
         "version": manifest.get("version", 1),
         "created_at": _serialize_datetime(created_at),

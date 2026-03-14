@@ -1,9 +1,8 @@
 """Tests for DPO trainer reference mode branches.
 
-Tests the three reference model configurations:
+Tests the two reference model configurations:
 1. Stacked adapters (parent exists): "ref" adapter preserved
 2. Implicit reference (no parent, no ref_model): "ref" adapter deleted
-3. Reference-free mode: no reference setup at all
 """
 
 from unittest.mock import MagicMock, patch
@@ -14,7 +13,7 @@ import pytest
 class TestEnableImplicitReference:
     """Tests for _enable_implicit_reference method."""
 
-    def _make_trainer(self, ref_model=None, parent=None, reference_free=False):
+    def _make_trainer(self, ref_model=None, parent=None):
         """Create a Trainer instance with mocked dependencies."""
         from llm_kelt.training.dpo.trainer import Trainer
 
@@ -22,7 +21,6 @@ class TestEnableImplicitReference:
             trainer = object.__new__(Trainer)
             trainer.ref_model = ref_model
             trainer.parent = parent
-            trainer.reference_free = reference_free
             trainer.model = None
             trainer.trainer = None
             trainer._lg = MagicMock()
@@ -49,7 +47,7 @@ class TestEnableImplicitReference:
         """When no parent and no ref_model, should remove ref adapter."""
         peft = pytest.importorskip("peft")
 
-        trainer = self._make_trainer(parent=None, ref_model=None, reference_free=False)
+        trainer = self._make_trainer(parent=None, ref_model=None)
         trainer._use_stacked_adapters = False
 
         # Create mock that passes isinstance check for PeftModel
@@ -73,7 +71,7 @@ class TestEnableImplicitReference:
         """Should use trainer.ref_adapter_name if set, not hardcoded 'ref'."""
         peft = pytest.importorskip("peft")
 
-        trainer = self._make_trainer(parent=None, ref_model=None, reference_free=False)
+        trainer = self._make_trainer(parent=None, ref_model=None)
         trainer._use_stacked_adapters = False
 
         # Create mock that passes isinstance check for PeftModel
@@ -92,27 +90,10 @@ class TestEnableImplicitReference:
         mock_model.delete_adapter.assert_called_once_with("custom_ref")
         assert mock_dpo_trainer.ref_adapter_name is None
 
-    def test_reference_free_skips_implicit_reference(self):
-        """When reference_free=True, _create_trainer should not call _enable_implicit_reference."""
-        pytest.importorskip("trl")
-        trainer = self._make_trainer(parent=None, ref_model=None, reference_free=True)
-        trainer.model = MagicMock()
-        trainer.train_dataset = MagicMock()
-        trainer.eval_dataset = None
-        trainer.tokenizer = MagicMock()
-
-        with (
-            patch("trl.DPOTrainer"),
-            patch.object(trainer, "_create_training_args", return_value=MagicMock()),
-            patch.object(trainer, "_enable_implicit_reference") as mock_enable,
-        ):
-            trainer._create_trainer()
-            mock_enable.assert_not_called()
-
     def test_implicit_reference_called_when_no_parent_no_ref_model(self):
         """When no parent and no ref_model, _create_trainer should call _enable_implicit_reference."""
         pytest.importorskip("trl")
-        trainer = self._make_trainer(parent=None, ref_model=None, reference_free=False)
+        trainer = self._make_trainer(parent=None, ref_model=None)
         trainer.model = MagicMock()
         trainer.train_dataset = MagicMock()
         trainer.eval_dataset = None
@@ -129,7 +110,7 @@ class TestEnableImplicitReference:
     def test_explicit_ref_model_skips_implicit_reference(self):
         """When ref_model is provided, _create_trainer should not call _enable_implicit_reference."""
         pytest.importorskip("trl")
-        trainer = self._make_trainer(parent=None, ref_model=MagicMock(), reference_free=False)
+        trainer = self._make_trainer(parent=None, ref_model=MagicMock())
         trainer.model = MagicMock()
         trainer.train_dataset = MagicMock()
         trainer.eval_dataset = None
@@ -147,7 +128,7 @@ class TestEnableImplicitReference:
         """Should always clear trainer.ref_adapter_name even if adapter doesn't exist."""
         peft = pytest.importorskip("peft")
 
-        trainer = self._make_trainer(parent=None, ref_model=None, reference_free=False)
+        trainer = self._make_trainer(parent=None, ref_model=None)
         trainer._use_stacked_adapters = False
 
         # Create mock that passes isinstance check for PeftModel, but no ref adapter
