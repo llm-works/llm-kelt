@@ -11,14 +11,13 @@ import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.models import Content
-from ..core.utils import utc_now
 from ..memory.atomic.models import Fact, FeedbackDetails
 from ..memory.isolation import build_context_filter
 
@@ -182,7 +181,7 @@ def export_feedback_sft(
         count=count,
         context_key=context_key,
         format="sft",
-        exported_at=utc_now(),
+        exported_at=datetime.now(UTC),
     )
 
 
@@ -233,5 +232,5 @@ def export_feedback_classifier(
         count=count,
         context_key=context_key,
         format="classifier",
-        exported_at=utc_now(),
+        exported_at=datetime.now(UTC),
     )

@@ -6,7 +6,9 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from appinfra.db.utils import detach_all
-from sqlalchemy import select
+from sqlalchemy import String, and_, select
+from sqlalchemy import cast as sa_cast
+from sqlalchemy.sql.elements import ColumnElement
 
 from llm_kelt.core.embedding import EmbeddingStore
 from llm_kelt.core.types import ScoredEntity
@@ -16,6 +18,81 @@ from .models import Fact
 
 if TYPE_CHECKING:
     from llm_kelt.inference.embedder import Embedder
+
+
+class EmbeddingFilter:
+    """Fluent builder for embedding similarity search filters.
+
+    Combines convenience methods for common filters with raw SQLAlchemy
+    clause support for complex joins and subqueries.
+
+    Examples:
+        # Simple filters
+        f = EmbeddingFilter().fact_type("solution").categories("joke", "riddle")
+
+        # Complex join filter
+        f = EmbeddingFilter().where(
+            Fact.id.in_(
+                select(ModelUsage.fact_id).where(ModelUsage.model_name.not_ilike('%haiku%'))
+            )
+        )
+
+        # Combined
+        f = EmbeddingFilter().fact_type("solution").where(custom_clause)
+    """
+
+    def __init__(self) -> None:
+        """Initialize an empty EmbeddingFilter."""
+        self._fact_type: str | None = None
+        self._categories: list[str] | None = None
+        self._clauses: list[ColumnElement[bool]] = []
+
+    def fact_type(self, t: str) -> EmbeddingFilter:
+        """Filter by atomic fact type (assertion, solution, prediction, etc.)."""
+        self._fact_type = t
+        return self
+
+    def categories(self, *cats: str) -> EmbeddingFilter:
+        """Filter by fact category (must match one of the provided categories)."""
+        self._categories = list(cats)
+        return self
+
+    def where(self, clause: ColumnElement[bool]) -> EmbeddingFilter:
+        """Add a raw SQLAlchemy clause for complex filtering.
+
+        Can be called multiple times - clauses are ANDed together.
+        """
+        self._clauses.append(clause)
+        return self
+
+    def build(self) -> ColumnElement[bool] | None:
+        """Build the combined SQLAlchemy clause."""
+        parts: list[ColumnElement[bool]] = []
+
+        if self._fact_type:
+            parts.append(Fact.type == self._fact_type)
+        if self._categories:
+            parts.append(Fact.category.in_(self._categories))
+        parts.extend(self._clauses)
+
+        if not parts:
+            return None
+        return and_(*parts) if len(parts) > 1 else parts[0]
+
+    def __bool__(self) -> bool:
+        """Return True if any filters are set."""
+        return bool(self._fact_type or self._categories or self._clauses)
+
+    def __repr__(self) -> str:
+        """Return string representation for debugging."""
+        parts = []
+        if self._fact_type:
+            parts.append(f"fact_type={self._fact_type!r}")
+        if self._categories:
+            parts.append(f"categories={self._categories!r}")
+        if self._clauses:
+            parts.append(f"clauses={len(self._clauses)}")
+        return f"EmbeddingFilter({', '.join(parts)})"
 
 
 class EmbeddingAdapter:
@@ -127,31 +204,106 @@ class EmbeddingAdapter:
         """
         return self._store.get(self.ENTITY_TYPE, str(fact_id), model_name)
 
-    def _hydrate_facts(
+    def _build_entity_id_subquery(
         self,
-        fact_ids: list[int],
-        fact_type: str | None,
-        categories: list[str] | None,
-    ) -> list[Fact]:
-        """Fetch facts from DB with optional filters."""
+        effective_filter: EmbeddingFilter | None,
+    ) -> Any:
+        """Build subquery that selects fact IDs matching all filter criteria.
+
+        Returns a SQLAlchemy subquery selecting Fact.id cast to string,
+        constrained by: active=True, context_key filter, and EmbeddingFilter.
+        This subquery is passed to EmbeddingStore.search() for pre-filtering
+        the vector search.
+        """
+        stmt = select(sa_cast(Fact.id, String)).where(Fact.active == True)  # noqa: E712
+
+        # Apply context filtering
+        context_filter = build_context_filter(self._context_key, Fact.context_key)
+        if context_filter is not None:
+            stmt = stmt.where(context_filter)
+
+        # Apply user-provided filter
+        if effective_filter:
+            clause = effective_filter.build()
+            if clause is not None:
+                stmt = stmt.where(clause)
+
+        return stmt.scalar_subquery()
+
+    def _hydrate_facts(self, fact_ids: list[int]) -> list[Fact]:
+        """Fetch facts from DB by ID. Filtering already done at search time."""
         with self._session_factory() as session:
-            stmt = select(Fact).where(
-                Fact.id.in_(fact_ids),
-                Fact.active == True,  # noqa: E712
-            )
-
-            # Apply context filtering with glob pattern support
-            context_filter = build_context_filter(self._context_key, Fact.context_key)
-            if context_filter is not None:
-                stmt = stmt.where(context_filter)
-
-            if fact_type:
-                stmt = stmt.where(Fact.type == fact_type)
-            if categories:
-                stmt = stmt.where(Fact.category.in_(categories))
-
+            stmt = select(Fact).where(Fact.id.in_(fact_ids))
             facts = list(session.scalars(stmt).all())
             return cast(list[Fact], detach_all(facts, session))
+
+    def _build_filter(
+        self,
+        filter: EmbeddingFilter | None,
+        fact_type: str | None,
+        categories: list[str] | None,
+    ) -> EmbeddingFilter | None:
+        """Build effective filter by merging filter param with legacy params.
+
+        If both filter and legacy params are provided, they are ANDed together.
+        Does not mutate the input filter.
+        """
+        if not filter and not fact_type and not categories:
+            return None
+
+        # No legacy params to merge - return filter as-is
+        needs_merge = (fact_type or categories) and filter is not None
+        if filter is not None and not needs_merge:
+            return filter
+
+        # Create new filter, copying state from input filter if present
+        f = EmbeddingFilter()
+        if filter is not None:
+            if filter._fact_type:
+                f.fact_type(filter._fact_type)
+            if filter._categories:
+                f.categories(*filter._categories)
+            for clause in filter._clauses:
+                f.where(clause)
+
+        # Merge legacy params (only if not already set)
+        if fact_type and f._fact_type is None:
+            f.fact_type(fact_type)
+        if categories and f._categories is None:
+            f.categories(*categories)
+
+        return f
+
+    def _search_and_score(
+        self,
+        query: list[float],
+        model_name: str,
+        fetch_k: int,
+        min_similarity: float,
+        effective_filter: EmbeddingFilter | None,
+    ) -> list[ScoredEntity[Fact]]:
+        """Search embedding store with pre-filtered vector search."""
+        # Build subquery for pre-filtering (context + active + user filter)
+        entity_id_subquery = self._build_entity_id_subquery(effective_filter)
+
+        results = self._store.search(
+            query=query,
+            entity_type=self.ENTITY_TYPE,
+            model_name=model_name,
+            top_k=fetch_k,
+            min_similarity=min_similarity,
+            entity_id_subquery=entity_id_subquery,
+        )
+        if not results:
+            return []
+
+        fact_ids = [int(entity_id) for entity_id, _ in results]
+        score_map = {int(entity_id): score for entity_id, score in results}
+        facts = self._hydrate_facts(fact_ids)
+
+        scored = [ScoredEntity(entity=f, score=score_map[f.id]) for f in facts if f.id in score_map]
+        scored.sort(key=lambda x: x.score, reverse=True)
+        return scored
 
     def search_similar(
         self,
@@ -160,32 +312,32 @@ class EmbeddingAdapter:
         *,
         top_k: int = 10,
         min_similarity: float = 0.0,
+        filter: EmbeddingFilter | None = None,
         fact_type: str | None = None,
         categories: list[str] | None = None,
     ) -> list[ScoredEntity[Fact]]:
-        """Search for facts similar to a query embedding."""
-        # Over-fetch if we need to filter
-        fetch_k = top_k * 2 if (fact_type or categories) else top_k
+        """Search for facts similar to a query embedding.
 
-        results = self._store.search(
-            query=query,
-            entity_type=self.ENTITY_TYPE,
-            model_name=model_name,
-            top_k=fetch_k,
-            min_similarity=min_similarity,
-        )
-        if not results:
-            return []
+        Args:
+            query: Query embedding vector.
+            model_name: Embedding model name.
+            top_k: Maximum number of results to return.
+            min_similarity: Minimum similarity threshold.
+            filter: EmbeddingFilter for flexible filtering (recommended).
+            fact_type: Legacy filter by fact type (use filter instead).
+            categories: Legacy filter by categories (use filter instead).
 
-        # Build score map and hydrate facts
-        fact_ids = [int(entity_id) for entity_id, _ in results]
-        score_map = {int(entity_id): score for entity_id, score in results}
-        facts = self._hydrate_facts(fact_ids, fact_type, categories)
+        Returns:
+            List of facts with similarity scores, sorted by similarity.
 
-        # Build scored results, sorted by similarity
-        scored = [ScoredEntity(entity=f, score=score_map[f.id]) for f in facts if f.id in score_map]
-        scored.sort(key=lambda x: x.score, reverse=True)
-        return scored[:top_k]
+        Raises:
+            ValueError: If top_k is less than 1.
+        """
+        if top_k < 1:
+            raise ValueError(f"top_k must be at least 1, got {top_k}")
+
+        effective_filter = self._build_filter(filter, fact_type, categories)
+        return self._search_and_score(query, model_name, top_k, min_similarity, effective_filter)
 
     def delete_embedding(self, fact_id: int) -> int:
         """

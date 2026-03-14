@@ -29,6 +29,7 @@ _TRAINING_KEYS = frozenset(
         "learning_rate",
         "warmup_ratio",
         "max_seq_length",
+        "max_grad_norm",
         "logging_steps",
         "save_steps",
         "eval_split",
@@ -86,45 +87,78 @@ class Client:
         self._lg = lg
         self._storage = storage
         self._default_profiles = default_profiles or {}
+        self._manifest_cache: dict[str, Manifest] = {}  # md5 -> Manifest cache
+
+    def _extract_nested_configs(
+        self, config: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        """Extract nested lora/training sections from config, returning flat remainder."""
+        config = dict(config) if config else {}
+
+        # Validate lora/training are dicts if present
+        if "lora" in config and not isinstance(config["lora"], dict):
+            raise ValueError(f"config.lora must be a dict, got {type(config['lora']).__name__}")
+        if "training" in config and not isinstance(config["training"], dict):
+            raise ValueError(
+                f"config.training must be a dict, got {type(config['training']).__name__}"
+            )
+
+        nested_lora = config.pop("lora", {})
+        nested_training = config.pop("training", {})
+        return config, nested_lora, nested_training
 
     def _build_manifest_configs(
         self,
-        method: Literal["dpo", "sft"],
+        method: Literal["dpo", "sft", "prompt"],
         model: str | None,
         config: dict[str, Any] | None,
     ) -> tuple[DotDict, DotDict, DotDict]:
         """Build configuration objects by merging default profile with agent overrides."""
-        # Start with default profile for this method
         defaults = dict(self._default_profiles.get(method, {}))
-        # Agent config overrides defaults
-        merged = {**defaults, **(config or {})}
+        flat_config, nested_lora, nested_training = self._extract_nested_configs(config or {})
+
+        # Merge flat config with defaults
+        merged = {**defaults, **flat_config}
 
         # Map profile keys to training config keys (e.g., epochs -> num_epochs)
         for profile_key, config_key in _PROFILE_KEY_MAP.items():
             if profile_key in merged and config_key not in merged:
                 merged[config_key] = merged.pop(profile_key)
 
-        # Build training config with model info
+        # Build training config: defaults + flat keys + nested training overrides
         training_config = DotDict({k: merged[k] for k in _TRAINING_KEYS if k in merged})
+        training_config.update(nested_training)
         if model:
             training_config["requested_model"] = model
 
+        # Build lora config: defaults + nested lora overrides
         lora_config = DotDict(merged.get("lora", {}))
-        method_config = DotDict()
-        if method == "dpo":
-            method_config = DotDict(self._extract_method_config(merged, ["beta", "reference_free"]))
+        lora_config.update(nested_lora)
 
+        method_config = self._build_method_config(method, merged)
         return lora_config, training_config, method_config
+
+    def _build_method_config(
+        self, method: Literal["dpo", "sft", "prompt"], merged: dict[str, Any]
+    ) -> DotDict:
+        """Build method-specific config (beta for DPO, virtual tokens for prompt, etc.)."""
+        if method == "dpo":
+            return DotDict(self._extract_method_config(merged, ["beta"]))
+        if method == "prompt":
+            keys = ["num_virtual_tokens", "prompt_tuning_init", "prompt_tuning_init_text"]
+            return DotDict(self._extract_method_config(merged, keys))
+        return DotDict()
 
     def create(
         self,
         adapter: str,
-        method: Literal["dpo", "sft"],
+        method: Literal["dpo", "sft", "prompt"],
         data: list[dict[str, Any]],
         *,
         model: str | None = None,
         parent: Adapter | None = None,
         context_key: str | None = None,
+        schema_name: str | None = None,
         description: str | None = None,
         config: dict[str, Any] | None = None,
         deployment_policy: Literal["skip", "add", "replace"] | None = None,
@@ -133,11 +167,12 @@ class Client:
 
         Args:
             adapter: Output adapter key (series name, e.g., "my-agent-sft").
-            method: Training method ("dpo" or "sft").
+            method: Training method ("dpo", "sft", or "prompt").
             data: List of training records (inline data).
             model: Optional base model (can be specified at training time via --model).
             parent: Parent adapter for lineage (continue training from this).
             context_key: Agent context key for provenance.
+            schema_name: Database schema where training data originated.
             description: Human-readable description.
             config: Override training configuration (num_epochs, etc.).
             deployment_policy: Deployment policy after training:
@@ -148,7 +183,7 @@ class Client:
         Returns:
             Manifest instance.
         """
-        source = Source(context_key=context_key, description=description)
+        source = Source(context_key=context_key, schema_name=schema_name, description=description)
         lora_config, training_config, method_config = self._build_manifest_configs(
             method, model, config
         )
@@ -274,6 +309,32 @@ class Client:
             adapter: Adapter = manifest.output.adapter
             return adapter
         return None
+
+    def get_manifest(self, md5: str) -> Manifest | None:
+        """Get a completed manifest by adapter md5.
+
+        Use this to look up the manifest for a deployed adapter, e.g., to
+        determine which schema the adapter's training data came from.
+
+        Results are cached since manifests don't change at runtime.
+
+        Args:
+            md5: MD5 hash of adapter weights (32 char hex).
+
+        Returns:
+            Manifest if found, None otherwise.
+
+        Example:
+            manifest = client.get_manifest("e6a8a798834d1c5f9b2a3e4d5f6a7b8c")
+            schema = manifest.source.schema_name if manifest and manifest.source else None
+        """
+        if md5 in self._manifest_cache:
+            return self._manifest_cache[md5]
+
+        manifest = self._storage.find_adapter_by_md5(md5)
+        if manifest:
+            self._manifest_cache[md5] = manifest
+        return manifest
 
     def get_latest_completed(
         self, adapter: str | None = None, context_key: str | None = None

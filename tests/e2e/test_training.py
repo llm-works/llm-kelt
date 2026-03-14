@@ -115,6 +115,70 @@ class TestLoraTraining:
 
 
 @pytest.mark.training
+class TestPromptTuning:
+    """E2E tests for Prompt Tuning training."""
+
+    def test_train_prompt_produces_valid_adapter(
+        self,
+        logger,
+        sft_training_data: Path,
+        local_model_path: Path,
+        fast_prompt_config,
+        fast_training_config,
+        tmp_path: Path,
+    ):
+        """Train prompt tuning adapter and verify it produces valid outputs."""
+        from peft import PeftModel
+        from transformers import AutoModelForCausalLM
+
+        from llm_kelt.training.prompt import Trainer
+
+        output_dir = tmp_path / "prompt_output"
+
+        trainer = Trainer(
+            lg=logger,
+            data_path=sft_training_data,
+            output_dir=output_dir,
+            base_model=str(local_model_path),
+            prompt_config=fast_prompt_config,
+            training_config=fast_training_config,
+            quantize=False,
+        )
+        result = trainer.train()
+
+        # Verify result structure
+        assert Path(result.adapter.path).exists(), "Adapter path should exist"
+        assert result.method == "prompt"
+        assert result.base_model == str(local_model_path)
+        assert result.samples_trained > 0
+
+        # Verify adapter files exist
+        adapter_config = Path(result.adapter.path) / "adapter_config.json"
+        assert adapter_config.exists(), "adapter_config.json should exist"
+
+        # Verify config was stored
+        assert "prompt_tuning" in result.config
+        assert (
+            result.config["prompt_tuning"]["num_virtual_tokens"]
+            == fast_prompt_config.num_virtual_tokens
+        )
+
+        # Verify adapter can be loaded
+        base_model = AutoModelForCausalLM.from_pretrained(
+            str(local_model_path),
+            device_map="auto",
+            trust_remote_code=True,
+        )
+        loaded_model = PeftModel.from_pretrained(base_model, result.adapter.path)
+        assert loaded_model is not None, "Should be able to load adapter"
+
+        # Verify it's a prompt tuning adapter with correct config
+        peft_config = loaded_model.peft_config["default"]
+        assert peft_config.peft_type.value == "PROMPT_TUNING"
+        assert peft_config.num_virtual_tokens == fast_prompt_config.num_virtual_tokens
+
+
+@pytest.mark.training
 class TestDpoTraining:
     """E2E tests for DPO training."""
 
@@ -143,7 +207,6 @@ class TestDpoTraining:
             lora_config=fast_lora_config,
             training_config=fast_training_config,
             quantize=False,
-            reference_free=True,  # Skip reference model to save GPU memory when vLLM is running
         )
 
         # Verify result structure

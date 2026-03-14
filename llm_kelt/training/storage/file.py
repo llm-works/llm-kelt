@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 import re
 import shutil
 from datetime import datetime
@@ -120,6 +121,17 @@ class FileStorage(Storage):
             raise FileNotFoundError(f"Manifest not found: {adapter}")
         pending_file.unlink()
 
+    def _link_manifest_to_adapter(self, key: str, md5: str, manifest_file: Path) -> None:
+        """Create symlink from adapter directory to its completed manifest."""
+        version_id = self._find_version_by_md5(key, md5)
+        if not version_id:
+            return
+        adapter_dir = self.adapters_path / key / version_id
+        manifest_link = adapter_dir / "manifest"
+        if not manifest_link.exists():
+            rel_path = os.path.relpath(manifest_file, adapter_dir)
+            manifest_link.symlink_to(rel_path)
+
     def complete_manifest(self, manifest: Manifest) -> None:
         """Move a manifest to completed storage."""
         from ..manifest.loader import save_manifest
@@ -138,6 +150,9 @@ class FileStorage(Storage):
             )
         completed_file = self.completed_path / f"{manifest.adapter}-{suffix}.yaml.gz"
         save_manifest(manifest, completed_file, compress=True)
+
+        if md5:
+            self._link_manifest_to_adapter(manifest.adapter, md5, completed_file)
 
         # Remove from pending if it exists
         pending_file = self.pending_path / f"{manifest.adapter}.yaml"
@@ -167,12 +182,49 @@ class FileStorage(Storage):
                 )
         return manifests
 
-    def find_adapter_by_md5(self, md5: str) -> Manifest | None:
-        """Find a completed manifest by adapter MD5."""
-        for manifest in self.list_completed_manifests():
-            if manifest.output and manifest.output.adapter and manifest.output.adapter.md5 == md5:
-                return manifest
+    def _normalize_md5(self, md5: object) -> str | None:
+        """Normalize and validate MD5 input. Returns 12-char hex or None if invalid."""
+        if not isinstance(md5, str):
+            self._lg.warning("invalid md5 type", extra={"md5": md5, "type": type(md5).__name__})
+            return None
+        md5 = md5.lower()
+        if re.fullmatch(r"[a-f0-9]{32}", md5):
+            return md5[:12]  # Truncate full MD5 to 12-char prefix used in filenames
+        if re.fullmatch(r"[a-f0-9]{12}", md5):
+            return md5
+        self._lg.warning("invalid md5 format", extra={"md5": md5})
         return None
+
+    def find_adapter_by_md5(self, md5: str) -> Manifest | None:
+        """Find a completed manifest by adapter MD5.
+
+        Uses filename glob (*-{md5}.yaml.gz) for O(1) lookup, and streams only
+        metadata (stops before data records) for fast lineage lookups.
+
+        Args:
+            md5: Hex MD5 hash (12 or 32 chars). Invalid input returns None.
+        """
+        from ..manifest.loader import load_manifest_metadata
+
+        if not self.completed_path.exists():
+            return None
+        if (normalized := self._normalize_md5(md5)) is None:
+            return None
+
+        # md5 is in filename: {adapter}-{md5}.yaml.gz
+        matches = sorted(self.completed_path.glob(f"*-{normalized}.yaml.gz"))
+        if not matches:
+            matches = sorted(self.completed_path.glob(f"*-{normalized}.yaml"))
+        if not matches:
+            return None
+
+        try:
+            return load_manifest_metadata(matches[0])
+        except Exception as e:
+            self._lg.warning(
+                "failed to load manifest", extra={"path": str(matches[0]), "error": str(e)}
+            )
+            return None
 
     # =========================================================================
     # Adapter Operations (ABC implementation)
@@ -310,7 +362,7 @@ class FileStorage(Storage):
         if md5 != "unknown":
             self._check_duplicate_md5(key, md5)
 
-        version_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{md5[:8]}"
+        version_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{md5}"
         adapter_path = self._copy_adapter_files(source, key, version_id)
 
         self._write_adapter_result_config(

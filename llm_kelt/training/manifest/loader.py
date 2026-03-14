@@ -6,14 +6,12 @@ Handles YAML serialization of training manifests and data resolution.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
 from appinfra import DotDict
-
-from llm_kelt.core.base import utc_now
 
 from ..schema import Adapter, RunResult
 from .errors import CorruptedManifestError
@@ -23,7 +21,7 @@ from .schema import Data, Deployment, Manifest, Source
 def _parse_datetime(value: str | datetime | None) -> datetime:
     """Parse datetime from string or pass through."""
     if value is None:
-        return utc_now()
+        return datetime.now(UTC)
     if isinstance(value, datetime):
         return value
     return datetime.fromisoformat(value)
@@ -40,14 +38,35 @@ def _read_yaml_file(path: Path) -> Any:
         return yaml.safe_load(f)
 
 
+def _read_yaml_metadata(path: Path) -> Any:
+    """Read YAML metadata only, stopping before data records.
+
+    Streams gzip decompression and stops at 'data:' section to avoid
+    decompressing hundreds of training records when only metadata is needed.
+    """
+    import gzip
+
+    lines: list[str] = []
+    opener = gzip.open if path.suffix == ".gz" else open
+
+    with opener(path, "rt", encoding="utf-8") as f:  # type: ignore[call-overload]
+        for line in f:
+            # Stop when we hit the data section (top-level key, no indent)
+            if line.startswith("data:"):
+                break
+            lines.append(line)
+
+    return yaml.safe_load("".join(lines))
+
+
 def _validate_required_fields(data: dict[str, Any]) -> None:
     """Validate required manifest fields."""
     if not data.get("adapter"):
         raise ValueError("Manifest missing required field: adapter")
     if not data.get("method"):
         raise ValueError("Manifest missing required field: method")
-    if data["method"] not in ("dpo", "sft"):
-        raise ValueError(f"Invalid method: {data['method']}. Must be 'dpo' or 'sft'")
+    if data["method"] not in ("dpo", "sft", "prompt"):
+        raise ValueError(f"Invalid method: {data['method']}. Must be 'dpo', 'sft', or 'prompt'")
     if not data.get("data"):
         raise ValueError("Manifest missing required field: data")
 
@@ -117,6 +136,29 @@ def load_manifest(path: Path) -> Manifest:
     return _build_manifest(data, source_path=path.resolve())
 
 
+def load_manifest_metadata(path: Path) -> Manifest:
+    """Load manifest metadata only, skipping training data records.
+
+    Much faster than load_manifest() for large files - streams gzip and stops
+    before decompressing the data section. Use when you only need adapter info,
+    parent lineage, or output metadata.
+
+    The returned Manifest has data=Data() (empty) and should not be used for training.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"Manifest not found: {path}")
+    if path.stat().st_size == 0:
+        raise CorruptedManifestError(path, "file is empty")
+
+    data = _read_yaml_metadata(path)
+    if not isinstance(data, dict):
+        raise CorruptedManifestError(path, f"expected dict, got {type(data).__name__}")
+
+    # Build manifest with empty data (metadata-only)
+    data["data"] = {"format": "external", "path": "(metadata-only)"}
+    return _build_manifest(data, source_path=path.resolve())
+
+
 def _serialize_datetime(dt: datetime) -> str:
     """Serialize datetime to ISO format string."""
     return dt.isoformat()
@@ -174,46 +216,52 @@ def _build_data_section(manifest: Manifest) -> dict[str, Any]:
 
 
 def _build_training_section(manifest: Manifest) -> dict[str, Any]:
-    """Build training section dict for YAML serialization."""
+    """Build training section dict for YAML serialization (config only)."""
     _, training_config = _get_effective_config(manifest)
-    # Make a copy to avoid mutating the manifest's config
-    training_dict: dict[str, Any] = dict(training_config)
-    output = manifest.get("output")
-    if output is not None:
-        training_dict["output"] = _build_output_dict(output)
-    return training_dict
+    return dict(training_config)
+
+
+def _add_provenance_fields(data: dict[str, Any], manifest: Manifest) -> None:
+    """Add source and parent fields to data dict if present."""
+    source = manifest.get("source")
+    if source and (
+        source.get("context_key") or source.get("schema_name") or source.get("description")
+    ):
+        data["source"] = dict(source)
+    parent = manifest.get("parent")
+    if parent is not None:
+        data["parent"] = dict(parent)
+
+
+def _add_method_and_deployment(data: dict[str, Any], manifest: Manifest) -> None:
+    """Add method-specific config and deployment fields to data dict if present."""
+    method_config = manifest.get("method_config")
+    if method_config:
+        data[manifest.get("method")] = dict(method_config)
+    deployment = manifest.get("deployment")
+    if deployment and deployment.get("policy"):
+        data["deployment"] = dict(deployment)
 
 
 def _build_manifest_dict(manifest: Manifest) -> dict[str, Any]:
     """Build dict from Manifest for YAML serialization."""
-    created_at = manifest.get("created_at") or utc_now()
+    created_at = manifest.get("created_at") or datetime.now(UTC)
     data: dict[str, Any] = {
         "version": manifest.get("version", 1),
         "created_at": _serialize_datetime(created_at),
         "method": manifest.get("method"),
         "adapter": manifest.get("adapter"),
     }
-
-    source = manifest.get("source")
-    if source and (source.get("context_key") or source.get("description")):
-        data["source"] = dict(source)
-
-    parent = manifest.get("parent")
-    if parent is not None:
-        data["parent"] = dict(parent)
+    _add_provenance_fields(data, manifest)
 
     lora_config, _ = _get_effective_config(manifest)
     data["lora"] = lora_config
     data["training"] = _build_training_section(manifest)
+    _add_method_and_deployment(data, manifest)
 
-    method_config = manifest.get("method_config")
-    if method_config:
-        data[manifest.get("method")] = dict(method_config)
-
-    deployment = manifest.get("deployment")
-    if deployment and deployment.get("policy"):
-        data["deployment"] = dict(deployment)
-
+    output = manifest.get("output")
+    if output is not None:
+        data["output"] = _build_output_dict(output)
     data["data"] = _build_data_section(manifest)
     return data
 
@@ -321,18 +369,34 @@ def _validate_hyperparams(training: dict, lora: dict) -> list[str]:
 _VALID_DEPLOYMENT_POLICIES = frozenset(["skip", "add", "replace"])
 
 
-def validate_manifest(manifest: Manifest) -> list[str]:
-    """Validate a training manifest."""
+def _validate_prompt_config(method_config: dict) -> list[str]:
+    """Validate prompt tuning specific configuration."""
     errors: list[str] = []
+    num_virtual_tokens = method_config.get("num_virtual_tokens", 20)
+    prompt_tuning_init = method_config.get("prompt_tuning_init", "TEXT")
+    prompt_tuning_init_text = method_config.get("prompt_tuning_init_text", "")
+    if num_virtual_tokens <= 0:
+        errors.append(f"num_virtual_tokens must be positive, got {num_virtual_tokens}")
+    if prompt_tuning_init not in ("TEXT", "RANDOM"):
+        errors.append(f"prompt_tuning_init must be 'TEXT' or 'RANDOM', got {prompt_tuning_init}")
+    if prompt_tuning_init == "TEXT" and not prompt_tuning_init_text:
+        errors.append("prompt_tuning_init_text is required when prompt_tuning_init='TEXT'")
+    return errors
 
+
+def _validate_core_fields(manifest: Manifest) -> list[str]:
+    """Validate required manifest fields: adapter, method, deployment, data."""
+    errors: list[str] = []
     adapter = manifest.get("adapter", "")
     method = manifest.get("method", "")
     data = manifest.get("data") or Data()
 
     if not adapter:
         errors.append("adapter is required")
-    if method not in ("dpo", "sft"):
-        errors.append(f"method must be 'dpo' or 'sft', got '{method}'")
+    if method not in ("dpo", "sft", "prompt"):
+        errors.append(f"method must be 'dpo', 'sft', or 'prompt', got '{method}'")
+    if adapter and ("/" in adapter or "\\" in adapter or ".." in adapter):
+        errors.append(f"Invalid adapter key: {adapter}")
 
     deployment = manifest.get("deployment") or Deployment()
     policy = deployment.get("policy")
@@ -344,12 +408,19 @@ def validate_manifest(manifest: Manifest) -> list[str]:
     elif data.get("format") == "external" and not data.get("path"):
         errors.append("External data requires a path")
 
-    if adapter and ("/" in adapter or "\\" in adapter or ".." in adapter):
-        errors.append(f"Invalid adapter key: {adapter}")
+    return errors
+
+
+def validate_manifest(manifest: Manifest) -> list[str]:
+    """Validate a training manifest."""
+    errors = _validate_core_fields(manifest)
 
     training = manifest.get("training") or {}
     lora = manifest.get("lora") or {}
     errors.extend(_validate_hyperparams(training, lora))
+
+    if manifest.get("method") == "prompt":
+        errors.extend(_validate_prompt_config(manifest.get("method_config") or {}))
 
     return errors
 

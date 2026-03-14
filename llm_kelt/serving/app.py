@@ -10,6 +10,7 @@ from .routes import create_router
 
 
 def create_server(
+    lg: Logger,
     kelt_client: Client,
     model_name: str = "llm-kelt-proxy",
     host: str = "0.0.0.0",
@@ -18,6 +19,7 @@ def create_server(
     """Create server with kelt-enhanced LLM proxy.
 
     Args:
+        lg: Logger instance.
         kelt_client: Configured Client instance.
         model_name: Model name to report in responses.
         host: Host to bind to.
@@ -38,7 +40,7 @@ def create_server(
         context = ClientContext(context_key="my-agent")
         kelt_client = factory.create_from_config(context=context, config=config)
 
-        server = create_server(kelt_client)
+        server = create_server(lg, kelt_client)
         server.start()
     """
     # Ensure LLM client is configured
@@ -53,7 +55,7 @@ def create_server(
     )
 
     return (
-        ServerBuilder("llm-kelt-proxy")
+        ServerBuilder(lg, "llm-kelt-proxy")
         .with_host(host)
         .with_port(port)
         .with_title("llm-kelt Proxy")
@@ -102,6 +104,7 @@ def create_server_from_config(config: dict, lg: Logger | None = None) -> Server:
     )
 
     return create_server(
+        lg=lg,
         kelt_client=kelt_client,
         model_name=proxy_config.get("model_name", "llm-kelt-proxy"),
         host=proxy_config.get("host", config.get("host", "0.0.0.0")),

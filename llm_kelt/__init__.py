@@ -51,8 +51,8 @@ Usage:
 """
 
 from .client import Client
-from .core.exceptions import (
-    ConfigurationError,
+from .core.errors import (
+    ConfigError,
     ConflictError,
     DatabaseError,
     KeltError,
@@ -70,7 +70,7 @@ __all__ = [
     "ValidationError",
     "NotFoundError",
     "DatabaseError",
-    "ConfigurationError",
+    "ConfigError",
     "ConflictError",
     "SchemaVersionError",
     "ClientContext",

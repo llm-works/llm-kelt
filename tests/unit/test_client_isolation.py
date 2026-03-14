@@ -17,6 +17,7 @@ class TestClientIsolation:
         db = Mock()
         db.session = MagicMock()
         db.engine = Mock()
+        db.schema = None  # Match default ClientContext.schema_name
         return db
 
     @pytest.fixture
@@ -119,6 +120,9 @@ class TestClientIsolation:
         """Test that with_isolation() can explicitly clear a field to None."""
         from unittest.mock import patch
 
+        # Set mock database schema to match context
+        mock_database.schema = "customer_acme"
+
         # Create client with both fields set
         with patch.object(Client, "_verify_schema"):
             with patch.object(Client, "_setup_stores"):
@@ -134,7 +138,8 @@ class TestClientIsolation:
         with patch.object(Client, "_verify_schema"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
-                    new_client = client.with_isolation(context_key=None)
+                    with patch.object(Client, "_ensure_schema_config"):
+                        new_client = client.with_isolation(context_key=None)
 
         # context_key should be None, schema_name preserved
         assert new_client.context.context_key is None

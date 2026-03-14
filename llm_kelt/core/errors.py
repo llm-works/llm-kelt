@@ -25,7 +25,7 @@ class DatabaseError(KeltError):
     pass
 
 
-class ConfigurationError(KeltError):
+class ConfigError(KeltError):
     """Raised when configuration is invalid or missing."""
 
     pass

@@ -2,14 +2,13 @@
 
 import hashlib
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar, cast
 
 from appinfra.db.utils import detach, detach_all
 from appinfra.log import Logger
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-
-from llm_kelt.core.base import utc_now
 
 from ..models import Fact
 
@@ -214,7 +213,7 @@ class FactClient(Generic[T]):
             if fact is None:
                 return False
             fact.active = False
-            fact.updated_at = utc_now()
+            fact.updated_at = datetime.now(UTC)
             return True
 
     def activate(self, fact_id: int) -> bool:
@@ -232,7 +231,7 @@ class FactClient(Generic[T]):
             if fact is None:
                 return False
             fact.active = True
-            fact.updated_at = utc_now()
+            fact.updated_at = datetime.now(UTC)
             return True
 
     def exists(self, fact_id: int) -> bool:

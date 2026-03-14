@@ -92,7 +92,8 @@ class ClientFactory:
                 min_confidence: 0.0
               default_system_prompt: ""
         """
-        db = Database(self._lg, PG(self._lg, config.dbs[db_key]))
+        pg = PG(self._lg, config.dbs[db_key], schema=context.schema_name)
+        db = Database(self._lg, pg)
         return Client(
             database=db,
             context=context,

@@ -1,7 +1,7 @@
 """Manifest runner - execute training from manifest files.
 
 Thin dispatcher that loads a manifest and delegates to the appropriate
-training client (DPO or SFT) based on the manifest method.
+training client (DPO, SFT, or Prompt Tuning) based on the manifest method.
 """
 
 from __future__ import annotations
@@ -98,6 +98,13 @@ class Runner:
                 manifest, register=not skip_registration
             )
 
+        if manifest.method == "prompt":
+            from .prompt import Client as PromptClient
+
+            return PromptClient(self._lg, self._storage).train(
+                manifest, register=not skip_registration
+            )
+
         # Fall through to SFT (method already validated by validate_manifest)
         from .sft import Client as SftClient
 
@@ -133,6 +140,7 @@ class Runner:
         manifest_path: Path,
         skip_registration: bool = False,
         model_override: str | None = None,
+        lora_profile: str | None = None,
     ) -> RunResult:
         """Execute training from a manifest file.
 
@@ -140,6 +148,8 @@ class Runner:
             manifest_path: Path to manifest YAML file.
             skip_registration: If True, don't register adapter to registry.
             model_override: Override manifest model (path, HF ID, or name to resolve).
+            lora_profile: LoRA profile override ("small", "medium", "large", "xlarge").
+                If None, auto-detects from model size (aborts if detection fails).
 
         Returns:
             RunResult with adapter metadata, metrics, and training info.
@@ -154,6 +164,13 @@ class Runner:
         # Resolve effective model and store in training config
         base_model = self._get_effective_model(manifest, model_override)
         manifest.training["base_model"] = base_model
+        if lora_profile is not None:
+            from .profiles import MODEL_SIZE_PROFILES
+
+            if lora_profile not in MODEL_SIZE_PROFILES:
+                valid = ", ".join(sorted(MODEL_SIZE_PROFILES.keys()))
+                raise ValueError(f"Invalid lora_profile '{lora_profile}'. Valid values: {valid}")
+            manifest.training["lora_profile"] = lora_profile
 
         result = self._dispatch_training(manifest, skip_registration)
         result = self._enrich_adapter(result)

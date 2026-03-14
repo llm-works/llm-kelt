@@ -5,19 +5,37 @@ Trains the model to prefer "chosen" responses over "rejected" ones.
 """
 
 import json
-from datetime import datetime
+import math
+from datetime import UTC, datetime
 from pathlib import Path
 
 from appinfra import DotDict
 from appinfra.log import Logger
 
-from llm_kelt.core.base import utc_now
-
 from ..lora import Config as LoraConfig
 from ..model import build_training_config
-from ..schema import Adapter, RunResult
+from ..schema import TRAINING_CONFIG_KEYS, Adapter, RunResult
+from ..stability import check_training_stability, log_stability_warnings
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+
+
+def _to_chat_format(record: dict) -> dict:
+    """Convert raw prompt/chosen/rejected strings to chat message format.
+
+    TRL's DPOTrainer expects message lists for proper chat template handling:
+    - prompt: list of user messages
+    - chosen: list of assistant messages (the preferred response)
+    - rejected: list of assistant messages (the rejected response)
+
+    This ensures consistent tokenization when DPOTrainer compares
+    prompt vs prompt+response.
+    """
+    return {
+        "prompt": [{"role": "user", "content": record["prompt"]}],
+        "chosen": [{"role": "assistant", "content": record["chosen"]}],
+        "rejected": [{"role": "assistant", "content": record["rejected"]}],
+    }
 
 
 def _load_dpo_dataset(data_path: Path, eval_split: float):
@@ -28,7 +46,8 @@ def _load_dpo_dataset(data_path: Path, eval_split: float):
     with data_path.open("r", encoding="utf-8") as f:
         for line in f:
             if line.strip():
-                records.append(json.loads(line))
+                raw = json.loads(line)
+                records.append(_to_chat_format(raw))
 
     if not records:
         raise ValueError(f"No records found in {data_path}")
@@ -55,7 +74,6 @@ class Trainer:
         training_config: DotDict | None = None,
         beta: float = 0.1,
         quantize: bool | None = None,
-        reference_free: bool = False,
         parent: Adapter | None = None,
     ):
         self._lg = lg
@@ -66,7 +84,6 @@ class Trainer:
         self.training_config = build_training_config(lg, base_model, training_config)
         self.beta = beta
         self._quantize_override = quantize  # None = auto-detect
-        self.reference_free = reference_free
         self.parent = parent
         self._init_state()
 
@@ -79,7 +96,8 @@ class Trainer:
         self.train_dataset = None
         self.eval_dataset = None
         self._quant_config = None
-        self._applied_quantization = False
+        self._is_quantized = False
+        self._use_stacked_adapters = False  # True when parent adapter is stacked with DPO
 
     def _load_tokenizer(self):
         """Load tokenizer for the base model."""
@@ -91,12 +109,28 @@ class Trainer:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
     def _apply_lora_adapter(self):
-        """Apply LoRA adapter - load existing or create new."""
+        """Apply LoRA adapter - load existing or create new.
+
+        When parent adapter exists, uses adapter copying for VRAM efficiency:
+        - Parent loaded as "default" adapter (policy, trainable)
+        - Copy created as "ref" adapter (reference, frozen)
+        - TRL automatically uses "ref" for reference logits
+        - Single model, no second model needed
+        """
         from peft import PeftModel, get_peft_model
 
         if self.parent is not None:
-            self._lg.info(f"loading existing adapter: {self.parent.path}")
-            self.model = PeftModel.from_pretrained(self.model, self.parent.path, is_trainable=True)
+            # Load parent as trainable "default" (policy)
+            self._lg.info(f"loading parent adapter as 'default' (trainable): {self.parent.path}")
+            self.model = PeftModel.from_pretrained(
+                self.model, self.parent.path, adapter_name="default", is_trainable=True
+            )
+
+            # Copy to frozen "ref" for TRL's reference logits
+            self._lg.info("copying to 'ref' adapter (frozen) for reference")
+            self.model.load_adapter(self.parent.path, adapter_name="ref", is_trainable=False)
+            self._use_stacked_adapters = True
+            self.model.set_adapter("default")  # Ensure default is active
         else:
             peft_config = self.lora_config.to_peft_config()
             self.model = get_peft_model(self.model, peft_config)
@@ -117,9 +151,10 @@ class Trainer:
         self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
 
-        self._quant_config, self._applied_quantization = get_quantization_config(
+        self._quant_config, _ = get_quantization_config(
             self._lg, self.base_model, self._quantize_override
         )
+        self._is_quantized = self._quant_config is not None
         self.model = AutoModelForCausalLM.from_pretrained(
             self.base_model,
             quantization_config=self._quant_config,
@@ -130,47 +165,22 @@ class Trainer:
 
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
-        if self._applied_quantization:
+        if self._is_quantized:
             self.model = prepare_model_for_kbit_training(self.model)
 
         self._apply_lora_adapter()
 
-    def _load_reference_model(self):
-        """Load reference model for DPO (unless reference-free mode).
+    def _log_reference_strategy(self):
+        """Log reference model strategy for DPO.
 
-        DPO requires comparing policy model outputs against a reference model.
-        Loading a separate reference model uses more VRAM but produces correct
-        gradients. The reference_free option skips this to save memory at the
-        cost of training quality.
-
-        IMPORTANT: When training on top of an existing adapter (parent),
-        the reference model MUST also have that adapter applied (frozen).
-        Otherwise DPO compares against the wrong baseline.
+        - Parent adapter exists: "ref" adapter already created in _apply_lora_adapter().
+          TRL will automatically use it for reference logits. No second model needed.
+        - No parent: TRL uses implicit reference via disable_adapter() automatically.
         """
-        if self.reference_free:
-            self._lg.info("reference-free mode: skipping reference model")
-            return
-
-        import torch
-        from transformers import AutoModelForCausalLM
-
-        self._lg.info("loading reference model for DPO")
-        self.ref_model = AutoModelForCausalLM.from_pretrained(
-            self.base_model,
-            quantization_config=self._quant_config,
-            device_map="auto",
-            torch_dtype=torch.bfloat16 if self._quant_config is None else None,
-            trust_remote_code=True,
-        )
-
-        # Apply the same adapter to reference model (frozen) if training on top of one
-        if self.parent is not None:
-            from peft import PeftModel
-
-            self._lg.info(f"applying adapter to reference model (frozen): {self.parent.path}")
-            self.ref_model = PeftModel.from_pretrained(
-                self.ref_model, self.parent.path, is_trainable=False
-            )
+        if self._use_stacked_adapters:
+            self._lg.info("using 'ref' adapter for reference (frozen copy of parent)")
+        else:
+            self._lg.info("using implicit reference via disable_adapter()")
 
     def _load_data(self):
         """Load training and eval datasets."""
@@ -181,33 +191,62 @@ class Trainer:
         if self.eval_dataset:
             self._lg.info(f"loaded {len(self.eval_dataset)} eval pairs")
 
+    def _calculate_warmup_steps(self) -> int:
+        """Calculate warmup steps from warmup ratio and training config."""
+        tc = self.training_config
+        if tc.batch_size <= 0 or tc.gradient_accumulation_steps <= 0:
+            raise ValueError("batch_size and gradient_accumulation_steps must be positive")
+
+        steps_per_epoch = max(
+            1, math.ceil(len(self.train_dataset) / (tc.batch_size * tc.gradient_accumulation_steps))
+        )
+        total_steps = steps_per_epoch * tc.num_epochs
+        warmup_steps = int(total_steps * tc.warmup_ratio)
+        # Ensure at least 1 warmup step when ratio > 0
+        if tc.warmup_ratio > 0 and warmup_steps == 0:
+            warmup_steps = 1
+        return warmup_steps
+
+    def _base_training_args(self) -> dict:
+        """Build base training arguments from config."""
+        tc = self.training_config
+        return dict(
+            output_dir=str(self.output_dir),
+            num_train_epochs=tc.num_epochs,
+            per_device_train_batch_size=tc.batch_size,
+            gradient_accumulation_steps=tc.gradient_accumulation_steps,
+            learning_rate=tc.learning_rate,
+            warmup_steps=self._calculate_warmup_steps(),
+            max_grad_norm=tc.max_grad_norm,
+            logging_steps=tc.logging_steps,
+            save_steps=tc.save_steps,
+            save_total_limit=2,
+            fp16=tc.fp16,
+            bf16=tc.bf16,
+            gradient_checkpointing=tc.gradient_checkpointing,
+            seed=tc.seed,
+            report_to="none",
+            optim="paged_adamw_8bit",
+            max_length=tc.max_seq_length,
+            neftune_noise_alpha=tc.neftune_noise_alpha,
+        )
+
     def _create_training_args(self):
         """Create DPO training arguments."""
         from trl import DPOConfig
 
-        return DPOConfig(
-            output_dir=str(self.output_dir),
-            num_train_epochs=self.training_config.num_epochs,
-            per_device_train_batch_size=self.training_config.batch_size,
-            gradient_accumulation_steps=self.training_config.gradient_accumulation_steps,
-            learning_rate=self.training_config.learning_rate,
-            warmup_ratio=self.training_config.warmup_ratio,
-            logging_steps=self.training_config.logging_steps,
-            save_steps=self.training_config.save_steps,
-            save_total_limit=2,
-            fp16=self.training_config.fp16,
-            bf16=self.training_config.bf16,
-            gradient_checkpointing=self.training_config.gradient_checkpointing,
-            seed=self.training_config.seed,
+        config_args = self._base_training_args()
+        config_args.update(
             eval_strategy="steps" if self.eval_dataset else "no",
             eval_steps=self.training_config.save_steps if self.eval_dataset else None,
             load_best_model_at_end=self.eval_dataset is not None,
-            report_to="none",
-            optim="paged_adamw_8bit",
             beta=self.beta,
-            max_length=self.training_config.max_seq_length,
-            max_prompt_length=self.training_config.max_seq_length // 2,
         )
+        if self._use_stacked_adapters:
+            config_args["model_adapter_name"] = "default"
+            config_args["ref_adapter_name"] = "ref"
+
+        return DPOConfig(**config_args)
 
     def _create_trainer(self):
         """Create the DPOTrainer."""
@@ -221,6 +260,47 @@ class Trainer:
             eval_dataset=self.eval_dataset,
             processing_class=self.tokenizer,
         )
+
+        # Use implicit reference via disable_adapter() when no parent adapter
+        # (TRL automatically uses "ref" adapter when it exists, so no action needed
+        # for stacked adapters case)
+        if self.ref_model is None and self.parent is None:
+            self._enable_implicit_reference()
+
+    def _enable_implicit_reference(self):
+        """Enable implicit reference by removing TRL's 'ref' adapter.
+
+        When ref_model=None with a PeftModel, TRL creates a 'ref' adapter as a copy
+        of the 'default' adapter. During training, TRL uses this frozen 'ref' adapter
+        for reference logits.
+
+        For DPO on a merged model (SFT baked into base), we want the reference to be
+        the base model itself, not a copy of fresh adapter weights. By removing the
+        'ref' adapter, TRL falls back to using disable_adapter() which gives us the
+        correct reference: the base model with any merged weights.
+
+        See TRL's use_adapter() in trainer/utils.py - when adapter_name=None,
+        it calls model.disable_adapter() as a context manager.
+        """
+        from peft import PeftModel
+
+        if not isinstance(self.model, PeftModel):
+            return
+
+        # Derive ref adapter name from trainer config, fallback to "ref"
+        ref_name = None
+        if self.trainer is not None and hasattr(self.trainer, "ref_adapter_name"):
+            ref_name = self.trainer.ref_adapter_name
+        ref_name = ref_name or "ref"
+
+        # Delete the ref adapter if it exists
+        if ref_name in self.model.peft_config:
+            self._lg.info(f"using implicit reference: removing '{ref_name}' adapter")
+            self.model.delete_adapter(ref_name)
+
+        # Always clear trainer binding so TRL uses disable_adapter() path
+        if self.trainer is not None and hasattr(self.trainer, "ref_adapter_name"):
+            self.trainer.ref_adapter_name = None
 
     def _extract_dpo_metrics(self, dpo_logs: list) -> dict:
         """Extract DPO-specific metrics (accuracy, margins, loss) from first/last logs."""
@@ -236,21 +316,26 @@ class Trainer:
             "loss_start": first_log.get("loss", 0.0),
         }
 
+    def _add_stability_warnings(self, metrics: dict, log_history: list[dict]) -> None:
+        """Check for training instability and add warnings to metrics."""
+        stability_report = check_training_stability(log_history)
+        log_stability_warnings(self._lg, stability_report)
+        if not stability_report.stable:
+            metrics["unstable"] = True
+            metrics["stability_warnings"] = stability_report.warnings
+
     def _collect_metrics(self) -> dict:
         """Extract training metrics from trainer log history."""
         if self.trainer is None or not self.trainer.state.log_history:
             return {}
 
         log_history = self.trainer.state.log_history
-        # Cap history to avoid bloating manifests (same as SFT trainer)
         capped_history = log_history[-100:]
         metrics: dict = {"history": capped_history}
 
-        # DPO-specific metrics (exclude final summary which only has train_loss)
         dpo_logs = [log for log in capped_history if "rewards/accuracies" in log]
         metrics.update(self._extract_dpo_metrics(dpo_logs))
 
-        # Overall train loss from final summary
         final_log = log_history[-1]
         metrics["train_loss"] = final_log.get("train_loss", final_log.get("loss", 0.0))
         metrics["train_runtime"] = final_log.get("train_runtime", 0.0)
@@ -258,9 +343,11 @@ class Trainer:
         metrics["epoch"] = final_log.get("epoch", 0.0)
 
         if self.eval_dataset:
-            # Runs full evaluation pass - adds GPU overhead but provides eval_loss metric
             metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
+            # Re-capture history to include eval entries added by evaluate()
+            metrics["history"] = self.trainer.state.log_history[-100:]
 
+        self._add_stability_warnings(metrics, log_history)
         return metrics
 
     def _save_and_collect_metrics(self) -> tuple[Path, dict]:
@@ -292,18 +379,14 @@ class Trainer:
                     "lora_alpha": self.lora_config.lora_alpha,
                     "lora_dropout": self.lora_config.lora_dropout,
                     "target_modules": self.lora_config.target_modules,
+                    "use_rslora": self.lora_config.use_rslora,
                 },
-                "training": {
-                    "num_epochs": self.training_config.num_epochs,
-                    "batch_size": self.training_config.batch_size,
-                    "learning_rate": self.training_config.learning_rate,
-                    "max_seq_length": self.training_config.max_seq_length,
-                },
-                "dpo": {"beta": self.beta, "reference_free": self.reference_free},
-                "quantized": self._applied_quantization,
+                "training": {k: self.training_config[k] for k in TRAINING_CONFIG_KEYS},
+                "dpo": {"beta": self.beta},
+                "quantized": self._is_quantized,
             },
             started_at=started_at,
-            completed_at=utc_now(),
+            completed_at=datetime.now(UTC),
             samples_trained=int(len(self.train_dataset) * self.training_config.num_epochs),  # type: ignore[arg-type]
             adapter=adapter,
             parent=self.parent,
@@ -311,14 +394,14 @@ class Trainer:
 
     def train(self) -> RunResult:
         """Run the full training pipeline."""
-        started_at = utc_now()
+        started_at = datetime.now(UTC)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self._lg.info(f"starting DPO training: {self.data_path} -> {self.output_dir}")
 
         self._load_data()
         self._load_model()
-        self._load_reference_model()
+        self._log_reference_strategy()
         self._create_trainer()
         if self.trainer is None:
             raise RuntimeError("Failed to create trainer")
@@ -338,7 +421,6 @@ def train_dpo(
     training_config: DotDict | None = None,
     beta: float = 0.1,
     quantize: bool | None = None,
-    reference_free: bool = False,
     parent: Adapter | None = None,
 ) -> RunResult:
     """Train a LoRA adapter using Direct Preference Optimization.
@@ -352,7 +434,6 @@ def train_dpo(
         training_config: Training hyperparameters. Uses sensible defaults if not provided.
         beta: DPO beta parameter (higher = more conservative).
         quantize: Force quantization on/off. None = auto-detect from model metadata.
-        reference_free: Skip reference model to save VRAM (may reduce quality).
         parent: Parent adapter to train on top of (for lineage).
 
     Returns:
@@ -367,7 +448,6 @@ def train_dpo(
         training_config=training_config,
         beta=beta,
         quantize=quantize,
-        reference_free=reference_free,
         parent=parent,
     )
     return trainer.train()

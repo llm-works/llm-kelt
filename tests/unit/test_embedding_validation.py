@@ -3,7 +3,7 @@
 import pytest
 
 from llm_kelt.core.embedding import _validate_embedding
-from llm_kelt.core.exceptions import ValidationError
+from llm_kelt.core.errors import ValidationError
 
 
 class TestValidateEmbedding:

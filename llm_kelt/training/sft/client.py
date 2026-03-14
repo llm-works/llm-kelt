@@ -82,19 +82,20 @@ class Client:
         if errors:
             raise ValueError(f"Invalid SFT data: {'; '.join(errors)}")
 
-    def _build_lora_config(self, lora: DotDict) -> Config:
-        """Build lora.Config from manifest DotDict."""
-        from ..lora.config import Config
+    def _build_lora_config(self, lora: DotDict, base_model: str, training: DotDict) -> Config:
+        """Build lora.Config from manifest DotDict with model-aware defaults."""
+        from ..profiles import build_lora_config
 
-        defaults = Config()
-        return Config(
-            r=lora.get("r", defaults.r),
-            lora_alpha=lora.get("lora_alpha", defaults.lora_alpha),
-            lora_dropout=lora.get("lora_dropout", defaults.lora_dropout),
-            target_modules=lora.get("target_modules", defaults.target_modules),
-            bias=lora.get("bias", defaults.bias),
-            task_type=lora.get("task_type", defaults.task_type),
+        profile_name, config = build_lora_config(lora, base_model, training)
+        self._lg.info(
+            f"lora config (profile={profile_name})",
+            extra={
+                "r": config.r,
+                "lora_alpha": config.lora_alpha,
+                "lora_dropout": config.lora_dropout,
+            },
         )
+        return config
 
     def _prepare_training(self, manifest: Manifest) -> tuple[Path, Path]:
         """Prepare training: resolve work dir and data path."""
@@ -135,7 +136,7 @@ class Client:
             data_path=data_path,
             output_dir=work_dir,
             base_model=base_model,
-            lora_config=self._build_lora_config(manifest.lora),
+            lora_config=self._build_lora_config(manifest.lora, base_model, manifest.training),
             training_config=manifest.training,
         )
 
@@ -160,13 +161,18 @@ class Client:
 
         description = (manifest.source.description if manifest.source else None) or "SFT adapter"
         deploy = get_deploy_setting(manifest)
-        self.registry.register(
+        info = self.registry.register(
             training_result=result,
             key=manifest.adapter,
             description=description,
             deploy=deploy,
             overwrite=True,
         )
+        # Update result.adapter.path to registered location (adapters/, not work/)
+        if result.adapter:
+            result.adapter = Adapter(
+                md5=result.adapter.md5, mtime=result.adapter.mtime, path=info.path
+            )
         self._lg.info("registered adapter", extra={"adapter": manifest.adapter})
 
     def train(self, manifest: Manifest, *, register: bool = True) -> RunResult:

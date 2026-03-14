@@ -26,6 +26,43 @@ client.health_check()
 
 ---
 
+## Multi-Schema Operations
+
+Use `with_schema()` for per-operation schema selection. This is useful when agents need to
+write to different schemas based on runtime context (e.g., training manifests specifying
+target schemas).
+
+```python
+# Schema-agnostic client (no schema_name in context)
+context = ClientContext(context_key="my-agent")
+client = factory.create_from_config(context=context, config=config)
+
+# Schema specified at operation time
+client.with_schema("hn_exp").atomic.solutions.record(
+    agent_name="reviewer",
+    problem="How to optimize database queries?",
+    solution="Use indexes and query plans...",
+)
+
+client.with_schema("playground").atomic.assertions.add(
+    "User prefers concise responses",
+    category="preferences",
+)
+
+# Schema from training manifest
+schema = manifest.source.schema_name if manifest.source else "default"
+client.with_schema(schema).atomic.facts.add(...)
+```
+
+**Key behaviors:**
+
+- **Lazy initialization** - Schema and tables created on first `.atomic` access (when `ensure_schema=True`)
+- **Lightweight** - `ScopedClient` shares resources (embedder, logger) with parent
+- **Independent scopes** - Each `with_schema()` call returns a fresh `ScopedClient`
+- **Context key preserved** - All scoped operations use the parent's `context_key`
+
+---
+
 ## Recording Feedback
 
 Explicit signals about content quality.

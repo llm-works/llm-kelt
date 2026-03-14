@@ -542,8 +542,8 @@ class TestBuildOutputResult:
         assert result.base_model == "Qwen/Qwen2.5-7B"
         assert result.samples_trained == 1000
 
-    def test_missing_timestamps_use_utc_now(self):
-        """Test that missing timestamps use utc_now()."""
+    def test_missing_timestamps_default_to_now(self):
+        """Test that missing timestamps default to current UTC time."""
         data = {"status": "completed"}
         result = _build_output_result(data)
 
@@ -718,6 +718,32 @@ class TestManifestClient:
 
         assert manifest.training.get("num_epochs") == 10
         assert manifest.training.get("batch_size") == 8  # Default preserved
+
+    def test_nested_config_overrides(self, lg, tmp_path: Path):
+        """Test nested lora and training config structure."""
+        from llm_kelt.training.storage import FileStorage
+
+        default_profiles = {"sft": {"epochs": 5, "lora": {"r": 16}}}
+        storage = FileStorage(lg, tmp_path)
+        client = Client(lg=lg, storage=storage, default_profiles=default_profiles)
+
+        manifest = client.create(
+            adapter="nested-config",
+            method="sft",
+            data=[{"prompt": "test", "completion": "response"}],
+            config={
+                "lora": {"r": 64, "lora_alpha": 128},
+                "training": {"learning_rate": 0.0001, "num_epochs": 3},
+            },
+        )
+
+        # Nested lora config applied
+        assert manifest.lora.get("r") == 64
+        assert manifest.lora.get("lora_alpha") == 128
+
+        # Nested training config applied
+        assert manifest.training.get("learning_rate") == 0.0001
+        assert manifest.training.get("num_epochs") == 3
 
     def test_create_with_deployment_policy_skip(self, client: Client):
         """Test creating manifest with deployment_policy=skip."""

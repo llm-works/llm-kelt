@@ -477,3 +477,49 @@ class TestAssertionsEmbeddings:
             categories=["nonexistent"],
         )
         assert len(results_empty) == 0
+
+    def test_search_similar_prefilter_finds_minority_category(self, kelt_client, clean_tables):
+        """Test that filter is applied IN the vector search (pre-filter), not post-hoc.
+
+        Regression test for: EmbeddingFilter applied post-hoc instead of pre-filtering.
+
+        Scenario:
+        - 10 facts in category "majority" with embeddings very close to query
+        - 2 facts in category "minority" with embeddings slightly farther from query
+        - Filter by "minority" category
+
+        Without pre-filtering: top_k=5 returns all "majority" facts, filter removes them → empty
+        With pre-filtering: vector search constrained to "minority", returns those 2 facts
+        """
+        from llm_kelt.memory.atomic import EmbeddingFilter
+
+        # Create majority category (10 facts, very similar to query)
+        majority_ids = []
+        for i in range(10):
+            fid = kelt_client.atomic.assertions.add(f"Majority fact {i}", category="majority")
+            # Embeddings very close to [1.0, 0.0, 0.0]
+            kelt_client.atomic.embeddings.set_embedding(fid, [0.99 + 0.001 * i, 0.01, 0.0], "test")
+            majority_ids.append(fid)
+
+        # Create minority category (2 facts, slightly farther from query)
+        minority_ids = []
+        for i in range(2):
+            fid = kelt_client.atomic.assertions.add(f"Minority fact {i}", category="minority")
+            # Embeddings slightly less similar to [1.0, 0.0, 0.0]
+            kelt_client.atomic.embeddings.set_embedding(fid, [0.9, 0.1, 0.0], "test")
+            minority_ids.append(fid)
+
+        # Search with filter for minority category
+        results = kelt_client.atomic.embeddings.search_similar(
+            query=[1.0, 0.0, 0.0],
+            model_name="test",
+            top_k=5,  # Without pre-filter, top-5 would all be majority
+            min_similarity=0.0,
+            filter=EmbeddingFilter().categories("minority"),
+        )
+
+        # Should find both minority facts, NOT empty result
+        result_ids = [r.entity.id for r in results]
+        assert len(results) == 2, f"Expected 2 results, got {len(results)}"
+        assert all(rid in minority_ids for rid in result_ids)
+        assert all(rid not in majority_ids for rid in result_ids)

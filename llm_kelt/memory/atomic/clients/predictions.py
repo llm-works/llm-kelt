@@ -6,7 +6,7 @@ from typing import Literal, cast
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import select
 
-from llm_kelt.core.exceptions import NotFoundError, ValidationError
+from llm_kelt.core.errors import NotFoundError, ValidationError
 
 from ..models import Fact, PredictionDetails
 from .base import FactClient

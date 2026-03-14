@@ -49,6 +49,7 @@ TRAINING_DEFAULTS = DotDict(
     learning_rate=2e-4,
     warmup_ratio=0.03,
     max_seq_length=2048,
+    max_grad_norm=1.0,
     logging_steps=10,
     save_steps=100,
     eval_split=0.0,
@@ -56,7 +57,14 @@ TRAINING_DEFAULTS = DotDict(
     bf16=False,
     gradient_checkpointing=True,
     seed=42,
+    # NEFTune: adds noise to embeddings during training. Improves instruction following
+    # and helps prevent overfitting on small datasets. None = disabled. See arXiv:2310.05914.
+    neftune_noise_alpha=None,
 )
+
+# Keys to persist in completed manifests for reproducibility.
+# All effective training parameters (defaults + profile + user overrides) should be stored.
+TRAINING_CONFIG_KEYS = tuple(TRAINING_DEFAULTS.keys())
 
 
 class Adapter(FieldDict):
