@@ -31,6 +31,29 @@ from llm_infer.serving.api.openai.streaming import stream_chat_completion
 from ..inference.context import ContextBuilder
 
 
+def _extract_text_content(msg: ChatMessage) -> str:
+    """Extract text content from a message, rejecting multimodal content.
+
+    Args:
+        msg: Chat message to extract content from.
+
+    Returns:
+        String content of the message.
+
+    Raises:
+        HTTPException: 400 if content is not a string (multimodal not supported).
+    """
+    if isinstance(msg.content, str):
+        return msg.content
+    if msg.content is None:
+        return ""
+    # List content = multimodal (images, etc.) - not supported
+    raise HTTPException(
+        status_code=400,
+        detail=f"Multimodal content not supported for {msg.role.value} messages",
+    )
+
+
 def _raise_http_for_backend_error(e: BackendError) -> NoReturn:
     """Convert backend error to appropriate HTTPException and raise it."""
     if isinstance(e, BackendUnavailableError):
@@ -85,8 +108,7 @@ def _convert_to_backend_messages(
     backend_messages: list[dict[str, str]] = []
 
     for msg in messages:
-        # Extract string content (multimodal list content not supported for backend)
-        content = msg.content if isinstance(msg.content, str) else ""
+        content = _extract_text_content(msg)
         if msg.role == Role.SYSTEM:
             system_prompt = content or None
         else:
@@ -168,10 +190,11 @@ class _RouteHandlers:
         system_prompt = None
         chat_messages: list[dict] = []
         for msg in messages:
+            content = _extract_text_content(msg)
             if msg.role == Role.SYSTEM:
-                system_prompt = msg.content
+                system_prompt = content or None
             else:
-                chat_messages.append({"role": msg.role.value, "content": msg.content})
+                chat_messages.append({"role": msg.role.value, "content": content})
 
         request_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
 
