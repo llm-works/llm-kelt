@@ -85,10 +85,12 @@ def _convert_to_backend_messages(
     backend_messages: list[dict[str, str]] = []
 
     for msg in messages:
+        # Extract string content (multimodal list content not supported for backend)
+        content = msg.content if isinstance(msg.content, str) else ""
         if msg.role == Role.SYSTEM:
-            system_prompt = msg.content
+            system_prompt = content or None
         else:
-            backend_messages.append({"role": msg.role.value, "content": msg.content or ""})
+            backend_messages.append({"role": msg.role.value, "content": content})
 
     return backend_messages, system_prompt
 
