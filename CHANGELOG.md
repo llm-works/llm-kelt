@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+- Add CLI reference (`docs/cli.md`) with full command documentation
+- Expand README with prompt tuning, manifest-based training, and adapter registry examples
+- Document training profiles table and stability detection features
+- Add multi-schema operations example (`with_schema()`)
+
 ## [0.2.0] - 2026-03-14
 
 ### Added
