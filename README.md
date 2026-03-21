@@ -140,7 +140,7 @@ result = export_feedback_sft(
 
 ```python
 from appinfra.log import LogConfig, LoggerFactory
-from llm_kelt.training import train_lora, RunConfig
+from llm_kelt.training import train_lora
 from llm_kelt.training.lora import Config as LoraConfig
 
 lg = LoggerFactory.create_root(LogConfig.from_params(level="info"))
@@ -151,17 +151,146 @@ result = train_lora(
     data_path="feedback_sft.jsonl",
     output_dir="./my_adapter",
     base_model="Qwen/Qwen2.5-7B-Instruct",
-    lora_config=LoraConfig(r=16, lora_alpha=32),
-    training_config=RunConfig(
-        num_epochs=3,
-        batch_size=4,
-        learning_rate=2e-4,
+    lora_config=LoraConfig(
+        r=16,
+        lora_alpha=32,
+        use_rslora=True,  # Rank-stabilized scaling (alpha/sqrt(r))
     ),
+    training_config={
+        "num_epochs": 3,
+        "batch_size": 4,
+        "learning_rate": 2e-4,
+        "max_grad_norm": 1.0,  # Gradient clipping
+        "neftune_noise_alpha": 5.0,  # Embedding noise regularization
+    },
     quantize=True,  # QLoRA for lower VRAM
 )
 
-print(f"Adapter saved to: {result.adapter_path}")
+print(f"Adapter saved to: {result.adapter.path}")
 print(f"Train loss: {result.metrics['train_loss']:.4f}")
+```
+
+### Prompt Tuning
+
+Alternative to LoRA for large models (32B+) where LoRA can be unstable:
+
+```python
+from llm_kelt.training.prompt import Config as PromptConfig
+from llm_kelt.training.prompt import Trainer
+
+# Configure soft prompt
+prompt_config = PromptConfig(
+    num_virtual_tokens=8,
+    prompt_tuning_init="TEXT",
+    prompt_tuning_init_text="You are a helpful assistant.",
+)
+
+# Train via manifest or directly
+trainer = Trainer(lg, base_model, prompt_config, training_config)
+result = trainer.train(data_path, output_dir)
+```
+
+### Manifest-Based Training
+
+File-based workflow for reproducible training runs:
+
+```yaml
+# manifests/my-adapter.yaml
+adapter: my-adapter
+method: sft  # or dpo
+
+source:
+  schema_name: production  # Data source schema
+
+data:
+  format: inline  # or path
+  records:
+    - instruction: "What is 2+2?"
+      output: "The answer is 4."
+
+training:
+  num_epochs: 3
+  batch_size: 4
+  learning_rate: 0.0002
+```
+
+```bash
+# Run via CLI
+kelt train run manifests/my-adapter.yaml
+
+# Or programmatically
+from llm_kelt.training import Runner
+from llm_kelt.training.storage import FileStorage
+
+storage = FileStorage(lg, registry_path)
+runner = Runner(lg, storage, model_locations=[Path("~/models")])
+result = runner.run(manifest_path)
+```
+
+### Training Profiles
+
+LoRA profiles are auto-detected based on model size:
+
+| Profile | Model Size | LoRA Rank | Alpha | Batch |
+|---------|-----------|-----------|-------|-------|
+| small | <3B | 8 | 16 | 8 |
+| medium | 3-14B | 16 | 32 | 4 |
+| large | 14-32B | 32 | 64 | 2 |
+| xlarge | >32B | 64 | 128 | 1 |
+
+Override with `--lora-profile` in CLI or via config.
+
+Training includes stability detection for NaN gradients, loss spikes, and divergence. Warnings are
+recorded in completed manifests.
+
+### Adapter Registry
+
+Manage trained adapters with versioning and deployment:
+
+```python
+from llm_kelt.training import AdapterRegistry
+from llm_kelt.training.storage import FileStorage
+
+storage = FileStorage(lg, base_path="~/adapters")
+registry = AdapterRegistry(lg, storage, infer_url="http://localhost:8000")
+
+# Register after training
+info = registry.register_and_refresh(
+    training_result=result,
+    key="my-adapter",
+    description="Fine-tuned on customer data",
+    deploy=True,  # Make available for inference
+)
+
+# List adapters and versions
+adapters = registry.list()
+versions = storage.list_versions("my-adapter")
+
+# Deploy specific version
+storage.deploy_adapter("my-adapter", version_id, policy="replace")
+
+# Refresh inference server
+registry.refresh("my-adapter")
+```
+
+### Multi-Schema Operations
+
+Use `with_schema()` for per-operation schema selection:
+
+```python
+from llm_kelt import ClientFactory, ClientContext
+
+# Schema-agnostic client
+context = ClientContext(context_key="my-agent")
+client = factory.create_from_config(context=context, config=config)
+
+# Schema specified at operation time
+client.with_schema("production").atomic.facts.add("User prefers concise responses")
+client.with_schema("staging").atomic.preferences.record(...)
+
+# Useful for training pipelines reading from multiple schemas
+schema = manifest.source.schema_name
+data = client.with_schema(schema).atomic.preferences.list()
 ```
 
 ## Architecture
@@ -214,6 +343,8 @@ See the [`examples/`](examples/) directory for complete working examples:
 | Class | Description |
 |-------|-------------|
 | `Client` | Main entry point, scoped to a context |
+| `Client.with_schema()` | Per-operation schema selection |
+| `ScopedClient` | Lazy-initializing schema-scoped client |
 | `FactsClient` | Store and retrieve facts |
 | `FeedbackClient` | Record explicit feedback signals |
 | `PreferencesClient` | Store preference pairs |
@@ -237,9 +368,26 @@ See the [`examples/`](examples/) directory for complete working examples:
 | `export_feedback_classifier` | Export for binary classification |
 | `train_lora` | Train LoRA adapter with SFT |
 | `train_dpo` | Train with Direct Preference Optimization |
-| `lora.Config` | LoRA hyperparameters |
-| `RunConfig` | Training hyperparameters |
-| `AdapterRegistry` | Manage trained adapters |
+| `lora.Config` | LoRA hyperparameters (`r`, `lora_alpha`, `use_rslora`) |
+| `prompt.Config` | Prompt tuning config (`num_virtual_tokens`, init settings) |
+| `AdapterRegistry` | Manage trained adapters with versioning |
+| `FileStorage` | File-based adapter storage backend |
+| `Runner` | Execute training from manifest files |
+| `Manifest` | Training manifest schema |
+| `build_training_config` | Build config from profile with overrides |
+
+### CLI
+
+See [CLI Reference](docs/cli.md) for full documentation.
+
+| Command | Description |
+|---------|-------------|
+| `kelt train run` | Run training from manifest |
+| `kelt train sft` | Direct SFT training |
+| `kelt train dpo` | Direct DPO training |
+| `kelt train adapters` | List registered adapters |
+| `kelt train deploy` | Deploy adapter version |
+| `kelt train merge` | Merge LoRA into base model |
 
 ## Requirements
 
