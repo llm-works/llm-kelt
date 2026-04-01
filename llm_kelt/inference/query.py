@@ -1,10 +1,12 @@
 """High-level context-aware query interface."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from llm_infer.client import ChatClient
 
+from ..conversation.session import Conversation
+from ..conversation.types import Role
 from .context import ContextBuilder
 
 if TYPE_CHECKING:
@@ -20,29 +22,6 @@ class RAGArgs:
     min_similarity: float = 0.3
     model_name: str | None = None  # Defaults to embedder's model
     categories: list[str] | None = None  # Filter results to these categories
-
-
-@dataclass
-class Conversation:
-    """
-    A conversation with message history.
-
-    Tracks messages for multi-turn conversations.
-    """
-
-    messages: list[dict[str, str]] = field(default_factory=list)
-
-    def add_user(self, content: str) -> None:
-        """Add a user message."""
-        self.messages.append({"role": "user", "content": content})
-
-    def add_assistant(self, content: str) -> None:
-        """Add an assistant message."""
-        self.messages.append({"role": "assistant", "content": content})
-
-    def clear(self) -> None:
-        """Clear conversation history."""
-        self.messages.clear()
 
 
 class ContextQuery:
@@ -159,8 +138,8 @@ class ContextQuery:
         )
 
         # Update conversation if provided
-        if conversation:
-            conversation.add_assistant(response.content)
+        if conversation is not None:
+            conversation.add(response.content, Role.ASSISTANT)
 
         return response.content
 
@@ -201,11 +180,11 @@ class ContextQuery:
         self,
         question: str,
         conversation: Conversation | None,
-    ) -> list[dict[str, str]]:
+    ) -> list:
         """Build message list, updating conversation if provided."""
-        if conversation:
-            conversation.add_user(question)
-            return conversation.messages
+        if conversation is not None:
+            conversation.add(question)
+            return conversation.messages  # list[Message], which are dicts
         return [{"role": "user", "content": question}]
 
     async def ask_without_facts(

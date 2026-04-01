@@ -301,7 +301,7 @@ class TestRAGIntegration:
         self, kelt_client, mock_embedder, mock_llm_client, sample_facts_with_embeddings
     ):
         """Test RAG works across multi-turn conversations."""
-        from llm_kelt.inference.query import Conversation
+        from llm_kelt.conversation import Conversation
 
         context_builder = ContextBuilder(kelt_client.atomic.assertions)
         query = ContextQuery(

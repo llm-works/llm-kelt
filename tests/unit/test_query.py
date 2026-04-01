@@ -5,9 +5,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from llm_infer.client import ChatResponse
 
+from llm_kelt.conversation import Conversation, Role
 from llm_kelt.core.types import ScoredEntity
 from llm_kelt.inference.embedder import EmbeddingResult
-from llm_kelt.inference.query import ContextQuery, Conversation, RAGArgs
+from llm_kelt.inference.query import ContextQuery, RAGArgs
 from llm_kelt.memory.atomic import Fact
 
 
@@ -42,7 +43,7 @@ class TestConversation:
     def test_add_user_message(self):
         """Test adding user message."""
         conv = Conversation()
-        conv.add_user("Hello")
+        conv.add("Hello")
         assert len(conv.messages) == 1
         assert conv.messages[0]["role"] == "user"
         assert conv.messages[0]["content"] == "Hello"
@@ -50,7 +51,7 @@ class TestConversation:
     def test_add_assistant_message(self):
         """Test adding assistant message."""
         conv = Conversation()
-        conv.add_assistant("Hi there")
+        conv.add("Hi there", Role.ASSISTANT)
         assert len(conv.messages) == 1
         assert conv.messages[0]["role"] == "assistant"
         assert conv.messages[0]["content"] == "Hi there"
@@ -58,8 +59,8 @@ class TestConversation:
     def test_clear(self):
         """Test clearing conversation."""
         conv = Conversation()
-        conv.add_user("Hello")
-        conv.add_assistant("Hi")
+        conv.add("Hello")
+        conv.add("Hi", Role.ASSISTANT)
         conv.clear()
         assert len(conv.messages) == 0
 
