@@ -21,8 +21,9 @@ from .base import SessionStorage, SessionSummary, StoredSession
 if TYPE_CHECKING:
     from ..session import Conversation
 
-# Conditional JSONB import — avoids hard failure if psycopg2 isn't installed
-# (file backend works without it).
+# Conditional JSONB import — this module requires psycopg2 at import time (the
+# Session model uses JSONB columns). The guard only prevents cascading failures
+# when storage/__init__.py imports just the file backend.
 try:
     from sqlalchemy.dialects.postgresql import JSONB
 except ImportError:  # pragma: no cover
@@ -108,18 +109,18 @@ class DbSessionStorage(SessionStorage):
                 select(Session).where(Session.session_id == session_id)
             ).scalar_one_or_none()
 
-        if record is None:
-            raise NotFoundError(f"Session not found: {session_id}")
+            if record is None:
+                raise NotFoundError(f"Session not found: {session_id}")
 
-        return StoredSession(
-            session_id=record.session_id,
-            messages=record.messages,
-            created_at=record.created_at.isoformat(),
-            updated_at=record.updated_at.isoformat(),
-            metadata=record.metadata_,
-            token_count=record.token_count,
-            config=record.config,
-        )
+            return StoredSession(
+                session_id=record.session_id,
+                messages=record.messages,
+                created_at=record.created_at.isoformat(),
+                updated_at=record.updated_at.isoformat(),
+                metadata=record.metadata_,
+                token_count=record.token_count,
+                config=record.config,
+            )
 
     def list(self, limit: int = 100) -> list[SessionSummary]:
         """List sessions sorted by most recently updated."""
@@ -129,8 +130,7 @@ class DbSessionStorage(SessionStorage):
                 .scalars()
                 .all()
             )
-
-        return [self._to_summary(r) for r in records]
+            return [self._to_summary(r) for r in records]
 
     def delete(self, session_id: str) -> bool:
         """Delete session from database."""

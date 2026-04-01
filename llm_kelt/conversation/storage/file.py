@@ -110,7 +110,15 @@ class FileSessionStorage(SessionStorage):
         return True
 
     def _session_path(self, session_id: str) -> Path:
-        """Get filesystem path for a session."""
+        """Get filesystem path for a session.
+
+        Raises:
+            ValueError: If session_id contains path traversal characters.
+        """
+        if not session_id:
+            raise ValueError("Session ID cannot be empty")
+        if "/" in session_id or "\\" in session_id or ".." in session_id:
+            raise ValueError(f"Invalid session ID (path traversal): {session_id}")
         return self._base_path / f"{session_id}.json"
 
     def _read_summary(self, path: Path) -> SessionSummary | None:

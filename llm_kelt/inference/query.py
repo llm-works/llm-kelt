@@ -184,7 +184,7 @@ class ContextQuery:
         """Build message list, updating conversation if provided."""
         if conversation is not None:
             conversation.add(question)
-            return conversation.messages  # list[Message], which are dicts
+            return conversation.messages_as_dicts()
         return [{"role": "user", "content": question}]
 
     async def ask_without_facts(

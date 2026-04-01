@@ -115,6 +115,14 @@ class Conversation:
         """
         return list(self._messages)
 
+    def messages_as_dicts(self) -> list[dict[str, Any]]:
+        """Get messages as plain dicts, omitting None-valued fields.
+
+        Suitable for passing directly to LLM client APIs that reject
+        unexpected null fields (e.g. ``tool_calls: null`` on user messages).
+        """
+        return [{k: v for k, v in dict(m).items() if v is not None} for m in self._messages]
+
     @property
     def message_count(self) -> int:
         """Number of messages in conversation."""

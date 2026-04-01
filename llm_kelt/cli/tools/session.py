@@ -63,7 +63,7 @@ class ShowSessionTool(Tool):
         try:
             session = storage.load(self.args.session_id)
         except Exception as e:
-            self.lg.error(str(e))
+            self.lg.warning("session load failed", extra={"exception": e})
             return 1
 
         if self.args.as_json:
