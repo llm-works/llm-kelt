@@ -83,7 +83,7 @@ class DbSessionStorage(SessionStorage):
             ).scalar_one_or_none()
 
             if existing is not None:
-                existing.messages = [dict(m) for m in conversation.messages]
+                existing.messages = conversation.messages_as_dicts()
                 existing.token_count = conversation.token_count
                 existing.config = dict(conversation.config)
                 existing.metadata_ = metadata or {}
@@ -91,7 +91,7 @@ class DbSessionStorage(SessionStorage):
             else:
                 record = Session(
                     session_id=session_id,
-                    messages=[dict(m) for m in conversation.messages],
+                    messages=conversation.messages_as_dicts(),
                     token_count=conversation.token_count,
                     config=dict(conversation.config),
                     metadata_=metadata or {},

@@ -65,7 +65,7 @@ class FileSessionStorage(SessionStorage):
 
         data = StoredSession(
             session_id=session_id,
-            messages=[dict(m) for m in conversation.messages],
+            messages=conversation.messages_as_dicts(),
             created_at=created_at,
             updated_at=now,
             metadata=metadata or {},

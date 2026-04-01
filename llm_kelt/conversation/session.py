@@ -99,7 +99,7 @@ class Conversation:
             tool_calls=tool_calls,
             tool_call_id=tool_call_id,
         )
-        tokens = estimate_message_tokens(msg.role, msg.content)
+        tokens = estimate_message_tokens(msg.role, msg.content, msg.tool_calls)
         self._messages.append(msg)
         self._token_count += tokens
 
@@ -165,7 +165,9 @@ class Conversation:
             messages: New message list.
         """
         self._messages = list(messages)
-        self._token_count = sum(estimate_message_tokens(m.role, m.content) for m in self._messages)
+        self._token_count = sum(
+            estimate_message_tokens(m.role, m.content, m.tool_calls) for m in self._messages
+        )
 
     def get_system_message(self) -> Message | None:
         """Get the system message if present.
