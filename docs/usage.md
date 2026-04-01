@@ -63,6 +63,108 @@ client.with_schema(schema).atomic.facts.add(...)
 
 ---
 
+## Conversations
+
+Stateful multi-turn dialogue with token tracking, compaction, and persistence.
+
+### Basic Usage
+
+```python
+from llm_kelt.conversation import Conversation, Config, Role
+
+# Create conversation with token limit
+conv = Conversation(config=Config(max_tokens=32000))
+conv.add("You are a helpful assistant.", Role.SYSTEM)
+conv.add("What is a Python decorator?")
+conv.add("A decorator wraps another function to extend its behavior.", Role.ASSISTANT)
+
+# Check state
+conv.message_count   # 3
+conv.token_count     # estimated tokens
+conv.usage_ratio     # fraction of limit used
+conv.needs_compaction()  # True when usage exceeds threshold
+```
+
+### Tool Call Messages
+
+```python
+conv.add("", Role.ASSISTANT, tool_calls=[
+    {"id": "tc_1", "name": "list_files", "arguments": {"path": "."}},
+])
+conv.add("main.py\nutils.py", Role.TOOL, tool_call_id="tc_1")
+```
+
+### Compaction
+
+When conversations approach token limits, compactors reduce size while preserving context.
+
+```python
+from llm_kelt.conversation import SlidingWindowCompactor
+
+# Manual compaction
+compactor = SlidingWindowCompactor()
+if conv.needs_compaction():
+    compactor.compact(conv)  # drops oldest messages, keeps system + recent
+
+# Auto-compaction via injected compactor
+conv = Conversation(
+    config=Config(max_tokens=32000, compact_threshold=0.8, min_recent_messages=4),
+    compactor=SlidingWindowCompactor(),
+)
+# Compaction fires automatically when threshold is exceeded on add()
+```
+
+For better context retention, use the summarizing compactor (requires an LLM client):
+
+```python
+from llm_kelt.conversation import SummarizingCompactor
+
+compactor = SummarizingCompactor(client=llm_client, model="qwen2.5-7b")
+# Summarizes old messages via LLM before discarding them
+```
+
+### Session Persistence
+
+Save and restore conversations using file or database storage.
+
+```python
+from llm_kelt.conversation.storage import FileSessionStorage
+
+storage = FileSessionStorage(lg, "~/.my-agent/sessions")
+
+# Save
+storage.save("session-123", conv, metadata={"model": "qwen2.5-7b"})
+
+# List sessions
+for s in storage.list():
+    print(f"{s.session_id}  msgs={s.message_count}  tokens={s.token_count}")
+
+# Load
+loaded = storage.load("session-123")
+# loaded.messages, loaded.metadata, loaded.config, loaded.token_count
+
+# Delete
+storage.delete("session-123")
+```
+
+### With ContextQuery
+
+The conversation layer integrates with `ContextQuery` for multi-turn RAG:
+
+```python
+from llm_kelt.conversation import Conversation, Config
+from llm_kelt.inference.query import ContextQuery
+
+conv = Conversation(config=Config(max_tokens=4000))
+query = ContextQuery(client=llm_client, context_builder=builder)
+
+response = await query.ask("What are Python generators?", conversation=conv)
+response = await query.ask("How do they differ from lists?", conversation=conv)
+# conv tracks the full multi-turn history automatically
+```
+
+---
+
 ## Recording Feedback
 
 Explicit signals about content quality.

@@ -7,11 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Conversation layer with stateful dialogue management (`llm_kelt.conversation`)
+  - `Conversation` class with token tracking and automatic compaction
+  - `Message`, `ToolCall`, and `Role` types (FieldDict-based, zero serialization overhead)
+  - Sliding window and LLM-summarizing compaction strategies
+  - File-based and PostgreSQL session storage backends
+  - `kelt session` CLI commands for listing, showing, and deleting sessions
+  - Example script (`examples/05_conversation.py`)
+
+### Changed
+- `Conversation` moved from `llm_kelt.inference.query` to `llm_kelt.conversation.session`
+  (re-exported from `llm_kelt.inference` for backward compatibility)
+- `ContextQuery` now uses the new `Conversation` class with `messages_as_dicts()` for
+  clean LLM API payloads
+
 ### Documentation
 - Add CLI reference (`docs/cli.md`) with full command documentation
 - Expand README with prompt tuning, manifest-based training, and adapter registry examples
 - Document training profiles table and stability detection features
 - Add multi-schema operations example (`with_schema()`)
+- Add conversation layer usage guide and CLI reference
 
 ## [0.2.0] - 2026-03-14
 
