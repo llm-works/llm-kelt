@@ -22,9 +22,11 @@ def _get_storage(lg: Logger, args: Any) -> FileSessionStorage:
 
 def _positive_int(value: str) -> int:
     """Argparse type validator for positive integers."""
+    import argparse
+
     n = int(value)
     if n < 1:
-        raise ValueError(f"limit must be >= 1, got {n}")
+        raise argparse.ArgumentTypeError(f"limit must be >= 1, got {n}")
     return n
 
 
