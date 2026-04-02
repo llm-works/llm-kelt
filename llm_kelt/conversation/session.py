@@ -235,11 +235,15 @@ class Conversation(ConversationLike):
         if len(pool) <= preserve_count:
             return [], list(self._messages)
 
-        to_compact = pool[:-preserve_count]
-        to_preserve = pool[-preserve_count:]
-
-        if system_msg is not None:
-            to_preserve = [system_msg] + to_preserve
+        # Guard against preserve_count=0: pool[:-0] returns [] in Python (not pool).
+        if preserve_count == 0:
+            to_compact = pool
+            to_preserve = [system_msg] if system_msg is not None else []
+        else:
+            to_compact = pool[:-preserve_count]
+            to_preserve = pool[-preserve_count:]
+            if system_msg is not None:
+                to_preserve = [system_msg] + to_preserve
 
         return to_compact, to_preserve
 

@@ -257,6 +257,7 @@ kelt session list -n 50
 **Aliases:** `kelt session ls`
 
 **Options:**
+
 | Flag | Description |
 |------|-------------|
 | `--limit, -n` | Max sessions to show (default: 20) |
@@ -276,6 +277,7 @@ kelt session show my-session --json
 ```
 
 **Options:**
+
 | Flag | Description |
 |------|-------------|
 | `--json` | Output as JSON instead of formatted text |

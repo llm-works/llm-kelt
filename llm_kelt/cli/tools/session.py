@@ -17,7 +17,7 @@ _DEFAULT_SESSIONS_DIR = "~/.llm-kelt/sessions"
 def _get_storage(lg: Logger, args: Any) -> FileSessionStorage:
     """Create storage backend from CLI args."""
     base_path = getattr(args, "sessions_dir", None) or _DEFAULT_SESSIONS_DIR
-    return FileSessionStorage(lg, Path(base_path))
+    return FileSessionStorage(lg, Path(base_path).expanduser())
 
 
 class ListSessionsTool(Tool):
@@ -118,7 +118,7 @@ class SessionTool(Tool):
 
     def __init__(self, parent: Any = None) -> None:
         super().__init__(
-            parent, ToolConfig(name="session", aliases=["s"], help_text="Session commands")
+            parent, ToolConfig(name="session", aliases=["sess"], help_text="Session commands")
         )
         self.add_tool(ListSessionsTool(self))
         self.add_tool(ShowSessionTool(self))
