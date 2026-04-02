@@ -90,7 +90,7 @@ class SummarizingCompactor(Compactor):
             ],
             **kwargs,
         )
-        return response.content
+        return response.content or "[Summary unavailable]"
 
 
 def _format_messages(messages: list[Message]) -> str:
