@@ -20,6 +20,14 @@ def _get_storage(lg: Logger, args: Any) -> FileSessionStorage:
     return FileSessionStorage(lg, Path(base_path).expanduser())
 
 
+def _positive_int(value: str) -> int:
+    """Argparse type validator for positive integers."""
+    n = int(value)
+    if n < 1:
+        raise ValueError(f"limit must be >= 1, got {n}")
+    return n
+
+
 class ListSessionsTool(Tool):
     """List stored sessions."""
 
@@ -27,11 +35,18 @@ class ListSessionsTool(Tool):
         super().__init__(parent, ToolConfig(name="list", aliases=["ls"], help_text="List sessions"))
 
     def add_args(self, parser) -> None:
-        parser.add_argument("--limit", "-n", type=int, default=20, help="Max sessions to show")
+        parser.add_argument(
+            "--limit", "-n", type=_positive_int, default=20, help="Max sessions to show"
+        )
 
     def run(self, **kwargs: Any) -> int:
         storage = _get_storage(self.lg, self.args)
-        summaries = storage.list(limit=self.args.limit)
+
+        try:
+            summaries = storage.list(limit=self.args.limit)
+        except OSError as e:
+            self.lg.warning("failed to list sessions", extra={"exception": e})
+            return 1
 
         if not summaries:
             print("No sessions found.")
@@ -102,7 +117,12 @@ class DeleteSessionTool(Tool):
 
     def run(self, **kwargs: Any) -> int:
         storage = _get_storage(self.lg, self.args)
-        deleted = storage.delete(self.args.session_id)
+
+        try:
+            deleted = storage.delete(self.args.session_id)
+        except OSError as e:
+            self.lg.warning("failed to delete session", extra={"exception": e})
+            return 1
 
         if deleted:
             print(f"Deleted session: {self.args.session_id}")

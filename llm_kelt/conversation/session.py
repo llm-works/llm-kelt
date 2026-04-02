@@ -216,20 +216,20 @@ class Conversation(ConversationLike):
         """Split messages into compactable and preserved portions.
 
         Preserved messages include:
-        - System message (if preserve_system is True)
+        - All system messages (if preserve_system is True)
         - Last min_recent_messages messages
 
         Returns:
             Tuple of (messages_to_compact, messages_to_preserve).
         """
         preserve_count = self.config.min_recent_messages
-        system_msg = self.get_system_message() if self.config.preserve_system else None
 
-        # When preserving system separately, exclude it from the split pool.
-        # Otherwise treat it as a regular message in the pool.
-        if system_msg is not None:
+        # When preserving system separately, exclude from the split pool.
+        if self.config.preserve_system:
+            system_msgs = [m for m in self._messages if m.role == Role.SYSTEM]
             pool = [m for m in self._messages if m.role != Role.SYSTEM]
         else:
+            system_msgs = []
             pool = list(self._messages)
 
         if len(pool) <= preserve_count:
@@ -238,12 +238,10 @@ class Conversation(ConversationLike):
         # Guard against preserve_count=0: pool[:-0] returns [] in Python (not pool).
         if preserve_count == 0:
             to_compact = pool
-            to_preserve = [system_msg] if system_msg is not None else []
+            to_preserve = list(system_msgs)
         else:
             to_compact = pool[:-preserve_count]
-            to_preserve = pool[-preserve_count:]
-            if system_msg is not None:
-                to_preserve = [system_msg] + to_preserve
+            to_preserve = system_msgs + pool[-preserve_count:]
 
         return to_compact, to_preserve
 

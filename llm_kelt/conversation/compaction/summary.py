@@ -59,11 +59,10 @@ class SummarizingCompactor(Compactor):
 
         new_messages: list[Message] = []
 
-        # System message first (if present)
-        system_msg = next((m for m in preserved if m.role == Role.SYSTEM), None)
-        if system_msg is not None:
-            new_messages.append(system_msg)
-            preserved = [m for m in preserved if m.role != Role.SYSTEM]
+        # System messages first (if present)
+        system_msgs = [m for m in preserved if m.role == Role.SYSTEM]
+        non_system = [m for m in preserved if m.role != Role.SYSTEM]
+        new_messages.extend(system_msgs)
 
         # Summary as context
         new_messages.append(
@@ -73,7 +72,7 @@ class SummarizingCompactor(Compactor):
             )
         )
 
-        new_messages.extend(preserved)
+        new_messages.extend(non_system)
         conversation.replace_messages(new_messages)
 
     def _summarize(self, messages: list[Message]) -> str:
