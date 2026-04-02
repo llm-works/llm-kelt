@@ -29,10 +29,11 @@ Usage:
     response = await client.chat_async(messages, system=system)
 """
 
+from ..conversation.session import Conversation
 from .context import ContextBuilder
 from .embed_facts import EmbedFactsResult, embed_missing_facts
 from .embedder import Embedder, EmbeddingResult
-from .query import ContextQuery, Conversation, RAGArgs
+from .query import ContextQuery, RAGArgs
 
 __all__ = [
     "ContextBuilder",

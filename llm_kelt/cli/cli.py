@@ -2,7 +2,7 @@
 
 from appinfra.app import AppBuilder
 
-from .tools import ProxyTool, TrainTool
+from .tools import ProxyTool, SessionTool, TrainTool
 
 
 def main() -> int:
@@ -16,6 +16,7 @@ def main() -> int:
         .done()
         .tools.with_tool(ProxyTool())
         .with_tool(TrainTool())
+        .with_tool(SessionTool())
         .done()
         .build()
     )

@@ -301,7 +301,7 @@ class TestRAGIntegration:
         self, kelt_client, mock_embedder, mock_llm_client, sample_facts_with_embeddings
     ):
         """Test RAG works across multi-turn conversations."""
-        from llm_kelt.inference.query import Conversation
+        from llm_kelt.conversation import Conversation
 
         context_builder = ContextBuilder(kelt_client.atomic.assertions)
         query = ContextQuery(
@@ -329,8 +329,8 @@ class TestRAGIntegration:
 
         # Conversation should have all messages
         assert len(conv.messages) == 4  # 2 user + 2 assistant
-        assert conv.messages[0]["content"] == "What language should I use?"
-        assert conv.messages[2]["content"] == "Tell me more about that"
+        assert conv.messages[0].content == "What language should I use?"
+        assert conv.messages[2].content == "Tell me more about that"
 
         # Embedder should have been called twice (once per question)
         assert mock_embedder.embed_async.call_count == 2

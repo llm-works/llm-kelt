@@ -238,6 +238,74 @@ kelt train merge my-adapter --dtype float16
 
 ---
 
+## Session Commands
+
+All session commands are under `kelt session` (alias: `kelt s`).
+
+### List Sessions
+
+List stored conversation sessions:
+
+```bash
+# List recent sessions (default: 20)
+kelt session list
+
+# Show more sessions
+kelt session list -n 50
+```
+
+**Aliases:** `kelt session ls`
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--limit, -n` | Max sessions to show (default: 20) |
+
+---
+
+### Show Session
+
+Display session contents:
+
+```bash
+# Show session messages
+kelt session show my-session
+
+# Output as JSON
+kelt session show my-session --json
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON instead of formatted text |
+
+---
+
+### Delete Session
+
+Delete a stored session:
+
+```bash
+kelt session delete my-session
+```
+
+**Aliases:** `kelt session rm`
+
+---
+
+### Sessions Directory
+
+By default, sessions are stored in `~/.llm-kelt/sessions/`. Override with `--sessions-dir`:
+
+```bash
+kelt session --sessions-dir /path/to/sessions list
+```
+
+---
+
 ## Proxy Server
 
 Start the context-injecting proxy server:
