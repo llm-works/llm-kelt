@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 from llm_kelt.conversation import (
     Config,
     Conversation,
@@ -18,7 +20,7 @@ from llm_kelt.conversation import (
 
 
 class TestMessage:
-    """Tests for Message FieldDict."""
+    """Tests for Message dataclass (from saia)."""
 
     def test_basic_message(self):
         msg = Message(role="user", content="hello")
@@ -28,7 +30,7 @@ class TestMessage:
         assert msg.tool_call_id is None
 
     def test_assistant_with_tool_calls(self):
-        calls = [{"id": "tc_1", "name": "search", "arguments": {"q": "test"}}]
+        calls = [ToolCall(id="tc_1", name="search", arguments={"q": "test"})]
         msg = Message(role="assistant", content="", tool_calls=calls)
         assert msg.tool_calls == calls
 
@@ -36,15 +38,18 @@ class TestMessage:
         msg = Message(role="tool", content="result data", tool_call_id="tc_1")
         assert msg.tool_call_id == "tc_1"
 
-    def test_message_is_dict(self):
-        """Message is a FieldDict, so it should behave as a dict."""
+    def test_message_as_dict(self):
         msg = Message(role="user", content="hello")
-        assert dict(msg)["role"] == "user"
-        assert dict(msg)["content"] == "hello"
+        d = dataclasses.asdict(msg)
+        assert d["role"] == "user"
+        assert d["content"] == "hello"
 
     def test_message_dict_roundtrip(self):
-        msg = Message(role="assistant", content="hi", tool_calls=[{"id": "1"}])
-        d = dict(msg)
+        calls = [ToolCall(id="1", name="search", arguments={})]
+        msg = Message(role="assistant", content="hi", tool_calls=calls)
+        d = dataclasses.asdict(msg)
+        # Roundtrip requires reconstructing ToolCall from dict
+        d["tool_calls"] = [ToolCall(**tc) for tc in d["tool_calls"]]
         restored = Message(**d)
         assert restored.role == msg.role
         assert restored.content == msg.content
@@ -52,7 +57,7 @@ class TestMessage:
 
 
 class TestToolCall:
-    """Tests for ToolCall FieldDict."""
+    """Tests for ToolCall dataclass (from saia)."""
 
     def test_basic_tool_call(self):
         tc = ToolCall(id="tc_1", name="search", arguments={"q": "test"})
@@ -60,13 +65,10 @@ class TestToolCall:
         assert tc.name == "search"
         assert tc.arguments == {"q": "test"}
 
-    def test_default_arguments(self):
-        tc = ToolCall(id="tc_1", name="noop")
-        assert tc.arguments == {}
-
-    def test_tool_call_is_dict(self):
-        tc = ToolCall(id="tc_1", name="search")
-        assert dict(tc)["id"] == "tc_1"
+    def test_tool_call_as_dict(self):
+        tc = ToolCall(id="tc_1", name="search", arguments={})
+        d = dataclasses.asdict(tc)
+        assert d["id"] == "tc_1"
 
 
 class TestRole:
@@ -110,6 +112,11 @@ class TestTokenEstimation:
         # 0 content tokens + 4 overhead = 4
         assert estimate_message_tokens("user", "") == 4
 
+    def test_message_tokens_with_tool_calls(self):
+        calls = [ToolCall(id="tc_1", name="search", arguments={"q": "test"})]
+        tokens = estimate_message_tokens("assistant", "", calls)
+        assert tokens > estimate_message_tokens("assistant", "")
+
 
 # =============================================================================
 # Conversation
@@ -139,7 +146,7 @@ class TestConversation:
 
     def test_add_tool_messages(self):
         conv = Conversation()
-        conv.add("", Role.ASSISTANT, tool_calls=[{"id": "tc_1", "name": "search"}])
+        conv.add("", Role.ASSISTANT, tool_calls=[ToolCall(id="tc_1", name="search", arguments={})])
         conv.add("results", Role.TOOL, tool_call_id="tc_1")
 
         assert conv.message_count == 2
@@ -230,6 +237,20 @@ class TestConversation:
         msgs.append(Message(role="user", content="extra"))
         assert conv.message_count == 1  # Original unchanged
 
+    def test_as_messages_returns_view(self):
+        """as_messages() returns the live internal list (ConversationLike contract)."""
+        conv = Conversation()
+        conv.add("hello")
+        view = conv.as_messages()
+        assert view is conv._messages
+
+    def test_append_protocol(self):
+        """append() implements ConversationLike protocol."""
+        conv = Conversation()
+        conv.append(Message(role="user", content="hello"))
+        assert conv.message_count == 1
+        assert conv.token_count > 0
+
     def test_auto_compaction_with_injected_compactor(self):
         """Test that compaction fires automatically when compactor is set."""
         from llm_kelt.conversation import SlidingWindowCompactor
@@ -252,6 +273,15 @@ class TestConversation:
         # needs_compaction is True, but no compactor means no auto-compact
         assert conv.needs_compaction()
         assert conv.message_count == 1
+
+    def test_messages_as_dicts_strips_nones(self):
+        conv = Conversation()
+        conv.add("hello")
+        dicts = conv.messages_as_dicts()
+        assert "tool_calls" not in dicts[0]
+        assert "tool_call_id" not in dicts[0]
+        assert dicts[0]["role"] == "user"
+        assert dicts[0]["content"] == "hello"
 
 
 class TestSplitForCompaction:

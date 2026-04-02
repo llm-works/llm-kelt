@@ -101,7 +101,7 @@ def _format_messages(messages: list[Message]) -> str:
         if msg.role == "tool":
             lines.append(f"TOOL RESULT: {msg.content}")
         elif msg.tool_calls:
-            tools = ", ".join(tc.get("name", "?") for tc in msg.tool_calls)
+            tools = ", ".join(tc.name for tc in msg.tool_calls)
             lines.append(f"ASSISTANT [called: {tools}]: {msg.content}")
         else:
             lines.append(f"{msg.role.upper()}: {msg.content}")

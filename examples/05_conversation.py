@@ -53,7 +53,7 @@ def demo_types():
     assistant_msg = Message(
         role="assistant",
         content="",
-        tool_calls=[dict(ToolCall(id="tc_1", name="list_files", arguments={"path": "."}))],
+        tool_calls=[ToolCall(id="tc_1", name="list_files", arguments={"path": "."})],
     )
     print(f"  {INFO}Assistant tool call:{RESET} {assistant_msg.tool_calls}")
 
@@ -61,8 +61,10 @@ def demo_types():
     tool_msg = Message(role="tool", content="main.py\nutils.py\nREADME.md", tool_call_id="tc_1")
     print(f"  {INFO}Tool result:{RESET} {tool_msg.content}")
 
-    # Messages are dicts (FieldDict)
-    d = dict(user_msg)
+    # Messages are dataclasses (from saia)
+    import dataclasses
+
+    d = dataclasses.asdict(user_msg)
     print(f"  {MUTED}As dict: {d}{RESET}")
 
 

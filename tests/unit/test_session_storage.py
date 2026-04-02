@@ -90,12 +90,16 @@ class TestSaveLoad:
 
     def test_save_with_tool_calls(self, storage: FileSessionStorage):
         conv = Conversation()
-        conv.add("", Role.ASSISTANT, tool_calls=[{"id": "tc_1", "name": "search"}])
+        from llm_kelt.conversation import ToolCall
+
+        conv.add("", Role.ASSISTANT, tool_calls=[ToolCall(id="tc_1", name="search", arguments={})])
         conv.add("results", Role.TOOL, tool_call_id="tc_1")
         storage.save("s1", conv)
 
         loaded = storage.load("s1")
-        assert loaded.messages[0]["tool_calls"] == [{"id": "tc_1", "name": "search"}]
+        assert loaded.messages[0]["tool_calls"] == [
+            {"id": "tc_1", "name": "search", "arguments": {}}
+        ]
         assert loaded.messages[1]["tool_call_id"] == "tc_1"
 
     def test_save_creates_directory(self, lg, tmp_path: Path):

@@ -45,16 +45,16 @@ class TestConversation:
         conv = Conversation()
         conv.add("Hello")
         assert len(conv.messages) == 1
-        assert conv.messages[0]["role"] == "user"
-        assert conv.messages[0]["content"] == "Hello"
+        assert conv.messages[0].role == "user"
+        assert conv.messages[0].content == "Hello"
 
     def test_add_assistant_message(self):
         """Test adding assistant message."""
         conv = Conversation()
         conv.add("Hi there", Role.ASSISTANT)
         assert len(conv.messages) == 1
-        assert conv.messages[0]["role"] == "assistant"
-        assert conv.messages[0]["content"] == "Hi there"
+        assert conv.messages[0].role == "assistant"
+        assert conv.messages[0].content == "Hi there"
 
     def test_clear(self):
         """Test clearing conversation."""
@@ -305,10 +305,10 @@ class TestContextQueryRAG:
 
         # Conversation should have both exchanges
         assert len(conv.messages) == 4
-        assert conv.messages[0]["content"] == "First question"
-        assert conv.messages[1]["content"] == "Test response"
-        assert conv.messages[2]["content"] == "Follow up"
-        assert conv.messages[3]["content"] == "Test response"
+        assert conv.messages[0].content == "First question"
+        assert conv.messages[1].content == "Test response"
+        assert conv.messages[2].content == "Follow up"
+        assert conv.messages[3].content == "Test response"
 
     @pytest.mark.asyncio
     async def test_ask_with_rag_no_facts_found(

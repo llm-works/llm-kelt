@@ -329,8 +329,8 @@ class TestRAGIntegration:
 
         # Conversation should have all messages
         assert len(conv.messages) == 4  # 2 user + 2 assistant
-        assert conv.messages[0]["content"] == "What language should I use?"
-        assert conv.messages[2]["content"] == "Tell me more about that"
+        assert conv.messages[0].content == "What language should I use?"
+        assert conv.messages[2].content == "Tell me more about that"
 
         # Embedder should have been called twice (once per question)
         assert mock_embedder.embed_async.call_count == 2

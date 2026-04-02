@@ -6,8 +6,12 @@ Uses character-based heuristics calibrated for common LLM tokenizers.
 
 from __future__ import annotations
 
+import dataclasses
 import json
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from llm_saia import ToolCall
 
 # Average chars per token varies by model/tokenizer, but 4 is a reasonable default.
 # GPT-style tokenizers: ~4 chars/token for English text.
@@ -39,7 +43,7 @@ def estimate_tokens(text: str, chars_per_token: float = DEFAULT_CHARS_PER_TOKEN)
 def estimate_message_tokens(
     role: str,
     content: str,
-    tool_calls: list[dict[str, Any]] | None = None,
+    tool_calls: list[ToolCall] | None = None,
 ) -> int:
     """Estimate tokens for a single message including role overhead.
 
@@ -59,5 +63,8 @@ def estimate_message_tokens(
     overhead = 4
     tokens = overhead + estimate_tokens(content)
     if tool_calls:
-        tokens += estimate_tokens(json.dumps(tool_calls, separators=(",", ":")))
+        serialized = json.dumps(
+            [dataclasses.asdict(tc) for tc in tool_calls], separators=(",", ":")
+        )
+        tokens += estimate_tokens(serialized)
     return tokens

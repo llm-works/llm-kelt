@@ -2,7 +2,7 @@
 
 Provides the primitives for multi-turn, context-aware conversations:
 
-- **types**: Canonical Message and ToolCall definitions (FieldDict-based)
+- **types**: Re-exports Message, ToolCall, Role from llm-saia
 - **session**: Conversation management with token tracking
 - **compaction**: Strategies for reducing conversation size (window, summarizing)
 - **storage**: Session persistence backends (file, database)

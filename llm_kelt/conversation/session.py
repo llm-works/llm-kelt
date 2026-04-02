@@ -4,19 +4,20 @@ Manages conversation history with context window awareness. Tracks messages,
 estimates token usage, and signals when compaction is needed. Does not perform
 compaction itself — that's delegated to a Compactor.
 
-Adapted from llm-gent's core/conv/conversation.py for use as a standalone
-primitive without agent-framework dependencies.
+Implements saia's ``ConversationLike`` protocol so it can be passed directly
+to saia verbs (e.g., ``Complete``) for automatic compaction during tool loops.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 from appinfra import FieldDict
+from llm_saia import ConversationLike, Message, Role, ToolCall
 
 from .compaction.base import Compactor
 from .tokens import estimate_message_tokens
-from .types import Message, Role
 
 
 class Config(FieldDict):
@@ -35,17 +36,25 @@ class Config(FieldDict):
     min_recent_messages: int = 4
 
 
-class Conversation:
+class Conversation(ConversationLike):
     """Manages conversation history with context window awareness.
 
     Tracks messages, estimates token usage, and signals when compaction is needed.
     It does not perform compaction itself — that's delegated to a Compactor.
 
+    Implements ``ConversationLike`` so it can be passed to saia verbs::
+
+        from llm_kelt.conversation import Conversation, Config
+        from llm_saia import Complete
+
+        conv = Conversation(config=Config(max_tokens=32000))
+        result = await complete("Do the task", conversation=conv)
+        # conv now contains the full history with automatic compaction
+
     Example::
 
-        from llm_kelt.conversation import Role
+        from llm_kelt.conversation import Conversation, Config, Role
 
-        # Auto-compaction via injected compactor
         conversation = Conversation(
             config=Config(max_tokens=32000),
             compactor=SlidingWindowCompactor(),
@@ -53,9 +62,6 @@ class Conversation:
         conversation.add("You are a helpful assistant.", Role.SYSTEM)
         conversation.add("Hello!")  # defaults to Role.USER
         conversation.add("Hi there!", Role.ASSISTANT)
-        # Compaction happens automatically when threshold is exceeded
-
-        messages = conversation.messages  # For LLM call
     """
 
     def __init__(
@@ -74,31 +80,17 @@ class Conversation:
         self._messages: list[Message] = []
         self._token_count: int = 0
 
-    def add(
-        self,
-        content: str,
-        role: Role = Role.USER,
-        *,
-        tool_calls: list[dict[str, Any]] | None = None,
-        tool_call_id: str | None = None,
-    ) -> None:
-        """Add a message to the conversation.
+    # --- ConversationLike protocol ---
 
-        If a compactor is configured and the conversation exceeds the
-        compaction threshold after adding, compaction runs automatically.
+    def append(self, msg: Message) -> None:
+        """Append a message (ConversationLike protocol).
+
+        Tracks token usage and triggers compaction if a compactor is configured
+        and the threshold is exceeded.
 
         Args:
-            content: Message text content.
-            role: Message role (default: Role.USER).
-            tool_calls: Tool calls requested by assistant (assistant messages only).
-            tool_call_id: ID of the tool call this responds to (tool messages only).
+            msg: Message to append.
         """
-        msg = Message(
-            role=role,
-            content=content,
-            tool_calls=tool_calls,
-            tool_call_id=tool_call_id,
-        )
         tokens = estimate_message_tokens(msg.role, msg.content, msg.tool_calls)
         self._messages.append(msg)
         self._token_count += tokens
@@ -106,12 +98,49 @@ class Conversation:
         if self.compactor is not None and self.needs_compaction():
             self.compactor.compact(self)
 
+    def as_messages(self) -> list[Message]:
+        """Return current messages as a view (ConversationLike protocol).
+
+        Returns the internal list directly — saia calls this fresh before each
+        LLM call, and compaction mutations between iterations are visible.
+        """
+        return self._messages
+
+    # --- Convenience methods ---
+
+    def add(
+        self,
+        content: str,
+        role: str | Role = Role.USER,
+        *,
+        tool_calls: list[ToolCall] | None = None,
+        tool_call_id: str | None = None,
+    ) -> None:
+        """Add a message to the conversation.
+
+        Convenience wrapper around ``append()`` that constructs a ``Message``.
+
+        Args:
+            content: Message text content.
+            role: Message role (default: Role.USER).
+            tool_calls: Tool calls requested by assistant (assistant messages only).
+            tool_call_id: ID of the tool call this responds to (tool messages only).
+        """
+        self.append(
+            Message(
+                role=role,
+                content=content,
+                tool_calls=tool_calls,
+                tool_call_id=tool_call_id,
+            )
+        )
+
     @property
     def messages(self) -> list[Message]:
         """Get all messages (copy).
 
         Returns:
-            Copy of message list.
+            Copy of message list. Use ``as_messages()`` for the live view.
         """
         return list(self._messages)
 
@@ -121,7 +150,10 @@ class Conversation:
         Suitable for passing directly to LLM client APIs that reject
         unexpected null fields (e.g. ``tool_calls: null`` on user messages).
         """
-        return [{k: v for k, v in dict(m).items() if v is not None} for m in self._messages]
+        return [
+            {k: v for k, v in dataclasses.asdict(m).items() if v is not None}
+            for m in self._messages
+        ]
 
     @property
     def message_count(self) -> int:
