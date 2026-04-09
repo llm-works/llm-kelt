@@ -460,6 +460,7 @@ class FactRelationship(Base):
             unique=True,
             postgresql_where=text("context_key IS NULL"),
         ),
+        Index("idx_atomic_rel_source_type", "source_id", "relationship_type"),
         Index("idx_atomic_rel_target_type", "target_id", "relationship_type"),
         Index("idx_atomic_rel_context", "context_key"),
         Index("idx_atomic_rel_type", "relationship_type"),

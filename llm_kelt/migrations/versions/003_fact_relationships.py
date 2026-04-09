@@ -53,6 +53,11 @@ def upgrade() -> None:  # cq: exempt
         postgresql_where=sa.text("context_key IS NULL"),
     )
     op.create_index(
+        "idx_atomic_rel_source_type",
+        "atomic_fact_relationships",
+        ["source_id", "relationship_type"],
+    )
+    op.create_index(
         "idx_atomic_rel_target_type",
         "atomic_fact_relationships",
         ["target_id", "relationship_type"],
@@ -73,5 +78,6 @@ def downgrade() -> None:
     op.drop_index("idx_atomic_rel_type", table_name="atomic_fact_relationships")
     op.drop_index("idx_atomic_rel_context", table_name="atomic_fact_relationships")
     op.drop_index("idx_atomic_rel_target_type", table_name="atomic_fact_relationships")
+    op.drop_index("idx_atomic_rel_source_type", table_name="atomic_fact_relationships")
     op.drop_index("uq_atomic_rel_null_ctx", table_name="atomic_fact_relationships")
     op.drop_table("atomic_fact_relationships")

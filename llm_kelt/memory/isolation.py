@@ -15,8 +15,9 @@ def glob_to_like(context_key: str) -> tuple[str, bool]:
     if "*" not in context_key and "?" not in context_key:
         return (context_key, False)
 
-    # Escape SQL wildcards first, then translate glob to SQL LIKE
-    pattern = context_key.replace("%", r"\%").replace("_", r"\_")
+    # Escape the LIKE escape character first, then SQL wildcards, then translate glob
+    pattern = context_key.replace("\\", "\\\\")
+    pattern = pattern.replace("%", r"\%").replace("_", r"\_")
     pattern = pattern.replace("*", "%").replace("?", "_")
     return (pattern, True)
 
