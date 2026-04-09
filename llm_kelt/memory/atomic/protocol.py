@@ -19,6 +19,7 @@ from .clients import (
     SolutionsClient,
 )
 from .embedding import EmbeddingAdapter
+from .relationships import RelationshipsClient
 
 if TYPE_CHECKING:
     from llm_kelt.inference.embedder import Embedder
@@ -78,6 +79,7 @@ class Protocol:
         self._directives: DirectivesClient | None = None
         self._interactions: InteractionsClient | None = None
         self._preferences: PreferencesClient | None = None
+        self._relationships: RelationshipsClient | None = None
 
         # Eagerly initialize embedding adapter so clients can use it
         self._embedding_adapter: EmbeddingAdapter | None = None
@@ -151,6 +153,15 @@ class Protocol:
         return self._preferences
 
     @property
+    def relationships(self) -> RelationshipsClient:
+        """Fact relationship edges (contradicts, supports, etc.)."""
+        if self._relationships is None:
+            self._relationships = RelationshipsClient(
+                self._lg, self._session_factory, self._context_key
+            )
+        return self._relationships
+
+    @property
     def embeddings(self) -> EmbeddingAdapter:
         """Embedding operations for atomic facts."""
         # Defensive: adapter is eagerly created in __init__ if embedding_store is set
@@ -181,4 +192,5 @@ class Protocol:
             "directives": self.directives.count(),
             "interactions": self.interactions.count(),
             "preferences": self.preferences.count(),
+            "relationships": self.relationships.count(),
         }

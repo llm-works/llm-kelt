@@ -7,6 +7,7 @@ This is a unified model where every piece of knowledge is a "fact" with
 a type discriminator and optional type-specific details.
 """
 
+import enum
 from datetime import UTC, date, datetime
 
 from sqlalchemy import (
@@ -84,6 +85,18 @@ class Fact(Base):
     )
     preference_details: Mapped["PreferenceDetails | None"] = relationship(
         back_populates="fact", uselist=False, passive_deletes=True
+    )
+
+    # Relationship edges (one-to-many)
+    outgoing_relationships: Mapped[list["FactRelationship"]] = relationship(
+        foreign_keys="FactRelationship.source_id",
+        back_populates="source_fact",
+        passive_deletes=True,
+    )
+    incoming_relationships: Mapped[list["FactRelationship"]] = relationship(
+        foreign_keys="FactRelationship.target_id",
+        back_populates="target_fact",
+        passive_deletes=True,
     )
 
     __table_args__ = (
@@ -349,3 +362,95 @@ class PreferenceDetails(Base):
 
     def __repr__(self) -> str:
         return f"<PreferenceDetails(id={self.id})>"
+
+
+# =============================================================================
+# Relationship Types
+# =============================================================================
+
+
+class RelType(enum.Enum):
+    """
+    Relationship types for fact-to-fact edges.
+
+    Each member holds (db_value, symmetric). Symmetric types (contradicts,
+    related_to) are stored with normalized ID ordering (min, max) so that
+    (A, B) and (B, A) map to the same row.
+    """
+
+    CONTRADICTS = ("contradicts", True)
+    SUPPORTS = ("supports", False)
+    SUPERSEDES = ("supersedes", False)
+    DERIVED_FROM = ("derived_from", False)
+    RELATED_TO = ("related_to", True)
+
+    def __init__(self, db_value: str, symmetric: bool) -> None:
+        self.db_value = db_value
+        self.symmetric = symmetric
+
+    @classmethod
+    def from_value(cls, value: str) -> "RelType":
+        """Look up a RelType by its database string value."""
+        for member in cls:
+            if member.db_value == value:
+                return member
+        valid = ", ".join(m.db_value for m in cls)
+        raise ValueError(f"Unknown relationship type: {value!r} (valid: {valid})")
+
+
+# =============================================================================
+# Fact Relationships Table
+# =============================================================================
+
+
+class FactRelationship(Base):
+    """
+    Edge between two facts — enables graph-like queries over atomic facts.
+
+    Stores typed, directed edges with optional confidence and metadata.
+    Symmetric relationship types (contradicts, related_to) are stored with
+    normalized ID ordering so the unique constraint prevents duplicate edges.
+    """
+
+    __tablename__ = "atomic_fact_relationships"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    source_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), nullable=False
+    )
+    target_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), nullable=False
+    )
+    relationship_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    context_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+    # Relationships back to Fact
+    source_fact: Mapped["Fact"] = relationship(
+        foreign_keys=[source_id], back_populates="outgoing_relationships", lazy="joined"
+    )
+    target_fact: Mapped["Fact"] = relationship(
+        foreign_keys=[target_id], back_populates="incoming_relationships", lazy="joined"
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_id",
+            "target_id",
+            "relationship_type",
+            name="uq_atomic_rel_src_tgt_type",
+        ),
+        Index("idx_atomic_rel_target_type", "target_id", "relationship_type"),
+        Index("idx_atomic_rel_context", "context_key"),
+        Index("idx_atomic_rel_type", "relationship_type"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<FactRelationship(id={self.id}, "
+            f"{self.source_id}-[{self.relationship_type}]->{self.target_id})>"
+        )

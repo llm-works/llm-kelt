@@ -140,16 +140,16 @@ class TestAdapterIntegration:
             # Query WITHOUT adapter
             response_base = await llm_client.chat_async(
                 messages=[{"role": "user", "content": "What is your favorite fruit?"}],
-                temperature=0.1,
+                temperature=0.0,
                 max_tokens=50,
             )
 
             # Query WITH adapter
             response_adapted = await llm_client.chat_async(
                 messages=[{"role": "user", "content": "What is your favorite fruit?"}],
-                temperature=0.1,
+                temperature=0.0,
                 max_tokens=50,
-                key=key,
+                adapter=key,
             )
 
             print("\n" + "=" * 60)
