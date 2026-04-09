@@ -12,7 +12,7 @@ llm: !include './llm.yaml'
 embedding:
   model_name: all-MiniLM-L6-v2   # Current model (used as key in fact_embeddings)
   dimensions: 384                 # Expected embedding dimensions
-  base_url: http://localhost:8001/v1  # Embedding server URL
+  base_url: http://localhost:18200/v1  # Embedding server URL
 
 # Proxy server settings
 proxy:

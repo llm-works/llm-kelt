@@ -64,6 +64,25 @@ class ListSessionsTool(Tool):
         return 0
 
 
+def _print_session(session) -> None:
+    """Print session details in human-readable format."""
+    print(f"Session: {session.session_id}")
+    print(f"Created: {session.created_at}")
+    print(f"Updated: {session.updated_at}")
+    print(f"Messages: {len(session.messages)}")
+    print(f"Tokens: {session.token_count}")
+
+    if session.metadata:
+        print(f"Metadata: {json.dumps(session.metadata, default=str)}")
+
+    print("\n--- Messages ---")
+    for msg in session.messages:
+        role = msg.get("role", "unknown").upper()
+        content = msg.get("content", "")
+        print(f"\n[{role}]")
+        print(content)
+
+
 class ShowSessionTool(Tool):
     """Display session contents."""
 
@@ -86,23 +105,8 @@ class ShowSessionTool(Tool):
 
         if self.args.as_json:
             print(json.dumps(dict(session), indent=2, default=str))
-            return 0
-
-        print(f"Session: {session.session_id}")
-        print(f"Created: {session.created_at}")
-        print(f"Updated: {session.updated_at}")
-        print(f"Messages: {len(session.messages)}")
-        print(f"Tokens: {session.token_count}")
-
-        if session.metadata:
-            print(f"Metadata: {json.dumps(session.metadata, default=str)}")
-
-        print("\n--- Messages ---")
-        for msg in session.messages:
-            role = msg.get("role", "unknown").upper()
-            content = msg.get("content", "")
-            print(f"\n[{role}]")
-            print(content)
+        else:
+            _print_session(session)
 
         return 0
 
