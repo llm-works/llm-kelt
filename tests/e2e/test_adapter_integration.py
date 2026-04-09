@@ -137,19 +137,23 @@ class TestAdapterIntegration:
             assert info.key == key
             assert info.deployed is True
 
+            # The deployed filename is {name}-{md5} — llm-infer only knows
+            # filenames, not kelt's name/key concepts.
+            adapter_filename = f"{key}-{info.md5}"
+
             # Query WITHOUT adapter
             response_base = await llm_client.chat_async(
                 messages=[{"role": "user", "content": "What is your favorite fruit?"}],
-                temperature=0.1,
+                temperature=0.0,
                 max_tokens=50,
             )
 
             # Query WITH adapter
             response_adapted = await llm_client.chat_async(
                 messages=[{"role": "user", "content": "What is your favorite fruit?"}],
-                temperature=0.1,
+                temperature=0.0,
                 max_tokens=50,
-                key=key,
+                adapter=adapter_filename,
             )
 
             print("\n" + "=" * 60)

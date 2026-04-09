@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from llm_kelt.core.embedding import EmbeddingStore
 
@@ -19,6 +20,7 @@ from .clients import (
     SolutionsClient,
 )
 from .embedding import EmbeddingAdapter
+from .relationships import RelationshipsClient
 
 if TYPE_CHECKING:
     from llm_kelt.inference.embedder import Embedder
@@ -78,6 +80,7 @@ class Protocol:
         self._directives: DirectivesClient | None = None
         self._interactions: InteractionsClient | None = None
         self._preferences: PreferencesClient | None = None
+        self._relationships: RelationshipsClient | None = None
 
         # Eagerly initialize embedding adapter so clients can use it
         self._embedding_adapter: EmbeddingAdapter | None = None
@@ -151,6 +154,15 @@ class Protocol:
         return self._preferences
 
     @property
+    def relationships(self) -> RelationshipsClient:
+        """Fact relationship edges (contradicts, supports, etc.)."""
+        if self._relationships is None:
+            self._relationships = RelationshipsClient(
+                self._lg, self._session_factory, self._context_key
+            )
+        return self._relationships
+
+    @property
     def embeddings(self) -> EmbeddingAdapter:
         """Embedding operations for atomic facts."""
         # Defensive: adapter is eagerly created in __init__ if embedding_store is set
@@ -173,7 +185,7 @@ class Protocol:
         Returns:
             Dict with counts for each collection type.
         """
-        return {
+        stats: dict[str, int] = {
             "assertions": self.assertions.count(),
             "solutions": self.solutions.count(),
             "predictions": self.predictions.count(),
@@ -182,3 +194,9 @@ class Protocol:
             "interactions": self.interactions.count(),
             "preferences": self.preferences.count(),
         }
+        try:
+            stats["relationships"] = self.relationships.count()
+        except (ProgrammingError, OperationalError) as e:
+            self._lg.warning("failed to count relationships", extra={"exception": e})
+            stats["relationships"] = 0
+        return stats
