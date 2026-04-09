@@ -184,7 +184,7 @@ class Protocol:
         Returns:
             Dict with counts for each collection type.
         """
-        return {
+        stats: dict[str, int] = {
             "assertions": self.assertions.count(),
             "solutions": self.solutions.count(),
             "predictions": self.predictions.count(),
@@ -192,5 +192,9 @@ class Protocol:
             "directives": self.directives.count(),
             "interactions": self.interactions.count(),
             "preferences": self.preferences.count(),
-            "relationships": self.relationships.count(),
         }
+        try:
+            stats["relationships"] = self.relationships.count()
+        except Exception:
+            stats["relationships"] = 0
+        return stats

@@ -25,7 +25,7 @@ def upgrade() -> None:  # cq: exempt
         sa.Column("source_id", sa.BigInteger(), nullable=False),
         sa.Column("target_id", sa.BigInteger(), nullable=False),
         sa.Column("relationship_type", sa.String(50), nullable=False),
-        sa.Column("confidence", sa.Float(), nullable=True, server_default="1.0"),
+        sa.Column("confidence", sa.Float(), nullable=True),
         sa.Column("metadata", postgresql.JSONB(), nullable=True),
         sa.Column("context_key", sa.String(255), nullable=True),
         sa.Column(
@@ -35,7 +35,11 @@ def upgrade() -> None:  # cq: exempt
         sa.ForeignKeyConstraint(["source_id"], ["atomic_facts.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["target_id"], ["atomic_facts.id"], ondelete="CASCADE"),
         sa.UniqueConstraint(
-            "source_id", "target_id", "relationship_type", name="uq_atomic_rel_src_tgt_type"
+            "source_id",
+            "target_id",
+            "relationship_type",
+            "context_key",
+            name="uq_atomic_rel_src_tgt_type_ctx",
         ),
     )
     op.create_index(

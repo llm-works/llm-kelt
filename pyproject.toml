@@ -101,7 +101,6 @@ markers = [
     "e2e: marks tests as end-to-end tests (require full system)",
     "llm: marks tests as requiring a running LLM (deselect with '-m \"not llm\"')",
     "training: marks tests requiring training dependencies (torch, transformers, peft, trl)",
-    "adapters: marks tests requiring inference server with LoRA adapter support",
 ]
 
 [tool.coverage.run]

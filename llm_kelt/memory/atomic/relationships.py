@@ -1,4 +1,7 @@
-"""Fact relationships client — graph-like edges between atomic facts."""
+"""Fact relationships client — graph-like edges between atomic facts.
+
+Requires PostgreSQL 14+ for recursive CTE CYCLE detection in get_chain().
+"""
 
 from __future__ import annotations
 
@@ -11,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from llm_kelt.core.errors import ConflictError, ValidationError
+from llm_kelt.memory.isolation import build_context_filter
 
 from .models import Fact, FactRelationship, RelType
 
@@ -22,6 +26,8 @@ class RelationshipsClient:
     Supports typed, directed relationships with optional confidence and metadata.
     Symmetric relationship types (contradicts, related_to) are stored with
     normalized ID ordering so (A, B) and (B, A) map to the same row.
+
+    Requires PostgreSQL 14+ for get_chain() (recursive CTE with CYCLE detection).
 
     Usage:
         client = RelationshipsClient(lg, session_factory, context_key)
@@ -44,12 +50,6 @@ class RelationshipsClient:
     # Private helpers
     # -------------------------------------------------------------------------
 
-    def _build_context_filter(self, column: Any) -> Any:
-        """Build context filter with glob pattern support."""
-        from llm_kelt.memory.isolation import build_context_filter
-
-        return build_context_filter(self.context_key, column)
-
     @staticmethod
     def _normalize_ids(source_id: int, target_id: int, rel_type: RelType) -> tuple[int, int]:
         """For symmetric types, return (min, max) to ensure canonical ordering."""
@@ -60,7 +60,7 @@ class RelationshipsClient:
     def _validate_facts_exist(self, session: Any, fact_ids: list[int]) -> None:
         """Verify facts exist, are active, and belong to context."""
         stmt = select(Fact.id).where(Fact.id.in_(fact_ids), Fact.active == True)  # noqa: E712
-        context_filter = self._build_context_filter(Fact.context_key)
+        context_filter = build_context_filter(self.context_key, Fact.context_key)
         if context_filter is not None:
             stmt = stmt.where(context_filter)
 
@@ -222,7 +222,7 @@ class RelationshipsClient:
         """
         with self._session_factory() as session:
             stmt = self._build_unlink_stmt(source_id, target_id, rel_type)
-            context_filter = self._build_context_filter(FactRelationship.context_key)
+            context_filter = build_context_filter(self.context_key, FactRelationship.context_key)
             if context_filter is not None:
                 stmt = stmt.where(context_filter)
 
@@ -261,7 +261,7 @@ class RelationshipsClient:
             if rel_type is not None:
                 stmt = stmt.where(FactRelationship.relationship_type == rel_type.db_value)
 
-            context_filter = self._build_context_filter(FactRelationship.context_key)
+            context_filter = build_context_filter(self.context_key, FactRelationship.context_key)
             if context_filter is not None:
                 stmt = stmt.where(context_filter)
 
@@ -283,7 +283,7 @@ class RelationshipsClient:
             stmt = self._query_relationships().where(
                 FactRelationship.relationship_type == RelType.CONTRADICTS.db_value
             )
-            context_filter = self._build_context_filter(FactRelationship.context_key)
+            context_filter = build_context_filter(self.context_key, FactRelationship.context_key)
             if context_filter is not None:
                 stmt = stmt.where(context_filter)
 
@@ -335,7 +335,7 @@ class RelationshipsClient:
             if rel_type is not None:
                 stmt = stmt.where(FactRelationship.relationship_type == rel_type.db_value)
 
-            context_filter = self._build_context_filter(FactRelationship.context_key)
+            context_filter = build_context_filter(self.context_key, FactRelationship.context_key)
             if context_filter is not None:
                 stmt = stmt.where(context_filter)
 

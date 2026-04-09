@@ -431,10 +431,10 @@ class FactRelationship(Base):
 
     # Relationships back to Fact
     source_fact: Mapped["Fact"] = relationship(
-        foreign_keys=[source_id], back_populates="outgoing_relationships", lazy="joined"
+        foreign_keys=[source_id], back_populates="outgoing_relationships"
     )
     target_fact: Mapped["Fact"] = relationship(
-        foreign_keys=[target_id], back_populates="incoming_relationships", lazy="joined"
+        foreign_keys=[target_id], back_populates="incoming_relationships"
     )
 
     __table_args__ = (
@@ -442,7 +442,8 @@ class FactRelationship(Base):
             "source_id",
             "target_id",
             "relationship_type",
-            name="uq_atomic_rel_src_tgt_type",
+            "context_key",
+            name="uq_atomic_rel_src_tgt_type_ctx",
         ),
         Index("idx_atomic_rel_target_type", "target_id", "relationship_type"),
         Index("idx_atomic_rel_context", "context_key"),
