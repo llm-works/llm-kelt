@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from llm_kelt.core.embedding import EmbeddingStore
 
@@ -195,6 +196,7 @@ class Protocol:
         }
         try:
             stats["relationships"] = self.relationships.count()
-        except Exception:
+        except (ProgrammingError, OperationalError) as e:
+            self._lg.warning("failed to count relationships", extra={"exception": e})
             stats["relationships"] = 0
         return stats

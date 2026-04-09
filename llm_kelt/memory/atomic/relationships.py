@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from llm_kelt.core.errors import ConflictError, ValidationError
-from llm_kelt.memory.isolation import build_context_filter
+from llm_kelt.memory.isolation import build_context_filter, glob_to_like
 
 from .models import Fact, FactRelationship, RelType
 
@@ -28,6 +28,11 @@ class RelationshipsClient:
     normalized ID ordering so (A, B) and (B, A) map to the same row.
 
     Requires PostgreSQL 14+ for get_chain() (recursive CTE with CYCLE detection).
+
+    Note: This client does NOT inherit from FactClient because relationships
+    are edges between facts, not facts themselves — they don't need embedding
+    support, content hashing, or the type-discriminator machinery. Session
+    and context filtering patterns are kept consistent manually.
 
     Usage:
         client = RelationshipsClient(lg, session_factory, context_key)
@@ -113,14 +118,12 @@ class RelationshipsClient:
         if self.context_key is None:
             return ("", {})
 
-        if "*" in self.context_key or "?" in self.context_key:
-            pattern = self.context_key.replace("%", r"\%").replace("_", r"\_")
-            pattern = pattern.replace("*", "%").replace("?", "_")
+        pattern, is_glob = glob_to_like(self.context_key)
+        if is_glob:
             return (
                 r"AND r.context_key LIKE :ctx_key ESCAPE '\'",
                 {"ctx_key": pattern},
             )
-
         return ("AND r.context_key = :ctx_key", {"ctx_key": self.context_key})
 
     def _build_chain_sql(self, ctx_clause: str) -> Any:
@@ -269,12 +272,16 @@ class RelationshipsClient:
             rels = list(session.scalars(stmt).unique().all())
             return _detach_relationships(rels, session)
 
-    def find_contradictions(self, fact_id: int | None = None) -> list[FactRelationship]:
+    def find_contradictions(
+        self,
+        fact_id: int | None = None,
+        limit: int = 1000,
+    ) -> list[FactRelationship]:
         """
         Find contradiction relationships.
 
         If fact_id provided, find contradictions for that fact.
-        If None, find all contradictions in the context.
+        If None, find all contradictions in the context (up to *limit*).
         """
         if fact_id is not None:
             return self.get_related(fact_id, rel_type=RelType.CONTRADICTS)
@@ -287,7 +294,7 @@ class RelationshipsClient:
             if context_filter is not None:
                 stmt = stmt.where(context_filter)
 
-            stmt = stmt.order_by(FactRelationship.created_at.desc()).limit(1000)
+            stmt = stmt.order_by(FactRelationship.created_at.desc()).limit(limit)
             rels = list(session.scalars(stmt).unique().all())
             return _detach_relationships(rels, session)
 

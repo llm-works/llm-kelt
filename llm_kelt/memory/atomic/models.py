@@ -87,16 +87,20 @@ class Fact(Base):
         back_populates="fact", uselist=False, passive_deletes=True
     )
 
-    # Relationship edges (one-to-many)
+    # Relationship edges (one-to-many).
+    # lazy="noload" prevents accidental N+1 queries — these collections are
+    # only useful via RelationshipsClient, never via Fact attribute access.
     outgoing_relationships: Mapped[list["FactRelationship"]] = relationship(
         foreign_keys="FactRelationship.source_id",
         back_populates="source_fact",
         passive_deletes=True,
+        lazy="noload",
     )
     incoming_relationships: Mapped[list["FactRelationship"]] = relationship(
         foreign_keys="FactRelationship.target_id",
         back_populates="target_fact",
         passive_deletes=True,
+        lazy="noload",
     )
 
     __table_args__ = (
@@ -444,6 +448,17 @@ class FactRelationship(Base):
             "relationship_type",
             "context_key",
             name="uq_atomic_rel_src_tgt_type_ctx",
+        ),
+        # Partial unique index for NULL context_key — PostgreSQL treats
+        # NULL != NULL in regular unique constraints, so without this
+        # duplicates slip through in the single-tenant (no context) case.
+        Index(
+            "uq_atomic_rel_null_ctx",
+            "source_id",
+            "target_id",
+            "relationship_type",
+            unique=True,
+            postgresql_where=text("context_key IS NULL"),
         ),
         Index("idx_atomic_rel_target_type", "target_id", "relationship_type"),
         Index("idx_atomic_rel_context", "context_key"),

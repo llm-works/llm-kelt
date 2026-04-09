@@ -42,6 +42,16 @@ def upgrade() -> None:  # cq: exempt
             name="uq_atomic_rel_src_tgt_type_ctx",
         ),
     )
+    # Partial unique index for NULL context_key — PostgreSQL treats
+    # NULL != NULL in regular unique constraints, so without this
+    # duplicates slip through in the single-tenant (no context) case.
+    op.create_index(
+        "uq_atomic_rel_null_ctx",
+        "atomic_fact_relationships",
+        ["source_id", "target_id", "relationship_type"],
+        unique=True,
+        postgresql_where=sa.text("context_key IS NULL"),
+    )
     op.create_index(
         "idx_atomic_rel_target_type",
         "atomic_fact_relationships",
@@ -63,4 +73,5 @@ def downgrade() -> None:
     op.drop_index("idx_atomic_rel_type", table_name="atomic_fact_relationships")
     op.drop_index("idx_atomic_rel_context", table_name="atomic_fact_relationships")
     op.drop_index("idx_atomic_rel_target_type", table_name="atomic_fact_relationships")
+    op.drop_index("uq_atomic_rel_null_ctx", table_name="atomic_fact_relationships")
     op.drop_table("atomic_fact_relationships")
