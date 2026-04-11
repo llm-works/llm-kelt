@@ -50,6 +50,7 @@ Usage:
     result = kelt.train.dpo.train(manifest)
 """
 
+from .bootstrap import ensure_schema
 from .client import Client
 from .core.errors import (
     ConfigError,
@@ -60,6 +61,7 @@ from .core.errors import (
     SchemaVersionError,
     ValidationError,
 )
+from .core.schema import SchemaState, SchemaStatus
 from .factory import ClientFactory
 from .memory import ClientContext
 
@@ -74,4 +76,7 @@ __all__ = [
     "ConflictError",
     "SchemaVersionError",
     "ClientContext",
+    "ensure_schema",
+    "SchemaStatus",
+    "SchemaState",
 ]

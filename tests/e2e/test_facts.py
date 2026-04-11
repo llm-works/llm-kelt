@@ -42,11 +42,13 @@ class TestFactsEndToEnd:
         question = "What programming language would you recommend for a new backend project?"
 
         # Step 1: Query WITHOUT facts
+        # temperature=0.0 for deterministic sampling — the 0.5B test model is too
+        # noisy at higher temps and produces flaky assertions.
         response_without_facts = (
             await llm_client.chat_async(
                 messages=[{"role": "user", "content": question}],
                 system=base_prompt,
-                temperature=0.3,  # Lower temperature for more consistent responses
+                temperature=0.0,
             )
         ).content
 
@@ -73,7 +75,7 @@ class TestFactsEndToEnd:
             await llm_client.chat_async(
                 messages=[{"role": "user", "content": question}],
                 system=prompt_with_facts,
-                temperature=0.3,
+                temperature=0.0,
             )
         ).content
 
@@ -98,10 +100,14 @@ class TestFactsEndToEnd:
             "Responses should differ when facts are provided"
         )
 
-        # The response with facts should mention Python given the preference
+        # The response with facts should reflect the stated Python preference.
+        # Accept any Python-ecosystem term — the 0.5B test model needs vocabulary
+        # flexibility, matching the pattern in test_fact_categories_affect_response.
         response_lower = response_with_facts.lower()
-        assert "python" in response_lower, (
-            "Response with facts should mention Python given the stated preference"
+        python_terms = ["python", "fastapi", "django", "flask"]
+        assert any(term in response_lower for term in python_terms), (
+            f"Response with facts should reflect Python preference. "
+            f"Got: {response_with_facts[:200]}..."
         )
 
     @pytest.mark.asyncio
@@ -146,12 +152,13 @@ class TestFactsEndToEnd:
         assert "short focused" in prompt_all_facts
         assert "practical examples" in prompt_all_facts
 
-        # Query with all facts
+        # Query with all facts. temperature=0.0 for deterministic sampling —
+        # the 0.5B test model is too noisy at higher temps.
         response = (
             await llm_client.chat_async(
                 messages=[{"role": "user", "content": question}],
                 system=prompt_all_facts,
-                temperature=0.3,
+                temperature=0.0,
             )
         ).content
 

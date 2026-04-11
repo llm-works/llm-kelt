@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `llm_kelt.ensure_schema(lg, pg, schema_name=None)` top-level helper for
+  embedding kelt into a foreign database. Provides a public migration path for
+  consumers who have a `PG` instance but don't want to construct a full `Client`
+  just to run migrations, without reaching into `core.*` modules. Shares its
+  migration-setup sequence with `Client(ensure_schema=True)` via
+  `Database.ensure_schema()` so both entry points run the same steps.
+- Re-export `SchemaStatus` and `SchemaState` from `llm_kelt` so callers can
+  inspect the result of `ensure_schema()` without importing from `core.*`.
 - Conversation layer with stateful dialogue management (`llm_kelt.conversation`)
   - `Conversation` class with token tracking and automatic compaction
   - `Message`, `ToolCall`, and `Role` types (FieldDict-based, zero serialization overhead)
@@ -21,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (re-exported from `llm_kelt.inference` for backward compatibility)
 - `ContextQuery` now uses the new `Conversation` class with `messages_as_dicts()` for
   clean LLM API payloads
+
+### Fixed
+- Reduced flakiness in `tests/e2e/test_facts.py` by switching LLM calls to
+  `temperature=0.0` and broadening the Python keyword assertion to accept any
+  Python-ecosystem term (matches the existing pattern in the sibling category test).
 
 ### Documentation
 - Add CLI reference (`docs/cli.md`) with full command documentation

@@ -392,14 +392,11 @@ class Client:
             ensure: If True, create database and run migrations automatically.
                     If False, only verify — raise SchemaVersionError if not current.
         """
-        schema_name = self._context.schema_name or self._db.schema
         if ensure:
-            self._db.ensure_database()
-            self._db.ensure_pg_schema()  # Create PostgreSQL schema if configured
-            manager = SchemaManager(self._lg, self._db.engine, schema_name=schema_name)
-            manager.ensure_schema()
+            self._db.ensure_schema(self._context.schema_name)
             return
 
+        schema_name = self._context.schema_name or self._db.schema
         manager = SchemaManager(self._lg, self._db.engine, schema_name=schema_name)
         status = manager.get_status()
         if status.state != SchemaState.CURRENT:
