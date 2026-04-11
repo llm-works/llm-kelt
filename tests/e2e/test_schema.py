@@ -159,3 +159,35 @@ class TestSchemaManager:
             finally:
                 holder_conn.execute(text(f"SELECT pg_advisory_unlock({_ADVISORY_LOCK_KEY})"))
                 holder_conn.commit()
+
+
+@pytest.mark.xdist_group("schema")
+class TestEnsureSchemaHelper:
+    """Test the top-level llm_kelt.ensure_schema() helper."""
+
+    def test_public_api_idempotent(self, logger, pg_with_tables):
+        """ensure_schema is exported from llm_kelt and is idempotent."""
+        import llm_kelt
+
+        status1 = llm_kelt.ensure_schema(logger, pg_with_tables)
+        status2 = llm_kelt.ensure_schema(logger, pg_with_tables)
+
+        assert status1.state == SchemaState.CURRENT
+        assert status2.state == SchemaState.CURRENT
+        assert status1.current_version == status2.current_version
+        assert status1.current_version == status1.head_version
+
+    def test_matches_verbose_form(self, logger, pg_with_tables):
+        """The helper returns the same status as the manual SchemaManager dance."""
+        import llm_kelt
+
+        helper_status = llm_kelt.ensure_schema(logger, pg_with_tables)
+
+        manual_mgr = SchemaManager(
+            logger, pg_with_tables.engine, schema_name=pg_with_tables.schema or "public"
+        )
+        manual_status = manual_mgr.get_status()
+
+        assert helper_status.state == manual_status.state
+        assert helper_status.current_version == manual_status.current_version
+        assert helper_status.head_version == manual_status.head_version
