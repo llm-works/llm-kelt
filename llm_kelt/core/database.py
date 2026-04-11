@@ -97,15 +97,25 @@ class Database:
 
         Args:
             schema_name: PostgreSQL schema name. Falls back to `self.schema`
-                (the schema PG was constructed with). `SchemaManager` ultimately
-                substitutes `"public"` if both are None.
+                (the schema PG was constructed with) when None. `SchemaManager`
+                ultimately substitutes `"public"` if both are None. An empty
+                string is rejected explicitly to avoid silently falling back.
 
         Returns:
             SchemaStatus describing the resulting state.
+
+        Raises:
+            ValueError: If schema_name is an empty string. Pass None instead
+                to fall back to `self.schema`.
         """
+        if schema_name == "":
+            raise ValueError(
+                "schema_name cannot be empty; pass None to fall back to the "
+                "schema PG was constructed with."
+            )
         self.ensure_database()
         self.ensure_pg_schema()
-        effective_schema = schema_name or self.schema
+        effective_schema = self.schema if schema_name is None else schema_name
         mgr = SchemaManager(self._lg, self.engine, schema_name=effective_schema)
         return mgr.ensure_schema()
 

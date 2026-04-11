@@ -181,10 +181,49 @@ class TestEnsureSchemaHelper:
         assert status1.current_version == status1.head_version
 
     def test_schema_name_override(self, logger, pg_with_tables):
-        """Explicit schema_name parameter overrides pg.schema."""
+        """Explicit schema_name parameter overrides pg.schema.
+
+        Passes a schema name distinct from `pg_with_tables.schema` and verifies
+        that migrations land in the override schema (not the PG default).
+        """
         import llm_kelt
 
-        # pg_with_tables has its own schema set by the test fixture; passing
-        # it explicitly should produce the same result as relying on pg.schema.
-        status = llm_kelt.ensure_schema(logger, pg_with_tables, schema_name=pg_with_tables.schema)
-        assert status.state == llm_kelt.SchemaState.CURRENT
+        override_schema = "ensure_schema_override_test"
+        assert pg_with_tables.schema != override_schema, (
+            "fixture precondition: override schema must differ from pg.schema"
+        )
+
+        try:
+            # SchemaManager runs migrations with search_path=override_schema but
+            # does not CREATE the schema itself (ensure_pg_schema only creates
+            # pg.schema). Pre-create it so migrations have a target.
+            with pg_with_tables.engine.connect() as conn:
+                conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{override_schema}"'))
+                conn.commit()
+
+            status = llm_kelt.ensure_schema(logger, pg_with_tables, schema_name=override_schema)
+            assert status.state == llm_kelt.SchemaState.CURRENT
+
+            # Verify tables actually landed in the override schema, not pg.schema.
+            with pg_with_tables.engine.connect() as conn:
+                result = conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM information_schema.tables "
+                        "WHERE table_schema = :schema AND table_name = 'alembic_version'"
+                    ),
+                    {"schema": override_schema},
+                ).scalar()
+                assert result == 1, (
+                    f"alembic_version should exist in override schema '{override_schema}'"
+                )
+        finally:
+            with pg_with_tables.engine.connect() as conn:
+                conn.execute(text(f'DROP SCHEMA IF EXISTS "{override_schema}" CASCADE'))
+                conn.commit()
+
+    def test_empty_schema_name_rejected(self, logger, pg_with_tables):
+        """Empty string schema_name is rejected explicitly (not silently ignored)."""
+        import llm_kelt
+
+        with pytest.raises(ValueError, match="cannot be empty"):
+            llm_kelt.ensure_schema(logger, pg_with_tables, schema_name="")
