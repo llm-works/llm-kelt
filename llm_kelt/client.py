@@ -12,7 +12,7 @@ from .core.content import ContentStore
 from .core.database import Database
 from .core.embedding import EmbeddingStore
 from .core.errors import SchemaVersionError
-from .core.schema import SchemaManager, SchemaState, SchemaStatus
+from .core.schema import SchemaManager, SchemaState, SchemaStatus, run_schema_setup
 from .inference.context import ContextBuilder
 from .inference.embedder import Embedder
 from .inference.query import ContextQuery
@@ -394,10 +394,7 @@ class Client:
         """
         schema_name = self._context.schema_name or self._db.schema
         if ensure:
-            self._db.ensure_database()
-            self._db.ensure_pg_schema()  # Create PostgreSQL schema if configured
-            manager = SchemaManager(self._lg, self._db.engine, schema_name=schema_name)
-            manager.ensure_schema()
+            run_schema_setup(self._lg, self._db, schema_name=schema_name)
             return
 
         manager = SchemaManager(self._lg, self._db.engine, schema_name=schema_name)

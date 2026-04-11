@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from appinfra.log import Logger
     from sqlalchemy.engine import Engine
 
+    from .database import Database
+
 
 # Advisory lock key for schema migrations.
 # IMPORTANT: This must be a fixed constant, not computed with hash(), because Python's
@@ -346,3 +348,34 @@ class SchemaManager:
                 return self.get_status()
             finally:
                 self._release_lock(conn)
+
+
+def run_schema_setup(
+    lg: "Logger",
+    db: "Database",
+    schema_name: str | None = None,
+) -> SchemaStatus:
+    """Run the full schema-setup sequence against an existing Database.
+
+    Single source of truth for the four-call sequence:
+        1. `db.ensure_database()` — create DB if PG was configured with `create_db=True`
+        2. `db.ensure_pg_schema()` — create the postgres schema namespace if configured
+        3. `SchemaManager(...).ensure_schema()` — run migrations and stamp version
+
+    Used by both `Client._verify_schema(ensure=True)` and the top-level
+    `llm_kelt.ensure_schema()` helper so the two entry points stay in sync.
+
+    Args:
+        lg: Logger instance.
+        db: Database wrapper around the target PG instance.
+        schema_name: PostgreSQL schema name. Defaults to `db.schema` and ultimately
+            to "public" if neither is set.
+
+    Returns:
+        SchemaStatus describing the resulting state.
+    """
+    db.ensure_database()
+    db.ensure_pg_schema()
+    effective_schema = schema_name or db.schema
+    mgr = SchemaManager(lg, db.engine, schema_name=effective_schema)
+    return mgr.ensure_schema()

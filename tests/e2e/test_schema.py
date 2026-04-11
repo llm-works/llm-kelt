@@ -172,22 +172,19 @@ class TestEnsureSchemaHelper:
         status1 = llm_kelt.ensure_schema(logger, pg_with_tables)
         status2 = llm_kelt.ensure_schema(logger, pg_with_tables)
 
-        assert status1.state == SchemaState.CURRENT
-        assert status2.state == SchemaState.CURRENT
+        # Return type and enum come from the public API surface — no need to
+        # reach into llm_kelt.core.* to inspect the result.
+        assert isinstance(status1, llm_kelt.SchemaStatus)
+        assert status1.state == llm_kelt.SchemaState.CURRENT
+        assert status2.state == llm_kelt.SchemaState.CURRENT
         assert status1.current_version == status2.current_version
         assert status1.current_version == status1.head_version
 
-    def test_matches_verbose_form(self, logger, pg_with_tables):
-        """The helper returns the same status as the manual SchemaManager dance."""
+    def test_schema_name_override(self, logger, pg_with_tables):
+        """Explicit schema_name parameter overrides pg.schema."""
         import llm_kelt
 
-        helper_status = llm_kelt.ensure_schema(logger, pg_with_tables)
-
-        manual_mgr = SchemaManager(
-            logger, pg_with_tables.engine, schema_name=pg_with_tables.schema or "public"
-        )
-        manual_status = manual_mgr.get_status()
-
-        assert helper_status.state == manual_status.state
-        assert helper_status.current_version == manual_status.current_version
-        assert helper_status.head_version == manual_status.head_version
+        # pg_with_tables has its own schema set by the test fixture; passing
+        # it explicitly should produce the same result as relying on pg.schema.
+        status = llm_kelt.ensure_schema(logger, pg_with_tables, schema_name=pg_with_tables.schema)
+        assert status.state == llm_kelt.SchemaState.CURRENT

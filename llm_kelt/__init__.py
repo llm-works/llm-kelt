@@ -61,6 +61,7 @@ from .core.errors import (
     SchemaVersionError,
     ValidationError,
 )
+from .core.schema import SchemaState, SchemaStatus
 from .factory import ClientFactory
 from .memory import ClientContext
 
@@ -76,4 +77,6 @@ __all__ = [
     "SchemaVersionError",
     "ClientContext",
     "ensure_schema",
+    "SchemaStatus",
+    "SchemaState",
 ]

@@ -8,10 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `llm_kelt.ensure_schema(lg, pg)` top-level helper for embedding kelt into a
-  foreign database. Replaces the 5-line dance of `Database.ensure_database()` +
-  `Database.ensure_pg_schema()` + `SchemaManager.ensure_schema()` and removes the
-  need for consumers to reach into `core.*` modules.
+- `llm_kelt.ensure_schema(lg, pg, schema_name=None)` top-level helper for
+  embedding kelt into a foreign database. Provides a public migration path for
+  consumers who have a `PG` instance but don't want to construct a full `Client`
+  just to run migrations, without reaching into `core.*` modules. Shares its
+  implementation with `Client(ensure_schema=True)` via a single internal helper
+  (`core.schema.run_schema_setup`) so both entry points stay in sync.
+- Re-export `SchemaStatus` and `SchemaState` from `llm_kelt` so callers can
+  inspect the result of `ensure_schema()` without importing from `core.*`.
 - Conversation layer with stateful dialogue management (`llm_kelt.conversation`)
   - `Conversation` class with token tracking and automatic compaction
   - `Message`, `ToolCall`, and `Role` types (FieldDict-based, zero serialization overhead)
