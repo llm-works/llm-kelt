@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .core.database import Database
-from .core.schema import SchemaStatus, run_schema_setup
+from .core.schema import SchemaStatus
 
 if TYPE_CHECKING:
     from appinfra.db.pg import PG
@@ -25,15 +25,17 @@ def ensure_schema(
 ) -> SchemaStatus:
     """Ensure kelt's schema is ready in the given PG instance.
 
-    Idempotent. Performs the full four-call setup sequence in one call:
+    Idempotent. Performs the full setup sequence in one call:
         1. Creates the database itself if PG was configured with `create_db=True`
         2. Creates the postgres schema namespace if PG was configured with one
         3. Runs migrations (or creates tables on a fresh database) and stamps version
 
     Use this when embedding kelt into a foreign database — e.g., a service that
-    owns its own PG and wants kelt's tables alongside its own. This shares its
-    implementation with `Client(ensure_schema=True)` via a single internal helper,
-    so both entry points behave identically.
+    owns its own PG and wants kelt's tables alongside its own. The migration-setup
+    sequence is shared with `Client(ensure_schema=True)` via `Database.ensure_schema()`,
+    so both entry points run the same steps. Note that constructing a `Client`
+    afterward still requires passing `schema_name` via `ClientContext` if it
+    differs from `pg.schema`; this helper only handles the migration side.
 
     Args:
         lg: Logger instance.
@@ -58,4 +60,4 @@ def ensure_schema(
         status = llm_kelt.ensure_schema(lg, pg, schema_name="my_tenant")
     """
     db = Database(lg, pg)
-    return run_schema_setup(lg, db, schema_name=schema_name)
+    return db.ensure_schema(schema_name)

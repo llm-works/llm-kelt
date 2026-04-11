@@ -8,6 +8,8 @@ import sqlalchemy_utils
 from appinfra.db.pg import PG
 from appinfra.log import Logger
 
+from .schema import SchemaManager, SchemaStatus
+
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
@@ -79,6 +81,33 @@ class Database:
         exists before tables are created. No-op if no schema is configured.
         """
         self._pg.create_schema()
+
+    def ensure_schema(self, schema_name: str | None = None) -> SchemaStatus:
+        """Run the full schema-setup sequence: create DB, create pg schema, migrate.
+
+        Single source of truth for the three-step setup used by both
+        `Client(ensure_schema=True)` and the top-level `llm_kelt.ensure_schema()`
+        helper:
+
+            1. `ensure_database()` — create the DB if PG was configured with
+               `create_db=True`
+            2. `ensure_pg_schema()` — create the postgres schema namespace if
+               configured
+            3. `SchemaManager.ensure_schema()` — run migrations and stamp version
+
+        Args:
+            schema_name: PostgreSQL schema name. Falls back to `self.schema`
+                (the schema PG was constructed with). `SchemaManager` ultimately
+                substitutes `"public"` if both are None.
+
+        Returns:
+            SchemaStatus describing the resulting state.
+        """
+        self.ensure_database()
+        self.ensure_pg_schema()
+        effective_schema = schema_name or self.schema
+        mgr = SchemaManager(self._lg, self.engine, schema_name=effective_schema)
+        return mgr.ensure_schema()
 
     def configure_schema(self, schema_name: str) -> None:
         """Configure PG with a schema after construction.

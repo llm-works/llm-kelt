@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   embedding kelt into a foreign database. Provides a public migration path for
   consumers who have a `PG` instance but don't want to construct a full `Client`
   just to run migrations, without reaching into `core.*` modules. Shares its
-  implementation with `Client(ensure_schema=True)` via a single internal helper
-  (`core.schema.run_schema_setup`) so both entry points stay in sync.
+  migration-setup sequence with `Client(ensure_schema=True)` via
+  `Database.ensure_schema()` so both entry points run the same steps.
 - Re-export `SchemaStatus` and `SchemaState` from `llm_kelt` so callers can
   inspect the result of `ensure_schema()` without importing from `core.*`.
 - Conversation layer with stateful dialogue management (`llm_kelt.conversation`)

@@ -12,7 +12,7 @@ from .core.content import ContentStore
 from .core.database import Database
 from .core.embedding import EmbeddingStore
 from .core.errors import SchemaVersionError
-from .core.schema import SchemaManager, SchemaState, SchemaStatus, run_schema_setup
+from .core.schema import SchemaManager, SchemaState, SchemaStatus
 from .inference.context import ContextBuilder
 from .inference.embedder import Embedder
 from .inference.query import ContextQuery
@@ -392,11 +392,11 @@ class Client:
             ensure: If True, create database and run migrations automatically.
                     If False, only verify — raise SchemaVersionError if not current.
         """
-        schema_name = self._context.schema_name or self._db.schema
         if ensure:
-            run_schema_setup(self._lg, self._db, schema_name=schema_name)
+            self._db.ensure_schema(self._context.schema_name)
             return
 
+        schema_name = self._context.schema_name or self._db.schema
         manager = SchemaManager(self._lg, self._db.engine, schema_name=schema_name)
         status = manager.get_status()
         if status.state != SchemaState.CURRENT:
