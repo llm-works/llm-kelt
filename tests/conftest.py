@@ -24,6 +24,31 @@ from llm_kelt.training import sft as training_sft  # noqa: F401
 pytest_plugins = ["appinfra.db.pg.testing"]
 
 
+@pytest.fixture(scope="session")
+def pg_test_schema(worker_id: str) -> str:
+    """
+    Generate a unique schema name per pytest process.
+
+    Overrides appinfra.db.pg.testing.pg_test_schema to include PID, preventing
+    collisions when multiple pytest processes run simultaneously (e.g., make check
+    running test.integration and test.coverage in parallel).
+
+    Schema naming:
+    - xdist worker: test_gw0_12345, test_gw1_12345, etc.
+    - non-xdist: test_master_12345
+
+    Dependencies:
+    - worker_id: provided by pytest-xdist (defaults to "master" when not using xdist)
+    - Cleanup: handled by appinfra's pg_migrate_factory (DROP SCHEMA in finally block)
+
+    Note: If appinfra's pg_test_schema signature changes, this override must be updated.
+    """
+    pid = os.getpid()
+    if worker_id == "master":
+        return f"test_master_{pid}"
+    return f"test_{worker_id}_{pid}"
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_cmdline_main(config):
     """Force sequential execution for e2e tests (GPU can't be shared).

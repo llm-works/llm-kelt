@@ -3,7 +3,8 @@ infra := $(shell appinfra scripts-path)
 
 # Configuration
 INFRA_DEV_PKG_NAME := llm_kelt
-INFRA_PYTEST_COVERAGE_THRESHOLD := 30
+INFRA_PYTEST_COVERAGE_THRESHOLD := 50
+INFRA_PYTEST_COVERAGE_MARKERS := unit or integration
 INFRA_DEV_DOCSTRING_THRESHOLD := 90
 
 # Test configuration file (used by integration and e2e tests)
