@@ -444,25 +444,31 @@ class EmbeddingAdapter:
         Returns:
             Number of orphan embeddings deleted (or found if dry_run).
         """
+        from sqlalchemy import delete as sa_delete
+        from sqlalchemy import func
+
         from llm_kelt.core.embedding import Embedding
 
         with self._session_factory() as session:
-            # Find orphan embeddings: entity_type matches but entity_id not in Fact.id
             # Subquery for valid fact IDs (as strings)
             valid_ids = select(sa_cast(Fact.id, String)).scalar_subquery()
 
-            # Count/find orphans
-            orphan_stmt = select(Embedding).where(
+            # Build WHERE clause for orphan embeddings
+            orphan_filter = and_(
                 Embedding.entity_type == self.ENTITY_TYPE,
                 Embedding.entity_id.not_in(valid_ids),
             )
 
-            orphans = list(session.scalars(orphan_stmt).all())
-            count = len(orphans)
-
-            if not dry_run and orphans:
-                for emb in orphans:
-                    session.delete(emb)
+            if dry_run:
+                # Count without loading vectors into memory
+                count = (
+                    session.scalar(select(func.count()).select_from(Embedding).where(orphan_filter))
+                    or 0
+                )
+            else:
+                # Set-based delete without materializing rows
+                result = session.execute(sa_delete(Embedding).where(orphan_filter))
+                count = result.rowcount
                 session.commit()
 
             return count

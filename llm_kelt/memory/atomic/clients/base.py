@@ -194,8 +194,15 @@ class FactClient(Generic[T]):
         Returns:
             DeleteResult with lists of deleted and not-found IDs.
         """
-        # Normalize to list
-        ids = [fact_ids] if isinstance(fact_ids, int) else list(fact_ids)
+        # Normalize to list, rejecting strings (which would split into characters)
+        if isinstance(fact_ids, int):
+            ids = [fact_ids]
+        elif isinstance(fact_ids, str):
+            raise TypeError(f"fact_ids must be int or Iterable[int], not str: {fact_ids!r}")
+        else:
+            ids = list(fact_ids)
+            if ids and not all(isinstance(i, int) for i in ids):
+                raise TypeError("All fact_ids must be integers")
 
         result = DeleteResult()
         with self._session_factory() as session:
