@@ -197,7 +197,8 @@ class TestAssertionsClient:
         assert kelt_client.atomic.assertions.exists(fact_id)
 
         result = kelt_client.atomic.assertions.delete(fact_id)
-        assert result is True
+        assert result.count == 1
+        assert fact_id in result.deleted
 
         assert not kelt_client.atomic.assertions.exists(fact_id)
 

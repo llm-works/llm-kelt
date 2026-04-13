@@ -422,3 +422,39 @@ class EmbeddingAdapter:
             Total count.
         """
         return self._store.count(entity_type=self.ENTITY_TYPE, model_name=model_name)
+
+    def delete_orphans(self, dry_run: bool = False) -> int:
+        """
+        Delete embeddings for facts that no longer exist.
+
+        Finds embeddings with entity_type='atomic.fact' where the entity_id
+        does not match any existing Fact.id, and deletes them.
+
+        Args:
+            dry_run: If True, count orphans but don't delete them.
+
+        Returns:
+            Number of orphan embeddings deleted (or found if dry_run).
+        """
+        from llm_kelt.core.embedding import Embedding
+
+        with self._session_factory() as session:
+            # Find orphan embeddings: entity_type matches but entity_id not in Fact.id
+            # Subquery for valid fact IDs (as strings)
+            valid_ids = select(sa_cast(Fact.id, String)).scalar_subquery()
+
+            # Count/find orphans
+            orphan_stmt = select(Embedding).where(
+                Embedding.entity_type == self.ENTITY_TYPE,
+                Embedding.entity_id.not_in(valid_ids),
+            )
+
+            orphans = list(session.scalars(orphan_stmt).all())
+            count = len(orphans)
+
+            if not dry_run and orphans:
+                for emb in orphans:
+                    session.delete(emb)
+                session.commit()
+
+            return count
