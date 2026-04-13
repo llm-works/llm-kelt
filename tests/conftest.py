@@ -29,15 +29,19 @@ def pg_test_schema(worker_id: str) -> str:
     """
     Generate a unique schema name per pytest process.
 
-    Extends appinfra's default to include PID, preventing collisions when
-    multiple pytest processes run simultaneously (e.g., make check running
-    test.integration and test.coverage in parallel).
+    Overrides appinfra.db.pg.testing.pg_test_schema to include PID, preventing
+    collisions when multiple pytest processes run simultaneously (e.g., make check
+    running test.integration and test.coverage in parallel).
 
     Schema naming:
     - xdist worker: test_gw0_12345, test_gw1_12345, etc.
     - non-xdist: test_master_12345
 
-    Cleanup happens automatically via pg_migrate_factory's finally block.
+    Dependencies:
+    - worker_id: provided by pytest-xdist (defaults to "master" when not using xdist)
+    - Cleanup: handled by appinfra's pg_migrate_factory (DROP SCHEMA in finally block)
+
+    Note: If appinfra's pg_test_schema signature changes, this override must be updated.
     """
     pid = os.getpid()
     if worker_id == "master":

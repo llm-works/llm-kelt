@@ -71,16 +71,16 @@ class TestBuildContextFilter:
         assert result is None
 
     def test_exact_match_uses_equality(self):
-        """Non-glob pattern uses equality comparison."""
-        # We can't easily test the SQL expression without a real column,
-        # but we can verify it doesn't crash
+        """Non-glob pattern uses equality comparison, not LIKE."""
         from sqlalchemy import String, column
 
         col = column("ctx", String)
         result = build_context_filter("exact_value", col)
         assert result is not None
-        # Check it's an equality expression
-        assert "=" in str(result) or "ctx" in str(result)
+        # Verify it's equality (=) not LIKE
+        result_str = str(result).upper()
+        assert "LIKE" not in result_str
+        assert "=" in str(result)
 
     def test_glob_pattern_uses_like(self):
         """Glob pattern uses LIKE comparison."""

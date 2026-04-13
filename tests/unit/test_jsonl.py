@@ -46,9 +46,11 @@ class TestOpenOutput:
         filepath = tmp_path / "test.jsonl"
         with _open_output(filepath) as f:
             f.write("test\n")
+            file_handle = f  # Capture handle to check closure
 
-        # File should be closed now
-        assert Path(filepath).exists()
+        # Verify file was closed and content was written
+        assert file_handle.closed
+        assert Path(filepath).read_text() == "test\n"
 
 
 class TestLoadJsonl:
