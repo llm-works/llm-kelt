@@ -8,6 +8,7 @@ a type discriminator and optional type-specific details.
 """
 
 import enum
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
 from sqlalchemy import (
@@ -28,6 +29,33 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from llm_kelt.core.base import Base
+
+# =============================================================================
+# Result Types
+# =============================================================================
+
+
+@dataclass
+class DeleteResult:
+    """Result of a delete operation.
+
+    Attributes:
+        deleted: IDs of facts that were successfully deleted.
+        not_found: IDs that were not found (or not accessible in context).
+    """
+
+    deleted: list[int] = field(default_factory=list)
+    not_found: list[int] = field(default_factory=list)
+
+    @property
+    def count(self) -> int:
+        """Number of facts deleted."""
+        return len(self.deleted)
+
+    def __bool__(self) -> bool:
+        """True if any facts were deleted."""
+        return len(self.deleted) > 0
+
 
 # =============================================================================
 # Base Fact Table

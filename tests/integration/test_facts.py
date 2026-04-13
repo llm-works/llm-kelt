@@ -197,9 +197,31 @@ class TestAssertionsClient:
         assert kelt_client.atomic.assertions.exists(fact_id)
 
         result = kelt_client.atomic.assertions.delete(fact_id)
-        assert result is True
+        assert result.count == 1
+        assert fact_id in result.deleted
 
         assert not kelt_client.atomic.assertions.exists(fact_id)
+
+    def test_delete_batch(self, kelt_client, clean_tables):
+        """Test batch deleting with iterable input including missing IDs."""
+        fact_id1 = kelt_client.atomic.assertions.add("First to delete")
+        fact_id2 = kelt_client.atomic.assertions.add("Second to delete")
+        missing_id = 999999  # Non-existent ID
+
+        result = kelt_client.atomic.assertions.delete([fact_id1, missing_id, fact_id2])
+
+        assert result.count == 2
+        assert set(result.deleted) == {fact_id1, fact_id2}
+        assert result.not_found == [missing_id]
+        assert not kelt_client.atomic.assertions.exists(fact_id1)
+        assert not kelt_client.atomic.assertions.exists(fact_id2)
+
+    def test_delete_rejects_string(self, kelt_client, clean_tables):
+        """Test that delete rejects string input (would split into characters)."""
+        import pytest
+
+        with pytest.raises(TypeError, match="not str"):
+            kelt_client.atomic.assertions.delete("123")
 
 
 class TestAssertionsEmbeddings:
@@ -425,6 +447,35 @@ class TestAssertionsEmbeddings:
             min_similarity=0.0,
         )
         assert len(results_after) == 0
+
+    def test_delete_fact_cleans_up_embedding_atomically(self, kelt_client, clean_tables, database):
+        """Test that FactClient.delete() removes embedding in same transaction.
+
+        This verifies the atomicity fix: embedding deletion uses the same session
+        as fact deletion, ensuring both succeed or fail together.
+        """
+        fact_id = kelt_client.atomic.assertions.add("Fact with embedding")
+        kelt_client.atomic.embeddings.set_embedding(fact_id, [0.5, 0.5], "test-model")
+
+        # Verify both exist
+        assert kelt_client.atomic.assertions.exists(fact_id)
+        assert kelt_client.atomic.embeddings.has_embedding(fact_id, "test-model")
+
+        # Delete fact - should automatically clean up embedding
+        result = kelt_client.atomic.assertions.delete(fact_id)
+        assert result.count == 1
+
+        # Both fact and embedding should be gone
+        assert not kelt_client.atomic.assertions.exists(fact_id)
+        assert not kelt_client.atomic.embeddings.has_embedding(fact_id, "test-model")
+
+        # Verify no orphan embeddings left
+        results = kelt_client.atomic.embeddings.search_similar(
+            query=[0.5, 0.5],
+            model_name="test-model",
+            min_similarity=0.9,
+        )
+        assert len(results) == 0
 
     def test_search_similar_with_categories_filter(self, kelt_client, clean_tables):
         """Test that search_similar filters by categories in SQL."""

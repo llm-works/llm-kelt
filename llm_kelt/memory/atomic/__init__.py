@@ -23,6 +23,7 @@ from .clients import (
 )
 from .embedding import EmbeddingAdapter, EmbeddingFilter
 from .models import (
+    DeleteResult,
     DirectiveDetails,
     Fact,
     FactRelationship,
@@ -40,6 +41,7 @@ __all__ = [
     # Protocol
     "Protocol",
     # Models
+    "DeleteResult",
     "Fact",
     "FactRelationship",
     "RelType",

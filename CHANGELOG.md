@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `DeleteResult` dataclass for atomic fact deletion results (`.deleted`, `.not_found`, `.count`)
+- `EmbeddingAdapter.delete_orphans(dry_run=False)` to clean up embeddings for deleted facts
+- `kelt atomic vacuum [--dry-run]` CLI command for orphan embedding cleanup
 - `llm_kelt.ensure_schema(lg, pg, schema_name=None)` top-level helper for
   embedding kelt into a foreign database. Provides a public migration path for
   consumers who have a `PG` instance but don't want to construct a full `Client`
@@ -25,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Example script (`examples/05_conversation.py`)
 
 ### Changed
+- **Breaking**: `FactClient.delete()` now returns `DeleteResult` instead of `bool`, accepts
+  `int | Iterable[int]`, and automatically cleans up associated embeddings
 - `Conversation` moved from `llm_kelt.inference.query` to `llm_kelt.conversation.session`
   (re-exported from `llm_kelt.inference` for backward compatibility)
 - `ContextQuery` now uses the new `Conversation` class with `messages_as_dicts()` for

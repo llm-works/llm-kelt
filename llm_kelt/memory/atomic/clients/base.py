@@ -1,7 +1,7 @@
 """Base client for atomic memory fact-based storage."""
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar, cast
 
@@ -10,7 +10,7 @@ from appinfra.log import Logger
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import Fact
+from ..models import DeleteResult, Fact
 
 T = TypeVar("T")  # Details model type
 
@@ -181,22 +181,42 @@ class FactClient(Generic[T]):
 
             return session.scalar(stmt) or 0
 
-    def delete(self, fact_id: int) -> bool:
+    def delete(self, fact_ids: int | Iterable[int]) -> DeleteResult:
         """
-        Delete a fact and its details (hard delete).
+        Delete fact(s) and their embeddings (hard delete).
+
+        Deletes the fact, its detail record (via CASCADE), and any associated
+        embeddings. Relationships are also deleted via CASCADE.
 
         Args:
-            fact_id: The fact ID to delete.
+            fact_ids: Single fact ID or iterable of fact IDs to delete.
 
         Returns:
-            True if deleted, False if not found.
+            DeleteResult with lists of deleted and not-found IDs.
         """
+        # Normalize to list, rejecting strings (which would split into characters)
+        if isinstance(fact_ids, int):
+            ids = [fact_ids]
+        elif isinstance(fact_ids, str):
+            raise TypeError(f"fact_ids must be int or Iterable[int], not str: {fact_ids!r}")
+        else:
+            ids = list(fact_ids)
+            if ids and not all(isinstance(i, int) for i in ids):
+                raise TypeError("All fact_ids must be integers")
+
+        result = DeleteResult()
         with self._session_factory() as session:
-            fact = self._get_fact(session, fact_id)
-            if fact is None:
-                return False
-            session.delete(fact)  # CASCADE deletes details
-            return True
+            for fid in ids:
+                fact = self._get_fact(session, fid)
+                if fact is None:
+                    result.not_found.append(fid)
+                    continue
+                # Delete embedding in same transaction (if adapter configured)
+                if self._embedding_adapter is not None:
+                    self._embedding_adapter.delete_embedding(fid, session=session)
+                session.delete(fact)  # CASCADE deletes details and relationships
+                result.deleted.append(fid)
+        return result
 
     def deactivate(self, fact_id: int) -> bool:
         """

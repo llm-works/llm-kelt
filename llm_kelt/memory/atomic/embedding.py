@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 from appinfra.db.utils import detach_all
 from sqlalchemy import String, and_, select
 from sqlalchemy import cast as sa_cast
+from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from llm_kelt.core.embedding import EmbeddingStore
@@ -339,7 +340,7 @@ class EmbeddingAdapter:
         effective_filter = self._build_filter(filter, fact_type, categories)
         return self._search_and_score(query, model_name, top_k, min_similarity, effective_filter)
 
-    def delete_embedding(self, fact_id: int) -> int:
+    def delete_embedding(self, fact_id: int, *, session: Session | None = None) -> int:
         """
         Delete embeddings when a fact is deleted.
 
@@ -347,11 +348,13 @@ class EmbeddingAdapter:
 
         Args:
             fact_id: The fact ID.
+            session: Optional session for transaction participation. If provided,
+                the deletion participates in the caller's transaction.
 
         Returns:
             Number of embeddings deleted.
         """
-        return self._store.delete(self.ENTITY_TYPE, str(fact_id))
+        return self._store.delete(self.ENTITY_TYPE, str(fact_id), session=session)
 
     def has_embedding(self, fact_id: int, model_name: str) -> bool:
         """
@@ -422,3 +425,50 @@ class EmbeddingAdapter:
             Total count.
         """
         return self._store.count(entity_type=self.ENTITY_TYPE, model_name=model_name)
+
+    def delete_orphans(self, dry_run: bool = False) -> int:
+        """
+        Delete embeddings for facts that no longer exist.
+
+        Finds embeddings with entity_type='atomic.fact' where the entity_id
+        does not match any existing Fact.id, and deletes them.
+
+        Note:
+            This method operates globally across all contexts, ignoring any
+            context_key set on this adapter. Orphan embeddings have no associated
+            fact to derive context from, so context filtering is not applicable.
+
+        Args:
+            dry_run: If True, count orphans but don't delete them.
+
+        Returns:
+            Number of orphan embeddings deleted (or found if dry_run).
+        """
+        from sqlalchemy import delete as sa_delete
+        from sqlalchemy import func
+
+        from llm_kelt.core.embedding import Embedding
+
+        with self._session_factory() as session:
+            # Subquery for valid fact IDs (as strings)
+            valid_ids = select(sa_cast(Fact.id, String)).scalar_subquery()
+
+            # Build WHERE clause for orphan embeddings
+            orphan_filter = and_(
+                Embedding.entity_type == self.ENTITY_TYPE,
+                Embedding.entity_id.not_in(valid_ids),
+            )
+
+            if dry_run:
+                # Count without loading vectors into memory
+                count = (
+                    session.scalar(select(func.count()).select_from(Embedding).where(orphan_filter))
+                    or 0
+                )
+            else:
+                # Set-based delete without materializing rows
+                result = session.execute(sa_delete(Embedding).where(orphan_filter))
+                count = result.rowcount
+                session.commit()
+
+            return count

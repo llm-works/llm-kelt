@@ -10,7 +10,7 @@ from typing import Any, cast
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, Index, Integer, String, UniqueConstraint, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from .base import Base
 from .errors import ValidationError
@@ -305,7 +305,7 @@ class EmbeddingStore:
             result = session.scalar(stmt)
             return list(result) if result is not None else None
 
-    def delete(self, entity_type: str, entity_id: str) -> int:
+    def delete(self, entity_type: str, entity_id: str, *, session: Session | None = None) -> int:
         """
         Delete all embeddings for an entity.
 
@@ -314,20 +314,29 @@ class EmbeddingStore:
         Args:
             entity_type: Type prefix.
             entity_id: Entity ID.
+            session: Optional session for transaction participation. If provided,
+                the caller is responsible for commit/rollback.
 
         Returns:
             Number of embeddings deleted.
         """
-        with self._session_factory() as session:
+
+        def _do_delete(sess: Session) -> int:
             stmt = select(Embedding).where(
                 Embedding.entity_type == entity_type,
                 Embedding.entity_id == entity_id,
             )
-            embeddings = list(session.scalars(stmt).all())
-            count = len(embeddings)
+            embeddings = list(sess.scalars(stmt).all())
             for emb in embeddings:
-                session.delete(emb)
-            session.commit()
+                sess.delete(emb)
+            return len(embeddings)
+
+        if session is not None:
+            return _do_delete(session)
+
+        with self._session_factory() as new_session:
+            count = _do_delete(new_session)
+            new_session.commit()
             return count
 
     def exists(self, entity_type: str, entity_id: str, model_name: str) -> bool:
