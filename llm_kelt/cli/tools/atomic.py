@@ -8,12 +8,18 @@ from appinfra.app.tools import Tool, ToolConfig
 
 
 def _get_database(lg: Any, app_config: Any):
-    """Create database connection from app config."""
+    """Create database connection from app config.
+
+    Requires a database configured under dbs.default in the app config.
+    """
     from llm_kelt.core.database import Database
 
     db_config = app_config.dbs.get("default")
     if db_config is None:
-        raise RuntimeError("No 'dbs.default' configuration found")
+        raise RuntimeError(
+            "No 'dbs.default' configuration found. "
+            "The atomic CLI requires a database configured under 'dbs.default'."
+        )
 
     from appinfra.db import PG
 

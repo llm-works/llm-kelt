@@ -204,9 +204,9 @@ class FactClient(Generic[T]):
                 if fact is None:
                     result.not_found.append(fid)
                     continue
-                # Delete embedding first (if adapter configured)
+                # Delete embedding in same transaction (if adapter configured)
                 if self._embedding_adapter is not None:
-                    self._embedding_adapter.delete_embedding(fid)
+                    self._embedding_adapter.delete_embedding(fid, session=session)
                 session.delete(fact)  # CASCADE deletes details and relationships
                 result.deleted.append(fid)
         return result
