@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `AsyncCompactor` base class for I/O-bound compaction strategies (e.g., LLM summarization)
+- `Conversation.append_async()` for non-blocking compaction in async contexts
+- Warns at construction when `AsyncCompactor` is used (reminds to use `append_async()`)
+- Raises `RuntimeError` if sync `append()` triggers async compaction
 - `Client.embedding_store` public property for entity-type agnostic vector storage
   (enables custom embeddings for non-fact entities like queries or documents)
 - `EmbeddingStore` re-exported from `llm_kelt` for type hints

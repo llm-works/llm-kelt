@@ -29,7 +29,7 @@ Usage::
         compactor.compact(conv)
 """
 
-from .compaction import Compactor, SlidingWindowCompactor, SummarizingCompactor
+from .compaction import AsyncCompactor, Compactor, SlidingWindowCompactor, SummarizingCompactor
 from .session import Config, Conversation
 from .storage import FileSessionStorage, SessionStorage, SessionSummary, StoredSession
 from .tokens import estimate_message_tokens, estimate_tokens
@@ -44,6 +44,7 @@ __all__ = [
     "Conversation",
     "Config",
     # Compaction
+    "AsyncCompactor",
     "Compactor",
     "SlidingWindowCompactor",
     "SummarizingCompactor",
