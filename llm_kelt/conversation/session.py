@@ -4,7 +4,7 @@ Manages conversation history with context window awareness. Tracks messages,
 estimates token usage, and signals when compaction is needed. Does not perform
 compaction itself — that's delegated to a Compactor.
 
-Implements saia's ``ConversationLike`` protocol so it can be passed directly
+Implements saia's ``AsyncConversationLike`` protocol so it can be passed directly
 to saia verbs (e.g., ``Complete``) for automatic compaction during tool loops.
 """
 
@@ -17,7 +17,7 @@ from typing import Any
 from appinfra import FieldDict
 from appinfra.log import Logger
 from appinfra.time import since, start
-from llm_saia import ConversationLike, Message, Role, ToolCall
+from llm_saia import AsyncConversationLike, Message, Role, ToolCall
 
 from .compaction.base import AsyncCompactor, Compactor
 from .tokens import estimate_message_tokens
@@ -39,13 +39,13 @@ class Config(FieldDict):
     min_recent_messages: int = 4
 
 
-class Conversation(ConversationLike):
+class Conversation(AsyncConversationLike):
     """Manages conversation history with context window awareness.
 
     Tracks messages, estimates token usage, and signals when compaction is needed.
     It does not perform compaction itself — that's delegated to a Compactor.
 
-    Implements ``ConversationLike`` so it can be passed to saia verbs::
+    Implements ``AsyncConversationLike`` so it can be passed to saia verbs::
 
         from appinfra.log import Logger
         from llm_kelt.conversation import Conversation, Config
@@ -125,7 +125,7 @@ class Conversation(ConversationLike):
             self._run_compaction()
 
     async def append_async(self, msg: Message) -> None:
-        """Append a message asynchronously (ConversationLike protocol).
+        """Append a message asynchronously (AsyncConversationLike protocol).
 
         Async variant of append() that supports both sync and async compactors
         without blocking the event loop.
