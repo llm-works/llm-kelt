@@ -113,15 +113,20 @@ class Conversation(AsyncConversationLike):
                 triggered. Use append_async() instead.
         """
         tokens = estimate_message_tokens(msg.role, msg.content, msg.tool_calls)
-        self._messages.append(msg)
-        self._token_count += tokens
 
-        if self.compactor is not None and self.needs_compaction():
-            if isinstance(self.compactor, AsyncCompactor):
+        # Check BEFORE mutating: would this append trigger async compaction?
+        if isinstance(self.compactor, AsyncCompactor):
+            would_trigger = (self._token_count + tokens) / self.config.max_tokens
+            if would_trigger >= self.config.compact_threshold:
                 raise RuntimeError(
                     "Async compactor requires append_async(). "
                     "Use 'await conversation.append_async(msg)' instead."
                 )
+
+        self._messages.append(msg)
+        self._token_count += tokens
+
+        if self.compactor is not None and self.needs_compaction():
             self._run_compaction()
 
     async def append_async(self, msg: Message) -> None:

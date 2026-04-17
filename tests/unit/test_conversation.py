@@ -397,6 +397,10 @@ class TestAsyncCompaction:
         with pytest.raises(RuntimeError, match="append_async"):
             conv.append(Message(role="user", content="a" * 200))
 
+        # Verify state was not mutated by the failed append
+        assert conv.message_count == 1
+        assert conv.messages[0].content == "short"
+
     async def test_append_async_with_sync_compactor(self, lg):
         class MockSyncCompactor(Compactor):
             def __init__(self):
