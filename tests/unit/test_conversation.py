@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
+from unittest.mock import MagicMock
+
+import pytest
 
 from llm_kelt.conversation import (
+    AsyncCompactor,
+    Compactor,
     Config,
     Conversation,
     Message,
@@ -359,3 +364,86 @@ class TestConfig:
         config = Config(max_tokens=8000)
         d = dict(config)
         assert d["max_tokens"] == 8000
+
+
+class TestAsyncCompaction:
+    """Tests for async compaction support."""
+
+    def test_async_compactor_warning_on_construction(self):
+        class MockAsyncCompactor(AsyncCompactor):
+            async def compact(self, conversation: Conversation) -> None:
+                pass
+
+        mock_lg = MagicMock()
+        compactor = MockAsyncCompactor()
+        Conversation(mock_lg, compactor=compactor)
+
+        mock_lg.warning.assert_called_once()
+        call_args = mock_lg.warning.call_args
+        assert "AsyncCompactor detected" in call_args[0][0]
+        assert "append_async" in call_args[0][0]
+
+    def test_sync_append_raises_with_async_compactor(self, lg):
+        class MockAsyncCompactor(AsyncCompactor):
+            async def compact(self, conversation: Conversation) -> None:
+                pass
+
+        config = Config(max_tokens=50, compact_threshold=0.5)
+        compactor = MockAsyncCompactor()
+        conv = Conversation(lg, config=config, compactor=compactor)
+
+        conv.append(Message(role="user", content="short"))
+
+        with pytest.raises(RuntimeError, match="append_async"):
+            conv.append(Message(role="user", content="a" * 200))
+
+    async def test_append_async_with_sync_compactor(self, lg):
+        class MockSyncCompactor(Compactor):
+            def __init__(self):
+                self.called = False
+
+            def compact(self, conversation: Conversation) -> None:
+                self.called = True
+                msgs = conversation.messages[-2:]
+                conversation.replace_messages(msgs)
+
+        config = Config(max_tokens=50, compact_threshold=0.5)
+        compactor = MockSyncCompactor()
+        conv = Conversation(lg, config=config, compactor=compactor)
+
+        await conv.append_async(Message(role="user", content="short"))
+        await conv.append_async(Message(role="user", content="a" * 200))
+
+        assert compactor.called
+        assert conv.message_count == 2
+
+    async def test_append_async_with_async_compactor(self, lg):
+        class MockAsyncCompactor(AsyncCompactor):
+            def __init__(self):
+                self.called = False
+
+            async def compact(self, conversation: Conversation) -> None:
+                self.called = True
+                msgs = conversation.messages[-2:]
+                conversation.replace_messages(msgs)
+
+        config = Config(max_tokens=50, compact_threshold=0.5)
+        compactor = MockAsyncCompactor()
+        conv = Conversation(lg, config=config, compactor=compactor)
+
+        await conv.append_async(Message(role="user", content="short"))
+        await conv.append_async(Message(role="user", content="a" * 200))
+
+        assert compactor.called
+        assert conv.message_count == 2
+
+    def test_sync_compactor_no_warning(self):
+        class MockSyncCompactor(Compactor):
+            def compact(self, conversation: Conversation) -> None:
+                pass
+
+        mock_lg = MagicMock()
+        compactor = MockSyncCompactor()
+        Conversation(mock_lg, compactor=compactor)
+
+        mock_lg.warning.assert_not_called()

@@ -10,6 +10,7 @@ to saia verbs (e.g., ``Complete``) for automatic compaction during tool loops.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 from typing import Any
 
@@ -18,7 +19,7 @@ from appinfra.log import Logger
 from appinfra.time import since, start
 from llm_saia import ConversationLike, Message, Role, ToolCall
 
-from .compaction.base import Compactor
+from .compaction.base import AsyncCompactor, Compactor
 from .tokens import estimate_message_tokens
 
 
@@ -73,7 +74,7 @@ class Conversation(ConversationLike):
         self,
         lg: Logger,
         config: Config | None = None,
-        compactor: Compactor | None = None,
+        compactor: Compactor | AsyncCompactor | None = None,
     ) -> None:
         """Initialize conversation.
 
@@ -81,12 +82,20 @@ class Conversation(ConversationLike):
             lg: Logger for debug output (compaction events, stats).
             config: Conversation configuration. Uses defaults if None.
             compactor: Optional compactor for automatic compaction on add().
+                If an AsyncCompactor is provided, use append_async() instead
+                of append() to avoid blocking the event loop.
         """
         self._lg = lg
         self.config = config or Config()
         self.compactor = compactor
         self._messages: list[Message] = []
         self._token_count: int = 0
+
+        if isinstance(compactor, AsyncCompactor):
+            self._lg.warning(
+                "AsyncCompactor detected - use append_async() to avoid blocking",
+                extra={"compactor": type(compactor).__name__},
+            )
 
     # --- ConversationLike protocol ---
 
@@ -98,32 +107,73 @@ class Conversation(ConversationLike):
 
         Args:
             msg: Message to append.
+
+        Raises:
+            RuntimeError: If an AsyncCompactor is configured and compaction is
+                triggered. Use append_async() instead.
         """
         tokens = estimate_message_tokens(msg.role, msg.content, msg.tool_calls)
         self._messages.append(msg)
         self._token_count += tokens
 
         if self.compactor is not None and self.needs_compaction():
+            if isinstance(self.compactor, AsyncCompactor):
+                raise RuntimeError(
+                    "Async compactor requires append_async(). "
+                    "Use 'await conversation.append_async(msg)' instead."
+                )
             self._run_compaction()
+
+    async def append_async(self, msg: Message) -> None:
+        """Append a message asynchronously (ConversationLike protocol).
+
+        Async variant of append() that supports both sync and async compactors
+        without blocking the event loop.
+
+        Args:
+            msg: Message to append.
+        """
+        tokens = estimate_message_tokens(msg.role, msg.content, msg.tool_calls)
+        self._messages.append(msg)
+        self._token_count += tokens
+
+        if self.compactor is not None and self.needs_compaction():
+            await self._run_compaction_async()
 
     def _run_compaction(self) -> None:
         """Run compaction and log stats."""
         assert self.compactor is not None  # noqa: S101
+        before_msgs, before_tokens, t0 = self._log_compaction_start()
+        self.compactor.compact(self)
+        self._log_compaction_end(before_msgs, before_tokens, t0)
 
+    async def _run_compaction_async(self) -> None:
+        """Run compaction asynchronously and log stats."""
+        assert self.compactor is not None  # noqa: S101
+        before_msgs, before_tokens, t0 = self._log_compaction_start()
+
+        if isinstance(self.compactor, AsyncCompactor):
+            await self.compactor.compact(self)
+        else:
+            await asyncio.to_thread(self.compactor.compact, self)
+
+        self._log_compaction_end(before_msgs, before_tokens, t0)
+
+    def _log_compaction_start(self) -> tuple[int, int, float]:
+        """Log compaction start and return state for later comparison."""
         before_msgs = len(self._messages)
         before_tokens = self._token_count
-
         self._lg.trace(
             "compacting conversation...",
             extra={"messages": before_msgs, "tokens": before_tokens},
         )
-        t0 = start()
+        return before_msgs, before_tokens, start()
 
-        self.compactor.compact(self)
-
+    def _log_compaction_end(self, before_msgs: int, before_tokens: int, t0: float) -> None:
+        """Log compaction completion with stats."""
+        assert self.compactor is not None  # noqa: S101
         after_msgs = len(self._messages)
         after_tokens = self._token_count
-
         self._lg.debug(
             "conversation compacted",
             extra={
