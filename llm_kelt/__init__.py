@@ -52,6 +52,7 @@ Usage:
 
 from .bootstrap import ensure_schema
 from .client import Client
+from .core.embedding import EmbeddingStore
 from .core.errors import (
     ConfigError,
     ConflictError,
@@ -68,6 +69,7 @@ from .memory import ClientContext
 __all__ = [
     "Client",
     "ClientFactory",
+    "EmbeddingStore",
     "KeltError",
     "ValidationError",
     "NotFoundError",

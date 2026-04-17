@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `Client.embedding_store` public property for entity-type agnostic vector storage
+  (enables custom embeddings for non-fact entities like queries or documents)
+- `EmbeddingStore` re-exported from `llm_kelt` for type hints
 - `DeleteResult` dataclass for atomic fact deletion results (`.deleted`, `.not_found`, `.count`)
 - `EmbeddingAdapter.delete_orphans(dry_run=False)` to clean up embeddings for deleted facts
 - `kelt atomic vacuum [--dry-run]` CLI command for orphan embedding cleanup
