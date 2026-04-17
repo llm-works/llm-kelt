@@ -115,7 +115,7 @@ class Conversation(AsyncConversationLike):
         tokens = estimate_message_tokens(msg.role, msg.content, msg.tool_calls)
 
         # Check BEFORE mutating: would this append trigger async compaction?
-        if isinstance(self.compactor, AsyncCompactor):
+        if isinstance(self.compactor, AsyncCompactor) and self.config.max_tokens > 0:
             would_trigger = (self._token_count + tokens) / self.config.max_tokens
             if would_trigger >= self.config.compact_threshold:
                 raise RuntimeError(
