@@ -90,6 +90,7 @@ class Conversation(AsyncConversationLike):
         self.compactor = compactor
         self._messages: list[Message] = []
         self._token_count: int = 0
+        self._append_lock = asyncio.Lock()
 
         if isinstance(compactor, AsyncCompactor):
             self._lg.warning(
@@ -138,12 +139,13 @@ class Conversation(AsyncConversationLike):
         Args:
             msg: Message to append.
         """
-        tokens = estimate_message_tokens(msg.role, msg.content, msg.tool_calls)
-        self._messages.append(msg)
-        self._token_count += tokens
+        async with self._append_lock:
+            tokens = estimate_message_tokens(msg.role, msg.content, msg.tool_calls)
+            self._messages.append(msg)
+            self._token_count += tokens
 
-        if self.compactor is not None and self.needs_compaction():
-            await self._run_compaction_async()
+            if self.compactor is not None and self.needs_compaction():
+                await self._run_compaction_async()
 
     def _run_compaction(self) -> None:
         """Run compaction and log stats."""
