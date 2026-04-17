@@ -298,7 +298,7 @@ class TestRAGIntegration:
 
     @pytest.mark.asyncio
     async def test_rag_multi_turn_conversation(
-        self, kelt_client, mock_embedder, mock_llm_client, sample_facts_with_embeddings
+        self, kelt_client, mock_embedder, mock_llm_client, sample_facts_with_embeddings, logger
     ):
         """Test RAG works across multi-turn conversations."""
         from llm_kelt.conversation import Conversation
@@ -311,7 +311,7 @@ class TestRAGIntegration:
             embedding_adapter=kelt_client.atomic.embeddings,
         )
 
-        conv = Conversation()
+        conv = Conversation(logger)
 
         # First turn - Python question
         await query.ask(

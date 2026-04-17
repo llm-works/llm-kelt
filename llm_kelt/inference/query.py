@@ -37,8 +37,8 @@ class ContextQuery:
         # Single question
         response = await query.ask("What's a good approach to X?")
 
-        # With conversation history
-        conv = Conversation()
+        # With conversation history (lg is a Logger instance)
+        conv = Conversation(lg)
         response = await query.ask("Hello!", conversation=conv)
         response = await query.ask("Tell me more", conversation=conv)
     """
@@ -105,8 +105,8 @@ class ContextQuery:
             # Single question
             response = await query.ask("Explain gradient descent")
 
-            # Multi-turn conversation
-            conv = Conversation()
+            # Multi-turn conversation (lg is a Logger instance)
+            conv = Conversation(lg)
             r1 = await query.ask("What is ML?", conversation=conv)
             r2 = await query.ask("Tell me more about neural networks", conversation=conv)
 

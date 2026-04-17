@@ -25,9 +25,9 @@ def storage(tmp_path: Path, lg):
     return FileSessionStorage(lg, tmp_path)
 
 
-def _make_conversation(messages: list[tuple[str, str]] | None = None) -> Conversation:
+def _make_conversation(lg, messages: list[tuple[str, str]] | None = None) -> Conversation:
     """Helper to create a conversation with optional messages."""
-    conv = Conversation()
+    conv = Conversation(lg)
     if messages:
         for role, content in messages:
             conv.add(content, role)
@@ -42,14 +42,14 @@ def _make_conversation(messages: list[tuple[str, str]] | None = None) -> Convers
 class TestSaveLoad:
     """Tests for save and load operations."""
 
-    def test_save_creates_file(self, storage: FileSessionStorage, tmp_path: Path):
-        conv = _make_conversation([("user", "hello"), ("assistant", "hi")])
+    def test_save_creates_file(self, storage: FileSessionStorage, tmp_path: Path, lg):
+        conv = _make_conversation(lg, [("user", "hello"), ("assistant", "hi")])
         storage.save("s1", conv)
 
         assert (tmp_path / "s1.json").exists()
 
-    def test_load_roundtrip(self, storage: FileSessionStorage):
-        conv = _make_conversation([("user", "hello"), ("assistant", "hi")])
+    def test_load_roundtrip(self, storage: FileSessionStorage, lg):
+        conv = _make_conversation(lg, [("user", "hello"), ("assistant", "hi")])
         storage.save("s1", conv, metadata={"model": "qwen2.5"})
 
         loaded = storage.load("s1")
@@ -60,9 +60,9 @@ class TestSaveLoad:
         assert loaded.metadata == {"model": "qwen2.5"}
         assert loaded.token_count == conv.token_count
 
-    def test_load_preserves_config(self, storage: FileSessionStorage):
+    def test_load_preserves_config(self, storage: FileSessionStorage, lg):
         config = Config(max_tokens=8000, compact_threshold=0.5)
-        conv = Conversation(config=config)
+        conv = Conversation(lg, config=config)
         conv.add("test")
         storage.save("s1", conv)
 
@@ -74,22 +74,22 @@ class TestSaveLoad:
         with pytest.raises(NotFoundError):
             storage.load("nonexistent")
 
-    def test_save_overwrites_preserves_created_at(self, storage: FileSessionStorage):
-        conv = _make_conversation([("user", "v1")])
+    def test_save_overwrites_preserves_created_at(self, storage: FileSessionStorage, lg):
+        conv = _make_conversation(lg, [("user", "v1")])
         storage.save("s1", conv)
 
         loaded1 = storage.load("s1")
         created_at = loaded1.created_at
 
-        conv2 = _make_conversation([("user", "v2")])
+        conv2 = _make_conversation(lg, [("user", "v2")])
         storage.save("s1", conv2)
 
         loaded2 = storage.load("s1")
         assert loaded2.created_at == created_at
         assert loaded2.messages[0]["content"] == "v2"
 
-    def test_save_with_tool_calls(self, storage: FileSessionStorage):
-        conv = Conversation()
+    def test_save_with_tool_calls(self, storage: FileSessionStorage, lg):
+        conv = Conversation(lg)
         from llm_kelt.conversation import ToolCall
 
         conv.add("", Role.ASSISTANT, tool_calls=[ToolCall(id="tc_1", name="search", arguments={})])
@@ -106,7 +106,7 @@ class TestSaveLoad:
         nested = tmp_path / "deep" / "nested" / "sessions"
         storage = FileSessionStorage(lg, nested)
 
-        conv = _make_conversation([("user", "hello")])
+        conv = _make_conversation(lg, [("user", "hello")])
         storage.save("s1", conv)
 
         assert nested.exists()
@@ -124,9 +124,9 @@ class TestList:
     def test_list_empty(self, storage: FileSessionStorage):
         assert storage.list() == []
 
-    def test_list_returns_summaries(self, storage: FileSessionStorage):
-        conv1 = _make_conversation([("user", "first question")])
-        conv2 = _make_conversation([("user", "second question"), ("assistant", "answer")])
+    def test_list_returns_summaries(self, storage: FileSessionStorage, lg):
+        conv1 = _make_conversation(lg, [("user", "first question")])
+        conv2 = _make_conversation(lg, [("user", "second question"), ("assistant", "answer")])
         storage.save("s1", conv1)
         storage.save("s2", conv2)
 
@@ -136,35 +136,35 @@ class TestList:
         ids = {s.session_id for s in summaries}
         assert ids == {"s1", "s2"}
 
-    def test_list_sorted_by_updated(self, storage: FileSessionStorage):
-        conv1 = _make_conversation([("user", "first")])
+    def test_list_sorted_by_updated(self, storage: FileSessionStorage, lg):
+        conv1 = _make_conversation(lg, [("user", "first")])
         storage.save("s1", conv1)
 
-        conv2 = _make_conversation([("user", "second")])
+        conv2 = _make_conversation(lg, [("user", "second")])
         storage.save("s2", conv2)
 
         summaries = storage.list()
         # s2 was saved last, should be first
         assert summaries[0].session_id == "s2"
 
-    def test_list_limit(self, storage: FileSessionStorage):
+    def test_list_limit(self, storage: FileSessionStorage, lg):
         for i in range(5):
-            conv = _make_conversation([("user", f"msg{i}")])
+            conv = _make_conversation(lg, [("user", f"msg{i}")])
             storage.save(f"s{i}", conv)
 
         summaries = storage.list(limit=2)
         assert len(summaries) == 2
 
-    def test_list_preview(self, storage: FileSessionStorage):
-        conv = _make_conversation([("user", "What is the weather?")])
+    def test_list_preview(self, storage: FileSessionStorage, lg):
+        conv = _make_conversation(lg, [("user", "What is the weather?")])
         storage.save("s1", conv)
 
         summaries = storage.list()
         assert summaries[0].preview == "What is the weather?"
 
-    def test_list_preview_truncation(self, storage: FileSessionStorage):
+    def test_list_preview_truncation(self, storage: FileSessionStorage, lg):
         long_msg = "x" * 200
-        conv = _make_conversation([("user", long_msg)])
+        conv = _make_conversation(lg, [("user", long_msg)])
         storage.save("s1", conv)
 
         summaries = storage.list()
@@ -175,9 +175,9 @@ class TestList:
         storage = FileSessionStorage(lg, "/tmp/nonexistent_dir_xyz")
         assert storage.list() == []
 
-    def test_list_skips_corrupt_files(self, storage: FileSessionStorage, tmp_path: Path):
+    def test_list_skips_corrupt_files(self, storage: FileSessionStorage, tmp_path: Path, lg):
         # Write a valid session
-        conv = _make_conversation([("user", "good")])
+        conv = _make_conversation(lg, [("user", "good")])
         storage.save("good", conv)
 
         # Write a corrupt file
@@ -196,8 +196,8 @@ class TestList:
 class TestDelete:
     """Tests for deleting sessions."""
 
-    def test_delete_existing(self, storage: FileSessionStorage, tmp_path: Path):
-        conv = _make_conversation([("user", "hello")])
+    def test_delete_existing(self, storage: FileSessionStorage, tmp_path: Path, lg):
+        conv = _make_conversation(lg, [("user", "hello")])
         storage.save("s1", conv)
 
         assert storage.delete("s1") is True
@@ -206,8 +206,8 @@ class TestDelete:
     def test_delete_nonexistent(self, storage: FileSessionStorage):
         assert storage.delete("nonexistent") is False
 
-    def test_delete_then_load_raises(self, storage: FileSessionStorage):
-        conv = _make_conversation([("user", "hello")])
+    def test_delete_then_load_raises(self, storage: FileSessionStorage, lg):
+        conv = _make_conversation(lg, [("user", "hello")])
         storage.save("s1", conv)
         storage.delete("s1")
 

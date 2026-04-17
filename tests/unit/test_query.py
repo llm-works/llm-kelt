@@ -40,25 +40,25 @@ class TestRAGArgs:
 class TestConversation:
     """Test Conversation class."""
 
-    def test_add_user_message(self):
+    def test_add_user_message(self, lg):
         """Test adding user message."""
-        conv = Conversation()
+        conv = Conversation(lg)
         conv.add("Hello")
         assert len(conv.messages) == 1
         assert conv.messages[0].role == "user"
         assert conv.messages[0].content == "Hello"
 
-    def test_add_assistant_message(self):
+    def test_add_assistant_message(self, lg):
         """Test adding assistant message."""
-        conv = Conversation()
+        conv = Conversation(lg)
         conv.add("Hi there", Role.ASSISTANT)
         assert len(conv.messages) == 1
         assert conv.messages[0].role == "assistant"
         assert conv.messages[0].content == "Hi there"
 
-    def test_clear(self):
+    def test_clear(self, lg):
         """Test clearing conversation."""
-        conv = Conversation()
+        conv = Conversation(lg)
         conv.add("Hello")
         conv.add("Hi", Role.ASSISTANT)
         conv.clear()
@@ -285,7 +285,13 @@ class TestContextQueryRAG:
 
     @pytest.mark.asyncio
     async def test_ask_with_rag_and_conversation(
-        self, mock_client, mock_context_builder, mock_embedding_adapter, mock_embedder, sample_fact
+        self,
+        mock_client,
+        mock_context_builder,
+        mock_embedding_adapter,
+        mock_embedder,
+        sample_fact,
+        lg,
     ):
         """Test that RAG works with multi-turn conversations."""
         mock_embedding_adapter.search_similar.return_value = [
@@ -299,7 +305,7 @@ class TestContextQueryRAG:
             embedding_adapter=mock_embedding_adapter,
         )
 
-        conv = Conversation()
+        conv = Conversation(lg)
         await query.ask("First question", conversation=conv, rag=RAGArgs())
         await query.ask("Follow up", conversation=conv, rag=RAGArgs())
 

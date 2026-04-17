@@ -126,15 +126,15 @@ class TestTokenEstimation:
 class TestConversation:
     """Tests for Conversation session management."""
 
-    def test_empty_conversation(self):
-        conv = Conversation()
+    def test_empty_conversation(self, lg):
+        conv = Conversation(lg)
         assert conv.message_count == 0
         assert conv.token_count == 0
         assert len(conv) == 0
         assert conv.messages == []
 
-    def test_add_messages(self):
-        conv = Conversation()
+    def test_add_messages(self, lg):
+        conv = Conversation(lg)
         conv.add("You are helpful.", Role.SYSTEM)
         conv.add("Hello")
         conv.add("Hi there", Role.ASSISTANT)
@@ -144,8 +144,8 @@ class TestConversation:
         assert conv.messages[1].role == "user"
         assert conv.messages[2].role == "assistant"
 
-    def test_add_tool_messages(self):
-        conv = Conversation()
+    def test_add_tool_messages(self, lg):
+        conv = Conversation(lg)
         conv.add("", Role.ASSISTANT, tool_calls=[ToolCall(id="tc_1", name="search", arguments={})])
         conv.add("results", Role.TOOL, tool_call_id="tc_1")
 
@@ -153,13 +153,13 @@ class TestConversation:
         assert conv.messages[0].tool_calls is not None
         assert conv.messages[1].tool_call_id == "tc_1"
 
-    def test_default_role_is_user(self):
-        conv = Conversation()
+    def test_default_role_is_user(self, lg):
+        conv = Conversation(lg)
         conv.add("hello")
         assert conv.messages[0].role == "user"
 
-    def test_token_tracking(self):
-        conv = Conversation()
+    def test_token_tracking(self, lg):
+        conv = Conversation(lg)
         conv.add("hello")
         initial = conv.token_count
         assert initial > 0
@@ -167,35 +167,35 @@ class TestConversation:
         conv.add("world", Role.ASSISTANT)
         assert conv.token_count > initial
 
-    def test_usage_ratio(self):
+    def test_usage_ratio(self, lg):
         config = Config(max_tokens=100)
-        conv = Conversation(config=config)
+        conv = Conversation(lg, config=config)
         assert conv.usage_ratio == 0.0
 
         conv.add("test")
         assert 0.0 < conv.usage_ratio < 1.0
 
-    def test_usage_ratio_zero_max(self):
+    def test_usage_ratio_zero_max(self, lg):
         config = Config(max_tokens=0)
-        conv = Conversation(config=config)
+        conv = Conversation(lg, config=config)
         assert conv.usage_ratio == 0.0
 
-    def test_needs_compaction(self):
+    def test_needs_compaction(self, lg):
         config = Config(max_tokens=50, compact_threshold=0.5)
-        conv = Conversation(config=config)
+        conv = Conversation(lg, config=config)
 
         # Add enough content to exceed threshold
         conv.add("a" * 200)
         assert conv.needs_compaction()
 
-    def test_no_compaction_needed(self):
+    def test_no_compaction_needed(self, lg):
         config = Config(max_tokens=100000)
-        conv = Conversation(config=config)
+        conv = Conversation(lg, config=config)
         conv.add("short message")
         assert not conv.needs_compaction()
 
-    def test_clear(self):
-        conv = Conversation()
+    def test_clear(self, lg):
+        conv = Conversation(lg)
         conv.add("hello")
         conv.add("hi", Role.ASSISTANT)
         conv.clear()
@@ -203,8 +203,8 @@ class TestConversation:
         assert conv.message_count == 0
         assert conv.token_count == 0
 
-    def test_replace_messages(self):
-        conv = Conversation()
+    def test_replace_messages(self, lg):
+        conv = Conversation(lg)
         conv.add("old message")
         conv.add("old response", Role.ASSISTANT)
 
@@ -216,8 +216,8 @@ class TestConversation:
         # Token count should be recalculated
         assert conv.token_count > 0
 
-    def test_get_system_message(self):
-        conv = Conversation()
+    def test_get_system_message(self, lg):
+        conv = Conversation(lg)
         conv.add("system prompt", Role.SYSTEM)
         conv.add("hello")
 
@@ -225,38 +225,38 @@ class TestConversation:
         assert sys_msg is not None
         assert sys_msg.content == "system prompt"
 
-    def test_get_system_message_none(self):
-        conv = Conversation()
+    def test_get_system_message_none(self, lg):
+        conv = Conversation(lg)
         conv.add("hello")
         assert conv.get_system_message() is None
 
-    def test_messages_returns_copy(self):
-        conv = Conversation()
+    def test_messages_returns_copy(self, lg):
+        conv = Conversation(lg)
         conv.add("hello")
         msgs = conv.messages
         msgs.append(Message(role="user", content="extra"))
         assert conv.message_count == 1  # Original unchanged
 
-    def test_as_messages_returns_view(self):
+    def test_as_messages_returns_view(self, lg):
         """as_messages() returns the live internal list (ConversationLike contract)."""
-        conv = Conversation()
+        conv = Conversation(lg)
         conv.add("hello")
         view = conv.as_messages()
         assert view is conv._messages
 
-    def test_append_protocol(self):
+    def test_append_protocol(self, lg):
         """append() implements ConversationLike protocol."""
-        conv = Conversation()
+        conv = Conversation(lg)
         conv.append(Message(role="user", content="hello"))
         assert conv.message_count == 1
         assert conv.token_count > 0
 
-    def test_auto_compaction_with_injected_compactor(self):
+    def test_auto_compaction_with_injected_compactor(self, lg):
         """Test that compaction fires automatically when compactor is set."""
         from llm_kelt.conversation import SlidingWindowCompactor
 
         config = Config(max_tokens=50, compact_threshold=0.5, min_recent_messages=1)
-        conv = Conversation(config=config, compactor=SlidingWindowCompactor())
+        conv = Conversation(lg, config=config, compactor=SlidingWindowCompactor())
 
         conv.add("first message")
         conv.add("second message", Role.ASSISTANT)
@@ -265,17 +265,17 @@ class TestConversation:
         # Should have been compacted — only recent messages preserved
         assert conv.message_count <= 2
 
-    def test_no_auto_compaction_without_compactor(self):
+    def test_no_auto_compaction_without_compactor(self, lg):
         config = Config(max_tokens=50, compact_threshold=0.5)
-        conv = Conversation(config=config)
+        conv = Conversation(lg, config=config)
 
         conv.add("a" * 200)
         # needs_compaction is True, but no compactor means no auto-compact
         assert conv.needs_compaction()
         assert conv.message_count == 1
 
-    def test_messages_as_dicts_strips_nones(self):
-        conv = Conversation()
+    def test_messages_as_dicts_strips_nones(self, lg):
+        conv = Conversation(lg)
         conv.add("hello")
         dicts = conv.messages_as_dicts()
         assert "tool_calls" not in dicts[0]
@@ -287,9 +287,9 @@ class TestConversation:
 class TestSplitForCompaction:
     """Tests for Conversation.split_for_compaction()."""
 
-    def test_split_basic(self):
+    def test_split_basic(self, lg):
         config = Config(min_recent_messages=2)
-        conv = Conversation(config=config)
+        conv = Conversation(lg, config=config)
         conv.add("msg1")
         conv.add("resp1", Role.ASSISTANT)
         conv.add("msg2")
@@ -299,9 +299,9 @@ class TestSplitForCompaction:
         assert len(to_compact) == 2
         assert len(preserved) == 2
 
-    def test_split_preserves_system(self):
+    def test_split_preserves_system(self, lg):
         config = Config(min_recent_messages=2, preserve_system=True)
-        conv = Conversation(config=config)
+        conv = Conversation(lg, config=config)
         conv.add("system", Role.SYSTEM)
         conv.add("msg1")
         conv.add("resp1", Role.ASSISTANT)
@@ -314,9 +314,9 @@ class TestSplitForCompaction:
         assert len(preserved) == 3
         assert preserved[0].role == "system"
 
-    def test_split_not_enough_messages(self):
+    def test_split_not_enough_messages(self, lg):
         config = Config(min_recent_messages=4)
-        conv = Conversation(config=config)
+        conv = Conversation(lg, config=config)
         conv.add("msg1")
         conv.add("resp1", Role.ASSISTANT)
 
@@ -324,9 +324,9 @@ class TestSplitForCompaction:
         assert len(to_compact) == 0
         assert len(preserved) == 2
 
-    def test_split_no_preserve_system(self):
+    def test_split_no_preserve_system(self, lg):
         config = Config(min_recent_messages=2, preserve_system=False)
-        conv = Conversation(config=config)
+        conv = Conversation(lg, config=config)
         conv.add("system", Role.SYSTEM)
         conv.add("msg1")
         conv.add("resp1", Role.ASSISTANT)

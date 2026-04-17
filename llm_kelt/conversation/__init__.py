@@ -9,12 +9,13 @@ Provides the primitives for multi-turn, context-aware conversations:
 
 Usage::
 
+    from appinfra.log import Logger
     from llm_kelt.conversation import Conversation, Config, Message
     from llm_kelt.conversation.storage import FileSessionStorage
     from llm_kelt.conversation.compaction import SlidingWindowCompactor
 
-    # Create conversation
-    conv = Conversation(config=Config(max_tokens=32000))
+    # Create conversation (lg is a Logger instance)
+    conv = Conversation(lg, config=Config(max_tokens=32000))
     conv.add("What happened in the news today?")
     conv.add("Here are today's top stories...", Role.ASSISTANT)
 

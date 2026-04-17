@@ -72,8 +72,9 @@ def demo_conversation():
     """Demonstrate conversation management with token tracking."""
     print(f"\n{H2}▶ Conversation Management{RESET}")
 
+    lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
     config = Config(max_tokens=200, compact_threshold=0.8, min_recent_messages=2)
-    conv = Conversation(config=config)
+    conv = Conversation(lg, config=config)
 
     conv.add("You are a helpful coding assistant.", Role.SYSTEM)
     conv.add("What is a Python decorator?")
@@ -145,7 +146,7 @@ def demo_storage():
             ],
             start=1,
         ):
-            conv = Conversation()
+            conv = Conversation(lg)
             conv.add(question)
             conv.add(answer, Role.ASSISTANT)
             storage.save(f"session-{i}", conv, metadata={"model": "qwen2.5-7b"})
@@ -227,7 +228,7 @@ async def demo_llm_conversation():
         base_system_prompt="You are a knowledgeable Python tutor. Keep answers concise.",
     )
 
-    conv = Conversation(config=Config(max_tokens=4000))
+    conv = Conversation(lg, config=Config(max_tokens=4000))
     questions = [
         "What are Python generators?",
         "How do they differ from list comprehensions?",
