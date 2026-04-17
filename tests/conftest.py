@@ -192,6 +192,12 @@ def logger():
 
 
 @pytest.fixture(scope="session")
+def lg(logger):
+    """Alias for logger fixture (matches parameter naming convention)."""
+    return logger
+
+
+@pytest.fixture(scope="session")
 def pg_test_config(config):
     """Provide database config to appinfra's schema isolation fixtures.
 

@@ -72,8 +72,8 @@ Stateful multi-turn dialogue with token tracking, compaction, and persistence.
 ```python
 from llm_kelt.conversation import Conversation, Config, Role
 
-# Create conversation with token limit
-conv = Conversation(config=Config(max_tokens=32000))
+# Create conversation with token limit (lg is a Logger instance)
+conv = Conversation(lg, config=Config(max_tokens=32000))
 conv.add("You are a helpful assistant.", Role.SYSTEM)
 conv.add("What is a Python decorator?")
 conv.add("A decorator wraps another function to extend its behavior.", Role.ASSISTANT)
@@ -108,6 +108,7 @@ if conv.needs_compaction():
 
 # Auto-compaction via injected compactor
 conv = Conversation(
+    lg,
     config=Config(max_tokens=32000, compact_threshold=0.8, min_recent_messages=4),
     compactor=SlidingWindowCompactor(),
 )
@@ -155,7 +156,7 @@ The conversation layer integrates with `ContextQuery` for multi-turn RAG:
 from llm_kelt.conversation import Conversation, Config
 from llm_kelt.inference.query import ContextQuery
 
-conv = Conversation(config=Config(max_tokens=4000))
+conv = Conversation(lg, config=Config(max_tokens=4000))
 query = ContextQuery(client=llm_client, context_builder=builder)
 
 response = await query.ask("What are Python generators?", conversation=conv)

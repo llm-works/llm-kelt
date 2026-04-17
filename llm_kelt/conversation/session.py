@@ -14,6 +14,8 @@ import dataclasses
 from typing import Any
 
 from appinfra import FieldDict
+from appinfra.log import Logger
+from appinfra.time import since, start
 from llm_saia import ConversationLike, Message, Role, ToolCall
 
 from .compaction.base import Compactor
@@ -44,18 +46,21 @@ class Conversation(ConversationLike):
 
     Implements ``ConversationLike`` so it can be passed to saia verbs::
 
+        from appinfra.log import Logger
         from llm_kelt.conversation import Conversation, Config
         from llm_saia import Complete
 
-        conv = Conversation(config=Config(max_tokens=32000))
+        conv = Conversation(lg, config=Config(max_tokens=32000))
         result = await complete("Do the task", conversation=conv)
         # conv now contains the full history with automatic compaction
 
     Example::
 
+        from appinfra.log import Logger
         from llm_kelt.conversation import Conversation, Config, Role
 
         conversation = Conversation(
+            lg,
             config=Config(max_tokens=32000),
             compactor=SlidingWindowCompactor(),
         )
@@ -66,15 +71,18 @@ class Conversation(ConversationLike):
 
     def __init__(
         self,
+        lg: Logger,
         config: Config | None = None,
         compactor: Compactor | None = None,
     ) -> None:
         """Initialize conversation.
 
         Args:
+            lg: Logger for debug output (compaction events, stats).
             config: Conversation configuration. Uses defaults if None.
             compactor: Optional compactor for automatic compaction on add().
         """
+        self._lg = lg
         self.config = config or Config()
         self.compactor = compactor
         self._messages: list[Message] = []
@@ -96,7 +104,40 @@ class Conversation(ConversationLike):
         self._token_count += tokens
 
         if self.compactor is not None and self.needs_compaction():
-            self.compactor.compact(self)
+            self._run_compaction()
+
+    def _run_compaction(self) -> None:
+        """Run compaction and log stats."""
+        assert self.compactor is not None  # noqa: S101
+
+        before_msgs = len(self._messages)
+        before_tokens = self._token_count
+
+        self._lg.trace(
+            "compacting conversation...",
+            extra={"messages": before_msgs, "tokens": before_tokens},
+        )
+        t0 = start()
+
+        self.compactor.compact(self)
+
+        after_msgs = len(self._messages)
+        after_tokens = self._token_count
+
+        self._lg.debug(
+            "conversation compacted",
+            extra={
+                "after": since(t0),
+                "compactor": type(self.compactor).__name__,
+                "messages": {"before": before_msgs, "after": after_msgs},
+                "tokens": {
+                    "before": before_tokens,
+                    "after": after_tokens,
+                    "saved": before_tokens - after_tokens,
+                },
+                "usage_ratio": self.usage_ratio,
+            },
+        )
 
     def as_messages(self) -> list[Message]:
         """Return current messages as a view (ConversationLike protocol).

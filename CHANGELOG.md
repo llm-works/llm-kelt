@@ -29,8 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - File-based and PostgreSQL session storage backends
   - `kelt session` CLI commands for listing, showing, and deleting sessions
   - Example script (`examples/05_conversation.py`)
+- Debug logging for conversation compaction (messages/tokens before/after, timing, usage ratio)
 
 ### Changed
+- **Breaking**: `Conversation.__init__` now requires `lg: Logger` as the first parameter
 - **Breaking**: `FactClient.delete()` now returns `DeleteResult` instead of `bool`, accepts
   `int | Iterable[int]`, and automatically cleans up associated embeddings
 - `Conversation` moved from `llm_kelt.inference.query` to `llm_kelt.conversation.session`
