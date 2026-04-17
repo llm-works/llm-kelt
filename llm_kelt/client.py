@@ -324,6 +324,36 @@ class Client:
         return self._embedder
 
     @property
+    def embedding_store(self) -> EmbeddingStore:
+        """Access embedding storage for custom entity types.
+
+        Provides entity-type agnostic vector storage and similarity search.
+        Use this for storing embeddings of non-fact entities (e.g., queries,
+        documents, custom domain objects).
+
+        Example:
+            # Store embedding for a custom entity type
+            kelt.embedding_store.store(
+                entity_type="myapp.query",
+                entity_id="q123",
+                embedding=[0.1, 0.2, ...],
+                model_name="text-embedding-3-small",
+            )
+
+            # Search for similar entities
+            results = kelt.embedding_store.search(
+                query=[0.1, 0.2, ...],
+                entity_type="myapp.query",
+                model_name="text-embedding-3-small",
+                top_k=5,
+            )
+
+            # Delete when entity is removed
+            kelt.embedding_store.delete("myapp.query", "q123")
+        """
+        return self._embedding_store
+
+    @property
     def kelt_config(self) -> DotDict | None:
         """Access kelt configuration (memory, embedding, default_system_prompt, etc.)."""
         return self._kelt_config

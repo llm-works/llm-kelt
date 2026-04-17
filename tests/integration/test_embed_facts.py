@@ -173,3 +173,92 @@ class TestEmbedMissingFactsIntegration:
         assert result.processed == 0
         assert result.failed == 0
         mock_embedder.embed_batch_async.assert_not_called()
+
+
+class TestPublicEmbeddingStore:
+    """Test the public embedding_store property for custom entity types."""
+
+    def test_embedding_store_property_exists(self, kelt_client):
+        """Test that embedding_store is publicly accessible."""
+        from llm_kelt import EmbeddingStore
+
+        store = kelt_client.embedding_store
+        assert store is not None
+        assert isinstance(store, EmbeddingStore)
+
+    def test_store_custom_entity_type(self, kelt_client, clean_tables):
+        """Test storing embeddings for a custom entity type."""
+        store = kelt_client.embedding_store
+
+        # Store embedding for a custom entity type
+        store.store(
+            entity_type="myapp.query",
+            entity_id="q123",
+            embedding=[0.1, 0.2, 0.3],
+            model_name="test-model",
+        )
+
+        # Verify it exists
+        assert store.exists("myapp.query", "q123", "test-model")
+
+        # Retrieve it
+        emb = store.get("myapp.query", "q123", "test-model")
+        assert emb == [0.1, 0.2, 0.3]
+
+    def test_search_custom_entity_type(self, kelt_client, clean_tables):
+        """Test searching embeddings for a custom entity type."""
+        store = kelt_client.embedding_store
+
+        # Store multiple embeddings
+        store.store("myapp.query", "q1", [1.0, 0.0, 0.0], "test-model")
+        store.store("myapp.query", "q2", [0.9, 0.1, 0.0], "test-model")
+        store.store("myapp.query", "q3", [0.0, 0.0, 1.0], "test-model")
+
+        # Search for similar to q1
+        results = store.search(
+            query=[1.0, 0.0, 0.0],
+            entity_type="myapp.query",
+            model_name="test-model",
+            top_k=2,
+        )
+
+        # q1 and q2 should be most similar
+        entity_ids = [r[0] for r in results]
+        assert "q1" in entity_ids
+        assert "q2" in entity_ids
+
+    def test_delete_custom_entity_type(self, kelt_client, clean_tables):
+        """Test deleting embeddings for a custom entity type."""
+        store = kelt_client.embedding_store
+
+        # Store and verify
+        store.store("myapp.query", "q999", [0.5, 0.5, 0.5], "test-model")
+        assert store.exists("myapp.query", "q999", "test-model")
+
+        # Delete
+        count = store.delete("myapp.query", "q999")
+        assert count == 1
+
+        # Verify gone
+        assert not store.exists("myapp.query", "q999", "test-model")
+
+    def test_custom_entity_isolated_from_facts(self, kelt_client, clean_tables):
+        """Test that custom entity embeddings don't interfere with fact embeddings."""
+        store = kelt_client.embedding_store
+
+        # Store custom embedding
+        store.store("myapp.query", "1", [0.5, 0.5, 0.5], "test-model")
+
+        # Create a fact with the same embedding
+        fact_id = kelt_client.atomic.assertions.add("Test assertion")
+        kelt_client.atomic.embeddings.set_embedding(fact_id, [0.5, 0.5, 0.5], "test-model")
+
+        # Search in custom type - should only find custom entity
+        custom_results = store.search([0.5, 0.5, 0.5], "myapp.query", "test-model")
+        assert len(custom_results) == 1
+        assert custom_results[0][0] == "1"
+
+        # Search in facts - should only find fact
+        fact_results = store.search([0.5, 0.5, 0.5], "atomic.fact", "test-model")
+        assert len(fact_results) == 1
+        assert fact_results[0][0] == str(fact_id)
