@@ -331,6 +331,12 @@ class Client:
         Use this for storing embeddings of non-fact entities (e.g., queries,
         documents, custom domain objects).
 
+        Note:
+            Unlike atomic facts, custom entity embeddings are not scoped by
+            ``context_key``. If you need isolation between contexts, encode
+            the context in ``entity_type`` (e.g., ``"myapp.alice.query"``) or
+            ``entity_id``.
+
         Example:
             # Store embedding for a custom entity type
             kelt.embedding_store.store(
