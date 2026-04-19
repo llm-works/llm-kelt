@@ -83,7 +83,7 @@ class Embedding(Base):
     gets its own record, allowing model upgrades without data loss.
     """
 
-    __tablename__ = "embeddings"
+    __tablename__ = "fact_embeddings"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -97,10 +97,10 @@ class Embedding(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "entity_type", "entity_id", "model_name", name="uq_embedding_entity_model"
+            "entity_type", "entity_id", "model_name", name="uq_fact_embedding_entity_model"
         ),
-        Index("idx_embedding_entity", "entity_type", "entity_id"),
-        Index("idx_embedding_model", "model_name"),
+        Index("idx_fact_embedding_entity", "entity_type", "entity_id"),
+        Index("idx_fact_embedding_model", "model_name"),
     )
 
     def __repr__(self) -> str:

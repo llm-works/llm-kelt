@@ -1,7 +1,7 @@
 """Database-backed session storage.
 
 Stores sessions in PostgreSQL using SQLAlchemy. Messages are stored as JSONB
-for efficient querying. Requires the ``sessions`` table to exist (see migrations).
+for efficient querying. Requires the ``conv_sessions`` table to exist (see migrations).
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
-from sqlalchemy import DateTime, Integer, String, desc, func, select
+from sqlalchemy import DateTime, Index, Integer, String, UniqueConstraint, desc, func, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...core.base import Base
@@ -35,10 +35,15 @@ _PREVIEW_MAX_LEN = 80
 class Session(Base):
     """SQLAlchemy model for conversation sessions."""
 
-    __tablename__ = "sessions"
+    __tablename__ = "conv_sessions"
+    __table_args__ = (
+        UniqueConstraint("session_id", name="uq_conv_sessions_session_id"),
+        Index("idx_conv_sessions_session_id", "session_id"),
+        Index("idx_conv_sessions_updated_at", "updated_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(String(255), nullable=False)
     messages: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
@@ -56,7 +61,7 @@ class Session(Base):
 class DbSessionStorage(SessionStorage):
     """PostgreSQL-backed session storage.
 
-    Uses the ``sessions`` table with JSONB columns for messages, config,
+    Uses the ``conv_sessions`` table with JSONB columns for messages, config,
     and metadata. Follows kelt's session_factory pattern.
 
     Args:
