@@ -25,54 +25,35 @@ def upgrade() -> None:  # cq: exempt
     # Rename sessions -> conv_sessions
     # =========================================================================
 
-    # Drop old indexes
-    op.drop_index("idx_sessions_session_id", table_name="sessions")
-    op.drop_index("idx_sessions_updated_at", table_name="sessions")
-
     # Rename table
     op.rename_table("sessions", "conv_sessions")
 
-    # Recreate indexes with new names
-    op.create_index("idx_conv_sessions_session_id", "conv_sessions", ["session_id"])
-    op.create_index("idx_conv_sessions_updated_at", "conv_sessions", ["updated_at"])
+    # Rename indexes in place (no rebuild)
+    op.execute("ALTER INDEX idx_sessions_session_id RENAME TO idx_conv_sessions_session_id")
+    op.execute("ALTER INDEX idx_sessions_updated_at RENAME TO idx_conv_sessions_updated_at")
 
-    # Rename the unique constraint (drop and recreate since Postgres doesn't support rename)
-    op.drop_constraint("uq_sessions_session_id", "conv_sessions", type_="unique")
-    op.create_unique_constraint("uq_conv_sessions_session_id", "conv_sessions", ["session_id"])
+    # Rename constraint in place
+    op.execute(
+        "ALTER TABLE conv_sessions RENAME CONSTRAINT "
+        "uq_sessions_session_id TO uq_conv_sessions_session_id"
+    )
 
     # =========================================================================
     # Rename embeddings -> fact_embeddings
     # =========================================================================
 
-    # Drop HNSW vector index first (references table by name)
-    op.execute("DROP INDEX IF EXISTS idx_embeddings_vector_1536")
-
-    # Drop old indexes
-    op.drop_index("idx_embedding_entity", table_name="embeddings")
-    op.drop_index("idx_embedding_model", table_name="embeddings")
-
     # Rename table
     op.rename_table("embeddings", "fact_embeddings")
 
-    # Recreate indexes with new names
-    op.create_index("idx_fact_embedding_entity", "fact_embeddings", ["entity_type", "entity_id"])
-    op.create_index("idx_fact_embedding_model", "fact_embeddings", ["model_name"])
+    # Rename indexes in place (no rebuild, including HNSW vector index)
+    op.execute("ALTER INDEX idx_embedding_entity RENAME TO idx_fact_embedding_entity")
+    op.execute("ALTER INDEX idx_embedding_model RENAME TO idx_fact_embedding_model")
+    op.execute("ALTER INDEX idx_embeddings_vector_1536 RENAME TO idx_fact_embeddings_vector_1536")
 
-    # Recreate HNSW index with new table name
+    # Rename constraint in place
     op.execute(
-        """
-        CREATE INDEX idx_fact_embeddings_vector_1536 ON fact_embeddings
-        USING hnsw ((embedding::vector(1536)) vector_cosine_ops)
-        WHERE dimensions = 1536
-        """
-    )
-
-    # Rename the unique constraint
-    op.drop_constraint("uq_embedding_entity_model", "fact_embeddings", type_="unique")
-    op.create_unique_constraint(
-        "uq_fact_embedding_entity_model",
-        "fact_embeddings",
-        ["entity_type", "entity_id", "model_name"],
+        "ALTER TABLE fact_embeddings RENAME CONSTRAINT "
+        "uq_embedding_entity_model TO uq_fact_embedding_entity_model"
     )
 
 
@@ -81,42 +62,33 @@ def downgrade() -> None:  # cq: exempt
     # Rename fact_embeddings -> embeddings
     # =========================================================================
 
-    op.execute("DROP INDEX IF EXISTS idx_fact_embeddings_vector_1536")
-
-    op.drop_index("idx_fact_embedding_entity", table_name="fact_embeddings")
-    op.drop_index("idx_fact_embedding_model", table_name="fact_embeddings")
-
-    op.rename_table("fact_embeddings", "embeddings")
-
-    op.create_index("idx_embedding_entity", "embeddings", ["entity_type", "entity_id"])
-    op.create_index("idx_embedding_model", "embeddings", ["model_name"])
-
+    # Rename constraint back
     op.execute(
-        """
-        CREATE INDEX idx_embeddings_vector_1536 ON embeddings
-        USING hnsw ((embedding::vector(1536)) vector_cosine_ops)
-        WHERE dimensions = 1536
-        """
+        "ALTER TABLE fact_embeddings RENAME CONSTRAINT "
+        "uq_fact_embedding_entity_model TO uq_embedding_entity_model"
     )
 
-    op.drop_constraint("uq_fact_embedding_entity_model", "embeddings", type_="unique")
-    op.create_unique_constraint(
-        "uq_embedding_entity_model",
-        "embeddings",
-        ["entity_type", "entity_id", "model_name"],
-    )
+    # Rename indexes back
+    op.execute("ALTER INDEX idx_fact_embedding_entity RENAME TO idx_embedding_entity")
+    op.execute("ALTER INDEX idx_fact_embedding_model RENAME TO idx_embedding_model")
+    op.execute("ALTER INDEX idx_fact_embeddings_vector_1536 RENAME TO idx_embeddings_vector_1536")
+
+    # Rename table
+    op.rename_table("fact_embeddings", "embeddings")
 
     # =========================================================================
     # Rename conv_sessions -> sessions
     # =========================================================================
 
-    op.drop_index("idx_conv_sessions_session_id", table_name="conv_sessions")
-    op.drop_index("idx_conv_sessions_updated_at", table_name="conv_sessions")
+    # Rename constraint back
+    op.execute(
+        "ALTER TABLE conv_sessions RENAME CONSTRAINT "
+        "uq_conv_sessions_session_id TO uq_sessions_session_id"
+    )
 
+    # Rename indexes back
+    op.execute("ALTER INDEX idx_conv_sessions_session_id RENAME TO idx_sessions_session_id")
+    op.execute("ALTER INDEX idx_conv_sessions_updated_at RENAME TO idx_sessions_updated_at")
+
+    # Rename table
     op.rename_table("conv_sessions", "sessions")
-
-    op.create_index("idx_sessions_session_id", "sessions", ["session_id"])
-    op.create_index("idx_sessions_updated_at", "sessions", ["updated_at"])
-
-    op.drop_constraint("uq_conv_sessions_session_id", "sessions", type_="unique")
-    op.create_unique_constraint("uq_sessions_session_id", "sessions", ["session_id"])
