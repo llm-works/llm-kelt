@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Debug logging for conversation compaction (messages/tokens before/after, timing, usage ratio)
 
 ### Changed
+- **Breaking**: Table `sessions` renamed to `conv_sessions` (avoids conflicts with agent tables)
+- **Breaking**: Table `embeddings` renamed to `fact_embeddings` (avoids conflicts with agent tables)
 - **Breaking**: `Conversation.__init__` now requires `lg: Logger` as the first parameter
 - **Breaking**: `FactClient.delete()` now returns `DeleteResult` instead of `bool`, accepts
   `int | Iterable[int]`, and automatically cleans up associated embeddings

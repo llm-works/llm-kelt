@@ -1,7 +1,7 @@
 """Database-backed session storage.
 
 Stores sessions in PostgreSQL using SQLAlchemy. Messages are stored as JSONB
-for efficient querying. Requires the ``sessions`` table to exist (see migrations).
+for efficient querying. Requires the ``conv_sessions`` table to exist (see migrations).
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ _PREVIEW_MAX_LEN = 80
 class Session(Base):
     """SQLAlchemy model for conversation sessions."""
 
-    __tablename__ = "sessions"
+    __tablename__ = "conv_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
@@ -56,7 +56,7 @@ class Session(Base):
 class DbSessionStorage(SessionStorage):
     """PostgreSQL-backed session storage.
 
-    Uses the ``sessions`` table with JSONB columns for messages, config,
+    Uses the ``conv_sessions`` table with JSONB columns for messages, config,
     and metadata. Follows kelt's session_factory pattern.
 
     Args:
