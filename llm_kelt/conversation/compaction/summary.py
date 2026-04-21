@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..tokens import Tokenizer, estimate_tokens
+from ..tokens import Tokenizer, estimate_message_tokens
 from ..types import Message, Role
 from .base import AsyncCompactor
 from .guard import CompactionContext, CompactionGuard, CompactionGuardError
@@ -41,7 +41,8 @@ class SummarizingCompactor(AsyncCompactor):
         model: Model to use (optional, uses client default).
         summary_prompt: Custom prompt for summarization.
         guards: Optional guards for validating compaction quality.
-        tokenizer: Optional tokenizer for accurate token counting in guards.
+        tokenizer: Optional tokenizer for token counting in guards. If not provided,
+            uses the conversation's Config.tokenizer (ensuring consistent counting).
     """
 
     def __init__(
@@ -67,7 +68,12 @@ class SummarizingCompactor(AsyncCompactor):
         before_tokens = conversation.token_count
         before_messages = list(conversation.messages)
 
-        summary = await self._summarize_with_guards(to_compact, before_messages, before_tokens)
+        # Use compactor's tokenizer if set, otherwise use conversation's
+        tokenizer = self._tokenizer or conversation.config.tokenizer
+
+        summary = await self._summarize_with_guards(
+            to_compact, preserved, before_messages, before_tokens, tokenizer
+        )
 
         new_messages = self._build_compacted_messages(preserved, summary)
         conversation.replace_messages(new_messages)
@@ -75,8 +81,10 @@ class SummarizingCompactor(AsyncCompactor):
     async def _summarize_with_guards(
         self,
         to_compact: list[Message],
+        preserved: list[Message],
         before_messages: list[Message],
         before_tokens: int,
+        tokenizer: Tokenizer | None,
     ) -> str:
         """Generate summary with guard validation and retry logic."""
         formatted = _format_messages(to_compact)
@@ -91,7 +99,9 @@ class SummarizingCompactor(AsyncCompactor):
             if not self._guards:
                 return summary
 
-            ctx = self._build_context(before_messages, summary, before_tokens, attempt)
+            ctx = self._build_context(
+                preserved, before_messages, summary, before_tokens, attempt, tokenizer
+            )
             error, feedback = self._run_guards(ctx)
 
             if error is None:
@@ -135,19 +145,26 @@ class SummarizingCompactor(AsyncCompactor):
 
     def _build_context(
         self,
+        preserved: list[Message],
         before_messages: list[Message],
         summary: str,
         before_tokens: int,
         attempt: int,
+        tokenizer: Tokenizer | None,
     ) -> CompactionContext:
         """Build context for guard validation."""
-        summary_tokens = estimate_tokens(summary, tokenizer=self._tokenizer)
-        # Estimate after_tokens as summary + preserved overhead
-        after_tokens = summary_tokens + 50  # rough estimate for structure overhead
+        # Build the actual after_messages for accurate token counting
+        after_messages = self._build_compacted_messages(preserved, summary)
+
+        # Calculate actual after_tokens from the compacted messages
+        after_tokens = sum(
+            estimate_message_tokens(m.role, m.content, m.tool_calls, tokenizer=tokenizer)
+            for m in after_messages
+        )
 
         return CompactionContext(
             before_messages=before_messages,
-            after_messages=[],  # Not yet constructed
+            after_messages=after_messages,
             before_tokens=before_tokens,
             after_tokens=after_tokens,
             summary=summary,
