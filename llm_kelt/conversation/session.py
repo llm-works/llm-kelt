@@ -19,24 +19,28 @@ from appinfra.log import Logger
 from appinfra.time import since, start
 from llm_saia import AsyncConversationLike, Message, Role, ToolCall
 
+from ..core.errors import ContextOverflowError
 from .compaction.base import AsyncCompactor, Compactor
-from .tokens import estimate_message_tokens
+from .tokens import Tokenizer, estimate_message_tokens
 
 
 class Config(FieldDict):
     """Configuration for conversation management.
 
     Attributes:
-        max_tokens: Maximum tokens before compaction is required.
+        max_tokens: Hard limit on input tokens. Compaction must achieve this or raise.
         compact_threshold: Trigger compaction when usage exceeds this fraction (0.0-1.0).
         preserve_system: Always preserve the system message during compaction.
         min_recent_messages: Minimum recent messages to preserve during compaction.
+        tokenizer: Optional tokenizer for accurate token counting. If None, uses
+            char/4 heuristic. Pass a callable that takes text and returns token count.
     """
 
     max_tokens: int = 32000
     compact_threshold: float = 0.8
     preserve_system: bool = True
     min_recent_messages: int = 4
+    tokenizer: Tokenizer | None = None
 
 
 class Conversation(AsyncConversationLike):
@@ -103,49 +107,94 @@ class Conversation(AsyncConversationLike):
     def append(self, msg: Message) -> None:
         """Append a message (ConversationLike protocol).
 
-        Tracks token usage and triggers compaction if a compactor is configured
-        and the threshold is exceeded.
-
-        Args:
-            msg: Message to append.
+        Raises ContextOverflowError BEFORE adding if the message cannot fit.
 
         Raises:
-            RuntimeError: If an AsyncCompactor is configured and compaction is
-                triggered. Use append_async() instead.
+            RuntimeError: If AsyncCompactor configured. Use append_async().
+            ContextOverflowError: If the message cannot fit within max_tokens.
         """
-        tokens = estimate_message_tokens(msg.role, msg.content, msg.tool_calls)
+        tokens = estimate_message_tokens(
+            msg.role, msg.content, msg.tool_calls, tokenizer=self.config.tokenizer
+        )
+        projected = self._token_count + tokens
 
-        # Check BEFORE mutating: would this append trigger async compaction?
-        if isinstance(self.compactor, AsyncCompactor) and self.config.max_tokens > 0:
-            would_trigger = (self._token_count + tokens) / self.config.max_tokens
-            if would_trigger >= self.config.compact_threshold:
-                raise RuntimeError(
-                    "Async compactor requires append_async(). "
-                    "Use 'await conversation.append_async(msg)' instead."
-                )
+        self._check_async_compactor_sync(projected)
+        compacted = self._maybe_compact_sync(projected)
+        if compacted:
+            projected = self._token_count + tokens
 
+        self._ensure_fits(tokens, projected)
         self._messages.append(msg)
         self._token_count += tokens
 
-        if self.compactor is not None and self.needs_compaction():
+        if not compacted and self.compactor is not None and self.needs_compaction():
             self._run_compaction()
 
     async def append_async(self, msg: Message) -> None:
         """Append a message asynchronously (AsyncConversationLike protocol).
 
-        Async variant of append() that supports both sync and async compactors
-        without blocking the event loop.
+        Raises ContextOverflowError BEFORE adding if the message cannot fit.
 
-        Args:
-            msg: Message to append.
+        Raises:
+            ContextOverflowError: If the message cannot fit within max_tokens.
         """
         async with self._append_lock:
-            tokens = estimate_message_tokens(msg.role, msg.content, msg.tool_calls)
+            tokens = estimate_message_tokens(
+                msg.role, msg.content, msg.tool_calls, tokenizer=self.config.tokenizer
+            )
+            projected = self._token_count + tokens
+
+            compacted = await self._maybe_compact_async(projected)
+            if compacted:
+                projected = self._token_count + tokens
+
+            self._ensure_fits(tokens, projected)
             self._messages.append(msg)
             self._token_count += tokens
 
-            if self.compactor is not None and self.needs_compaction():
+            if not compacted and self.compactor is not None and self.needs_compaction():
                 await self._run_compaction_async()
+
+    def _should_compact(self, projected: int) -> bool:
+        """Check if compaction should be triggered for the projected token count."""
+        if self.compactor is None or self.config.max_tokens <= 0:
+            return False
+        would_exceed = projected > self.config.max_tokens
+        would_trigger = projected / self.config.max_tokens >= self.config.compact_threshold
+        return would_exceed or would_trigger
+
+    def _check_async_compactor_sync(self, projected: int) -> None:
+        """Raise RuntimeError if async compactor would be triggered in sync context."""
+        if isinstance(self.compactor, AsyncCompactor) and self._should_compact(projected):
+            raise RuntimeError(
+                "Async compactor requires append_async(). "
+                "Use 'await conversation.append_async(msg)' instead."
+            )
+
+    def _maybe_compact_sync(self, projected: int) -> bool:
+        """Compact if needed (sync). Returns True if compaction ran."""
+        if self._should_compact(projected):
+            self._run_compaction()
+            return True
+        return False
+
+    async def _maybe_compact_async(self, projected: int) -> bool:
+        """Compact if needed (async). Returns True if compaction ran."""
+        if self._should_compact(projected):
+            await self._run_compaction_async()
+            return True
+        return False
+
+    def _ensure_fits(self, msg_tokens: int, projected: int) -> None:
+        """Raise ContextOverflowError if projected tokens exceed max_tokens."""
+        if self.config.max_tokens > 0 and projected > self.config.max_tokens:
+            self._log_context_overflow(msg_tokens, projected)
+            raise ContextOverflowError(
+                f"Message ({msg_tokens} tokens) would exceed max_tokens={self.config.max_tokens}. "
+                f"Current: {self._token_count}, projected: {projected}.",
+                token_count=projected,
+                max_tokens=self.config.max_tokens,
+            )
 
     def _run_compaction(self) -> None:
         """Run compaction and log stats."""
@@ -193,6 +242,19 @@ class Conversation(AsyncConversationLike):
                     "saved": before_tokens - after_tokens,
                 },
                 "usage_ratio": self.usage_ratio,
+            },
+        )
+
+    def _log_context_overflow(self, msg_tokens: int, projected: int) -> None:
+        """Log context overflow before raising error."""
+        self._lg.error(
+            "context overflow: message cannot fit within max_tokens",
+            extra={
+                "message_tokens": msg_tokens,
+                "current_tokens": self._token_count,
+                "projected_tokens": projected,
+                "max_tokens": self.config.max_tokens,
+                "message_count": len(self._messages),
             },
         )
 
@@ -296,7 +358,10 @@ class Conversation(AsyncConversationLike):
         """
         self._messages = list(messages)
         self._token_count = sum(
-            estimate_message_tokens(m.role, m.content, m.tool_calls) for m in self._messages
+            estimate_message_tokens(
+                m.role, m.content, m.tool_calls, tokenizer=self.config.tokenizer
+            )
+            for m in self._messages
         )
 
     def get_system_message(self) -> Message | None:

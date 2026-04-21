@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Hard context limit enforcement: `max_tokens` is now a guaranteed cap, not just a compaction trigger
+- `ContextOverflowError` raised BEFORE adding a message that would exceed `max_tokens`
+- `Config.tokenizer` option for accurate token counting (accepts `Callable[[str], int]`)
+- `CompactionGuard` protocol for validating compaction quality with retry/escalation
+- Pre-built compaction guards: `token_reduction()`, `preserve_keywords()`, `max_summary_tokens()`
+- `CompactionGuardError` raised when guards fail after all retries exhausted
 - `AsyncCompactor` base class for I/O-bound compaction strategies (e.g., LLM summarization)
 - `Conversation.append_async()` for non-blocking compaction in async contexts
 - Warns at construction when `AsyncCompactor` is used (reminds to use `append_async()`)
@@ -36,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Debug logging for conversation compaction (messages/tokens before/after, timing, usage ratio)
 
 ### Changed
+- **Breaking**: `SummarizingCompactor` is now an `AsyncCompactor` (use `append_async()`, accepts guards)
 - **Breaking**: Table `sessions` renamed to `conv_sessions` (avoids conflicts with agent tables)
 - **Breaking**: Table `embeddings` renamed to `fact_embeddings` (avoids conflicts with agent tables)
 - **Breaking**: `Conversation.__init__` now requires `lg: Logger` as the first parameter

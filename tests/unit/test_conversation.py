@@ -11,6 +11,7 @@ from llm_kelt.conversation import (
     AsyncCompactor,
     Compactor,
     Config,
+    ContextOverflowError,
     Conversation,
     Message,
     Role,
@@ -122,6 +123,23 @@ class TestTokenEstimation:
         tokens = estimate_message_tokens("assistant", "", calls)
         assert tokens > estimate_message_tokens("assistant", "")
 
+    def test_tokenizer_callable(self):
+        """Test that custom tokenizer is used when provided."""
+
+        def fake_tokenizer(text: str) -> int:
+            return 999  # Always return 999 tokens
+
+        assert estimate_tokens("hello", tokenizer=fake_tokenizer) == 999
+        assert estimate_message_tokens("user", "hello", tokenizer=fake_tokenizer) == 999 + 4
+
+    def test_tokenizer_empty_string(self):
+        """Empty string returns 0 even with tokenizer."""
+
+        def fake_tokenizer(text: str) -> int:
+            return 999
+
+        assert estimate_tokens("", tokenizer=fake_tokenizer) == 0
+
 
 # =============================================================================
 # Conversation
@@ -172,6 +190,18 @@ class TestConversation:
         conv.add("world", Role.ASSISTANT)
         assert conv.token_count > initial
 
+    def test_tokenizer_config(self, lg):
+        """Test that custom tokenizer in config is used for token counting."""
+
+        def precise_tokenizer(text: str) -> int:
+            return len(text.split())  # Word count as tokens
+
+        config = Config(tokenizer=precise_tokenizer)
+        conv = Conversation(lg, config=config)
+        conv.add("one two three")  # 3 words + 4 overhead = 7 tokens
+
+        assert conv.token_count == 7
+
     def test_usage_ratio(self, lg):
         config = Config(max_tokens=100)
         conv = Conversation(lg, config=config)
@@ -186,10 +216,11 @@ class TestConversation:
         assert conv.usage_ratio == 0.0
 
     def test_needs_compaction(self, lg):
-        config = Config(max_tokens=50, compact_threshold=0.5)
+        # max_tokens must be large enough to hold the message
+        config = Config(max_tokens=100, compact_threshold=0.5)
         conv = Conversation(lg, config=config)
 
-        # Add enough content to exceed threshold
+        # Add enough content to exceed threshold (54 tokens > 50% of 100)
         conv.add("a" * 200)
         assert conv.needs_compaction()
 
@@ -260,7 +291,8 @@ class TestConversation:
         """Test that compaction fires automatically when compactor is set."""
         from llm_kelt.conversation import SlidingWindowCompactor
 
-        config = Config(max_tokens=50, compact_threshold=0.5, min_recent_messages=1)
+        # max_tokens must accommodate preserved messages after compaction
+        config = Config(max_tokens=100, compact_threshold=0.5, min_recent_messages=1)
         conv = Conversation(lg, config=config, compactor=SlidingWindowCompactor())
 
         conv.add("first message")
@@ -271,13 +303,26 @@ class TestConversation:
         assert conv.message_count <= 2
 
     def test_no_auto_compaction_without_compactor(self, lg):
-        config = Config(max_tokens=50, compact_threshold=0.5)
+        # Without a compactor, messages that fit under max_tokens are allowed
+        # but no automatic compaction happens
+        config = Config(max_tokens=100, compact_threshold=0.5)
         conv = Conversation(lg, config=config)
 
-        conv.add("a" * 200)
+        conv.add("a" * 200)  # 54 tokens, under max_tokens but over threshold
         # needs_compaction is True, but no compactor means no auto-compact
         assert conv.needs_compaction()
         assert conv.message_count == 1
+
+    def test_exceeds_max_tokens_without_compactor_raises(self, lg):
+        """Without a compactor, exceeding max_tokens raises ContextOverflowError."""
+        config = Config(max_tokens=20)  # Very small limit
+        conv = Conversation(lg, config=config)
+
+        with pytest.raises(ContextOverflowError) as exc_info:
+            conv.add("a" * 200)  # 54 tokens, exceeds max_tokens
+
+        assert exc_info.value.max_tokens == 20
+        assert conv.message_count == 0  # Message was NOT added
 
     def test_messages_as_dicts_strips_nones(self, lg):
         conv = Conversation(lg)
@@ -411,7 +456,8 @@ class TestAsyncCompaction:
                 msgs = conversation.messages[-2:]
                 conversation.replace_messages(msgs)
 
-        config = Config(max_tokens=50, compact_threshold=0.5)
+        # max_tokens must accommodate preserved messages after compaction
+        config = Config(max_tokens=100, compact_threshold=0.5)
         compactor = MockSyncCompactor()
         conv = Conversation(lg, config=config, compactor=compactor)
 
@@ -431,7 +477,8 @@ class TestAsyncCompaction:
                 msgs = conversation.messages[-2:]
                 conversation.replace_messages(msgs)
 
-        config = Config(max_tokens=50, compact_threshold=0.5)
+        # max_tokens must accommodate preserved messages after compaction
+        config = Config(max_tokens=100, compact_threshold=0.5)
         compactor = MockAsyncCompactor()
         conv = Conversation(lg, config=config, compactor=compactor)
 
@@ -451,3 +498,37 @@ class TestAsyncCompaction:
         Conversation(mock_lg, compactor=compactor)
 
         mock_lg.warning.assert_not_called()
+
+    def test_context_overflow_raises_when_compaction_insufficient(self, lg):
+        """Test that ContextOverflowError is raised when compaction can't meet max_tokens."""
+
+        class NoOpCompactor(Compactor):
+            def compact(self, conversation: Conversation) -> None:
+                pass  # Doesn't actually reduce anything
+
+        # max_tokens is too small to hold even the preserved messages
+        config = Config(max_tokens=10, compact_threshold=0.5)
+        conv = Conversation(lg, config=config, compactor=NoOpCompactor())
+
+        conv.add("short")  # Under threshold, no compaction yet
+
+        with pytest.raises(ContextOverflowError) as exc_info:
+            conv.add("a" * 200)  # Triggers compaction, but NoOpCompactor doesn't reduce
+
+        assert exc_info.value.max_tokens == 10
+        assert exc_info.value.token_count > 10
+
+    async def test_context_overflow_async(self, lg):
+        """Test that ContextOverflowError is raised in async path."""
+
+        class NoOpAsyncCompactor(AsyncCompactor):
+            async def compact(self, conversation: Conversation) -> None:
+                pass
+
+        config = Config(max_tokens=10, compact_threshold=0.5)
+        conv = Conversation(lg, config=config, compactor=NoOpAsyncCompactor())
+
+        await conv.append_async(Message(role="user", content="short"))
+
+        with pytest.raises(ContextOverflowError):
+            await conv.append_async(Message(role="user", content="a" * 200))
