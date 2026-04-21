@@ -65,11 +65,16 @@ class SummarizingCompactor(AsyncCompactor):
         if not to_compact:
             return
 
-        before_tokens = conversation.token_count
         before_messages = list(conversation.messages)
 
         # Use compactor's tokenizer if set, otherwise use conversation's
         tokenizer = self._tokenizer or conversation.config.tokenizer
+
+        # Calculate before_tokens using the resolved tokenizer for consistency
+        before_tokens = sum(
+            estimate_message_tokens(m.role, m.content, m.tool_calls, tokenizer=tokenizer)
+            for m in before_messages
+        )
 
         summary = await self._summarize_with_guards(
             to_compact, preserved, before_messages, before_tokens, tokenizer
@@ -88,41 +93,43 @@ class SummarizingCompactor(AsyncCompactor):
     ) -> str:
         """Generate summary with guard validation and retry logic."""
         formatted = _format_messages(to_compact)
-        max_attempts = 1 + sum(g.max_retries for g in self._guards)
-        last_error: str | None = None
+        if not self._guards:
+            return await self._call_llm(formatted)
+
+        guard_attempts: dict[int, int] = {i: 0 for i in range(len(self._guards))}
         last_feedback: str | None = None
+        attempt = 0
 
-        for attempt in range(max_attempts):
-            prompt = self._build_prompt(formatted, last_error, last_feedback, attempt)
+        while True:
+            prompt = self._build_prompt(formatted, last_feedback, attempt)
             summary = await self._call_llm(prompt)
-
-            if not self._guards:
-                return summary
 
             ctx = self._build_context(
                 preserved, before_messages, summary, before_tokens, attempt, tokenizer
             )
-            error, feedback = self._run_guards(ctx)
-
-            if error is None:
+            result = self._check_guards(ctx, guard_attempts)
+            if result is None:
                 return summary
 
-            last_error = error
-            last_feedback = feedback
+            last_feedback = result
+            attempt += 1
 
-        raise CompactionGuardError(
-            guard_name=None,
-            error=last_error or "Unknown error",
-            attempts=max_attempts,
-        )
+    def _check_guards(self, ctx: CompactionContext, guard_attempts: dict[int, int]) -> str | None:
+        """Check guards and raise if any exhausted retries. Returns feedback or None."""
+        failed, error, feedback = self._run_guards_with_tracking(ctx, guard_attempts)
+        if failed is None:
+            return None
 
-    def _build_prompt(
-        self,
-        formatted: str,
-        last_error: str | None,
-        last_feedback: str | None,
-        attempt: int,
-    ) -> str:
+        guard_idx, guard = failed
+        if guard_attempts[guard_idx] > guard.max_retries:
+            raise CompactionGuardError(
+                guard_name=guard.name,
+                error=error or "Unknown error",
+                attempts=guard_attempts[guard_idx],
+            )
+        return feedback
+
+    def _build_prompt(self, formatted: str, last_feedback: str | None, attempt: int) -> str:
         """Build summarization prompt, including retry feedback if applicable."""
         if attempt == 0 or last_feedback is None:
             return formatted
@@ -175,22 +182,26 @@ class SummarizingCompactor(AsyncCompactor):
             attempt=attempt,
         )
 
-    def _run_guards(self, ctx: CompactionContext) -> tuple[str | None, str | None]:
-        """Run all guards, return (first_error, combined_feedback) or (None, None)."""
-        errors: list[str] = []
-        feedbacks: list[str] = []
+    def _run_guards_with_tracking(
+        self, ctx: CompactionContext, guard_attempts: dict[int, int]
+    ) -> tuple[tuple[int, CompactionGuard] | None, str | None, str | None]:
+        """Run guards and track attempts per guard.
 
-        for guard in self._guards:
+        Returns:
+            (failed_guard, error, feedback) where failed_guard is (index, guard) or None if passed.
+        """
+        for i, guard in enumerate(self._guards):
+            # Skip guards that have exhausted retries
+            if guard_attempts[i] > guard.max_retries:
+                continue
+
             error = guard.validator(ctx)
             if error is not None:
-                errors.append(error)
-                feedback = guard.resolve_instruction(ctx.attempt, ctx, error)
-                feedbacks.append(feedback)
+                guard_attempts[i] += 1
+                feedback = guard.resolve_instruction(guard_attempts[i] - 1, ctx, error)
+                return (i, guard), error, feedback
 
-        if not errors:
-            return None, None
-
-        return errors[0], "\n\n".join(feedbacks)
+        return None, None, None
 
     def _build_compacted_messages(self, preserved: list[Message], summary: str) -> list[Message]:
         """Build the final message list with summary inserted."""

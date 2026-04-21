@@ -130,7 +130,12 @@ def token_reduction(
         min_ratio: Minimum fraction of tokens to remove (0.0 to 1.0). Default 0.3 (30%).
         max_retries: Max retry attempts. Default 2.
         escalate: Use increasingly forceful retry instructions. Default True.
+
+    Raises:
+        ValueError: If min_ratio is not between 0.0 and 1.0.
     """
+    if not 0.0 <= min_ratio <= 1.0:
+        raise ValueError(f"min_ratio must be between 0.0 and 1.0, got {min_ratio}")
 
     def check(ctx: CompactionContext) -> str | None:
         if ctx.reduction_ratio < min_ratio:
@@ -208,7 +213,12 @@ def max_summary_tokens(
         max_tokens: Maximum tokens allowed in the summary.
         max_retries: Max retry attempts. Default 2.
         escalate: Use increasingly forceful retry instructions. Default True.
+
+    Raises:
+        ValueError: If max_tokens is negative.
     """
+    if max_tokens < 0:
+        raise ValueError(f"max_tokens must be >= 0, got {max_tokens}")
 
     def check(ctx: CompactionContext) -> str | None:
         if ctx.summary_tokens is None:
