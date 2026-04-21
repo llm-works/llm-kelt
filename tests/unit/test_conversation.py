@@ -11,12 +11,20 @@ from llm_kelt.conversation import (
     AsyncCompactor,
     Compactor,
     Config,
+    ContextOverflowError,
     Conversation,
     Message,
     Role,
     ToolCall,
     estimate_message_tokens,
     estimate_tokens,
+)
+from llm_kelt.conversation.compaction import (
+    CompactionContext,
+    CompactionGuard,
+    CompactionGuardError,
+    SummarizingCompactor,
+    token_reduction,
 )
 
 # =============================================================================
@@ -122,6 +130,23 @@ class TestTokenEstimation:
         tokens = estimate_message_tokens("assistant", "", calls)
         assert tokens > estimate_message_tokens("assistant", "")
 
+    def test_tokenizer_callable(self):
+        """Test that custom tokenizer is used when provided."""
+
+        def fake_tokenizer(text: str) -> int:
+            return 999  # Always return 999 tokens
+
+        assert estimate_tokens("hello", tokenizer=fake_tokenizer) == 999
+        assert estimate_message_tokens("user", "hello", tokenizer=fake_tokenizer) == 999 + 4
+
+    def test_tokenizer_empty_string(self):
+        """Empty string returns 0 even with tokenizer."""
+
+        def fake_tokenizer(text: str) -> int:
+            return 999
+
+        assert estimate_tokens("", tokenizer=fake_tokenizer) == 0
+
 
 # =============================================================================
 # Conversation
@@ -172,6 +197,18 @@ class TestConversation:
         conv.add("world", Role.ASSISTANT)
         assert conv.token_count > initial
 
+    def test_tokenizer_config(self, lg):
+        """Test that custom tokenizer in config is used for token counting."""
+
+        def precise_tokenizer(text: str) -> int:
+            return len(text.split())  # Word count as tokens
+
+        config = Config(tokenizer=precise_tokenizer)
+        conv = Conversation(lg, config=config)
+        conv.add("one two three")  # 3 words + 4 overhead = 7 tokens
+
+        assert conv.token_count == 7
+
     def test_usage_ratio(self, lg):
         config = Config(max_tokens=100)
         conv = Conversation(lg, config=config)
@@ -186,10 +223,11 @@ class TestConversation:
         assert conv.usage_ratio == 0.0
 
     def test_needs_compaction(self, lg):
-        config = Config(max_tokens=50, compact_threshold=0.5)
+        # max_tokens must be large enough to hold the message
+        config = Config(max_tokens=100, compact_threshold=0.5)
         conv = Conversation(lg, config=config)
 
-        # Add enough content to exceed threshold
+        # Add enough content to exceed threshold (54 tokens > 50% of 100)
         conv.add("a" * 200)
         assert conv.needs_compaction()
 
@@ -260,7 +298,8 @@ class TestConversation:
         """Test that compaction fires automatically when compactor is set."""
         from llm_kelt.conversation import SlidingWindowCompactor
 
-        config = Config(max_tokens=50, compact_threshold=0.5, min_recent_messages=1)
+        # max_tokens must accommodate preserved messages after compaction
+        config = Config(max_tokens=100, compact_threshold=0.5, min_recent_messages=1)
         conv = Conversation(lg, config=config, compactor=SlidingWindowCompactor())
 
         conv.add("first message")
@@ -271,13 +310,26 @@ class TestConversation:
         assert conv.message_count <= 2
 
     def test_no_auto_compaction_without_compactor(self, lg):
-        config = Config(max_tokens=50, compact_threshold=0.5)
+        # Without a compactor, messages that fit under max_tokens are allowed
+        # but no automatic compaction happens
+        config = Config(max_tokens=100, compact_threshold=0.5)
         conv = Conversation(lg, config=config)
 
-        conv.add("a" * 200)
+        conv.add("a" * 200)  # 54 tokens, under max_tokens but over threshold
         # needs_compaction is True, but no compactor means no auto-compact
         assert conv.needs_compaction()
         assert conv.message_count == 1
+
+    def test_exceeds_max_tokens_without_compactor_raises(self, lg):
+        """Without a compactor, exceeding max_tokens raises ContextOverflowError."""
+        config = Config(max_tokens=20)  # Very small limit
+        conv = Conversation(lg, config=config)
+
+        with pytest.raises(ContextOverflowError) as exc_info:
+            conv.add("a" * 200)  # 54 tokens, exceeds max_tokens
+
+        assert exc_info.value.max_tokens == 20
+        assert conv.message_count == 0  # Message was NOT added
 
     def test_messages_as_dicts_strips_nones(self, lg):
         conv = Conversation(lg)
@@ -411,7 +463,8 @@ class TestAsyncCompaction:
                 msgs = conversation.messages[-2:]
                 conversation.replace_messages(msgs)
 
-        config = Config(max_tokens=50, compact_threshold=0.5)
+        # max_tokens must accommodate preserved messages after compaction
+        config = Config(max_tokens=100, compact_threshold=0.5)
         compactor = MockSyncCompactor()
         conv = Conversation(lg, config=config, compactor=compactor)
 
@@ -431,7 +484,8 @@ class TestAsyncCompaction:
                 msgs = conversation.messages[-2:]
                 conversation.replace_messages(msgs)
 
-        config = Config(max_tokens=50, compact_threshold=0.5)
+        # max_tokens must accommodate preserved messages after compaction
+        config = Config(max_tokens=100, compact_threshold=0.5)
         compactor = MockAsyncCompactor()
         conv = Conversation(lg, config=config, compactor=compactor)
 
@@ -451,3 +505,323 @@ class TestAsyncCompaction:
         Conversation(mock_lg, compactor=compactor)
 
         mock_lg.warning.assert_not_called()
+
+    def test_context_overflow_raises_when_compaction_insufficient(self, lg):
+        """Test that ContextOverflowError is raised when compaction can't meet max_tokens."""
+
+        class NoOpCompactor(Compactor):
+            def compact(self, conversation: Conversation) -> None:
+                pass  # Doesn't actually reduce anything
+
+        # max_tokens is too small to hold even the preserved messages
+        config = Config(max_tokens=10, compact_threshold=0.5)
+        conv = Conversation(lg, config=config, compactor=NoOpCompactor())
+
+        conv.add("short")  # Under threshold, no compaction yet
+
+        with pytest.raises(ContextOverflowError) as exc_info:
+            conv.add("a" * 200)  # Triggers compaction, but NoOpCompactor doesn't reduce
+
+        assert exc_info.value.max_tokens == 10
+        assert exc_info.value.token_count > 10
+
+    async def test_context_overflow_async(self, lg):
+        """Test that ContextOverflowError is raised in async path."""
+
+        class NoOpAsyncCompactor(AsyncCompactor):
+            async def compact(self, conversation: Conversation) -> None:
+                pass
+
+        config = Config(max_tokens=10, compact_threshold=0.5)
+        conv = Conversation(lg, config=config, compactor=NoOpAsyncCompactor())
+
+        await conv.append_async(Message(role="user", content="short"))
+
+        with pytest.raises(ContextOverflowError):
+            await conv.append_async(Message(role="user", content="a" * 200))
+
+
+# =============================================================================
+# SummarizingCompactor
+# =============================================================================
+
+
+class MockChatResponse:
+    """Mock response from LLM client."""
+
+    def __init__(self, content: str):
+        self.content = content
+
+
+class MockChatClient:
+    """Mock LLM client for testing."""
+
+    def __init__(self, responses: list[str] | None = None):
+        self.responses = responses or ["Summary of conversation."]
+        self.call_count = 0
+        self.last_messages: list[dict] | None = None
+
+    async def chat_async(self, messages: list[dict], **kwargs) -> MockChatResponse:
+        self.last_messages = messages
+        response = self.responses[min(self.call_count, len(self.responses) - 1)]
+        self.call_count += 1
+        return MockChatResponse(response)
+
+
+class TestSummarizingCompactor:
+    """Tests for SummarizingCompactor."""
+
+    async def test_basic_compaction(self, lg):
+        """Test basic summarization without guards."""
+        client = MockChatClient(responses=["This is a summary."])
+        compactor = SummarizingCompactor(client=client)
+
+        config = Config(max_tokens=200, compact_threshold=0.5, min_recent_messages=1)
+        conv = Conversation(lg, config=config, compactor=compactor)
+
+        conv.add("system prompt", Role.SYSTEM)
+        conv.add("first message")
+        conv.add("first response", Role.ASSISTANT)
+        conv.add("second message")
+
+        # Trigger compaction via append_async
+        await conv.append_async(Message(role="assistant", content="a" * 500))
+
+        assert client.call_count == 1
+        # Should have system + summary + recent messages
+        assert any("[Previous conversation summary]" in m.content for m in conv.messages)
+
+    async def test_guard_passes(self, lg):
+        """Test that guards are validated and pass."""
+        client = MockChatClient(responses=["Short summary."])
+
+        def always_pass(ctx: CompactionContext) -> str | None:
+            return None  # No error = pass
+
+        guard = CompactionGuard(
+            validator=always_pass,
+            retry_instruction="Make it better.",
+            name="test_guard",
+        )
+        compactor = SummarizingCompactor(client=client, guards=[guard])
+
+        config = Config(max_tokens=200, compact_threshold=0.5, min_recent_messages=1)
+        conv = Conversation(lg, config=config, compactor=compactor)
+
+        conv.add("first message")
+        conv.add("first response", Role.ASSISTANT)
+
+        await conv.append_async(Message(role="user", content="a" * 500))
+
+        assert client.call_count == 1  # No retries needed
+
+    async def test_guard_retry_then_pass(self, lg):
+        """Test that guard failure triggers retry with feedback."""
+        # First response fails, second passes
+        client = MockChatClient(responses=["Too long summary.", "Short."])
+
+        attempt_count = [0]
+
+        def fail_first_attempt(ctx: CompactionContext) -> str | None:
+            attempt_count[0] += 1
+            if attempt_count[0] == 1:
+                return "Summary too long"
+            return None
+
+        guard = CompactionGuard(
+            validator=fail_first_attempt,
+            retry_instruction="Make it shorter.",
+            max_retries=2,
+            name="length_check",
+        )
+        compactor = SummarizingCompactor(client=client, guards=[guard])
+
+        config = Config(max_tokens=200, compact_threshold=0.5, min_recent_messages=1)
+        conv = Conversation(lg, config=config, compactor=compactor)
+
+        conv.add("first message")
+        conv.add("first response", Role.ASSISTANT)
+
+        await conv.append_async(Message(role="user", content="a" * 500))
+
+        assert client.call_count == 2  # Initial + 1 retry
+        # Second call should include feedback
+        assert "Make it shorter." in client.last_messages[1]["content"]
+
+    async def test_guard_exhausts_retries(self, lg):
+        """Test that CompactionGuardError is raised when retries exhausted."""
+        client = MockChatClient(responses=["Always fails."] * 10)
+
+        def always_fail(ctx: CompactionContext) -> str | None:
+            return "This always fails"
+
+        guard = CompactionGuard(
+            validator=always_fail,
+            retry_instruction="Try again.",
+            max_retries=2,
+            name="failing_guard",
+        )
+        compactor = SummarizingCompactor(client=client, guards=[guard])
+
+        config = Config(max_tokens=200, compact_threshold=0.5, min_recent_messages=1)
+        conv = Conversation(lg, config=config, compactor=compactor)
+
+        conv.add("first message")
+        conv.add("first response", Role.ASSISTANT)
+
+        with pytest.raises(CompactionGuardError) as exc_info:
+            await conv.append_async(Message(role="user", content="a" * 500))
+
+        assert exc_info.value.attempts == 3  # 1 initial + 2 retries
+        assert "This always fails" in exc_info.value.error
+        assert client.call_count == 3
+
+    async def test_tokenizer_from_conversation_config(self, lg):
+        """Test that compactor uses conversation's tokenizer when not provided."""
+        client = MockChatClient(responses=["Summary."])
+
+        def check_token_count(ctx: CompactionContext) -> str | None:
+            # With word tokenizer, "Summary." = 1 word + overhead
+            # Preserved messages will also be counted
+            # This just verifies the guard can access token counts
+            if ctx.after_tokens == 0:
+                return "Token count should not be zero"
+            return None
+
+        guard = CompactionGuard(
+            validator=check_token_count,
+            retry_instruction="Fix it.",
+            name="token_check",
+        )
+
+        def word_tokenizer(text: str) -> int:
+            return len(text.split())
+
+        compactor = SummarizingCompactor(client=client, guards=[guard])
+        config = Config(
+            max_tokens=500,
+            compact_threshold=0.3,
+            min_recent_messages=1,
+            tokenizer=word_tokenizer,
+        )
+        conv = Conversation(lg, config=config, compactor=compactor)
+
+        conv.add("first message here")
+        conv.add("first response here", Role.ASSISTANT)
+
+        await conv.append_async(Message(role="user", content="a " * 200))
+
+        assert client.call_count == 1  # Guard passed
+
+    async def test_after_tokens_includes_preserved(self, lg):
+        """Test that after_tokens correctly includes preserved messages."""
+        client = MockChatClient(responses=["Short."])
+
+        captured_ctx: list[CompactionContext] = []
+
+        def capture_context(ctx: CompactionContext) -> str | None:
+            captured_ctx.append(ctx)
+            return None
+
+        guard = CompactionGuard(
+            validator=capture_context,
+            retry_instruction="N/A",
+            name="capture",
+        )
+        compactor = SummarizingCompactor(client=client, guards=[guard])
+
+        config = Config(max_tokens=500, compact_threshold=0.3, min_recent_messages=2)
+        conv = Conversation(lg, config=config, compactor=compactor)
+
+        conv.add("system prompt", Role.SYSTEM)
+        conv.add("message one")
+        conv.add("response one", Role.ASSISTANT)
+        conv.add("message two")
+        conv.add("response two", Role.ASSISTANT)
+
+        await conv.append_async(Message(role="user", content="a " * 300))
+
+        assert len(captured_ctx) == 1
+        ctx = captured_ctx[0]
+
+        # after_messages should include system + summary + preserved non-system
+        assert len(ctx.after_messages) >= 2
+        # after_tokens should be > just the summary tokens
+        summary_only_tokens = estimate_message_tokens(
+            "user", "[Previous conversation summary]\nShort.\n[End summary]"
+        )
+        assert ctx.after_tokens > summary_only_tokens
+
+    async def test_after_messages_populated(self, lg):
+        """Test that after_messages is correctly populated for guards."""
+        client = MockChatClient(responses=["The summary."])
+
+        captured_ctx: list[CompactionContext] = []
+
+        def capture_context(ctx: CompactionContext) -> str | None:
+            captured_ctx.append(ctx)
+            return None
+
+        guard = CompactionGuard(
+            validator=capture_context,
+            retry_instruction="N/A",
+            name="capture",
+        )
+        compactor = SummarizingCompactor(client=client, guards=[guard])
+
+        config = Config(max_tokens=300, compact_threshold=0.3, min_recent_messages=1)
+        conv = Conversation(lg, config=config, compactor=compactor)
+
+        conv.add("system prompt", Role.SYSTEM)
+        conv.add("old message")
+        conv.add("old response", Role.ASSISTANT)
+
+        await conv.append_async(Message(role="user", content="a " * 200))
+
+        assert len(captured_ctx) == 1
+        ctx = captured_ctx[0]
+
+        # after_messages should not be empty
+        assert len(ctx.after_messages) > 0
+        # Should contain the summary message
+        assert any("The summary." in m.content for m in ctx.after_messages)
+
+
+class TestTokenReductionGuard:
+    """Tests for the token_reduction pre-built guard."""
+
+    def test_passes_when_reduction_sufficient(self):
+        """Test guard passes when reduction ratio meets minimum."""
+        guard = token_reduction(min_ratio=0.3)
+
+        ctx = CompactionContext(
+            before_messages=[],
+            after_messages=[],
+            before_tokens=100,
+            after_tokens=60,  # 40% reduction
+            summary="test",
+            summary_tokens=50,
+            attempt=0,
+        )
+
+        result = guard.validator(ctx)
+        assert result is None  # Pass
+
+    def test_fails_when_reduction_insufficient(self):
+        """Test guard fails when reduction ratio is below minimum."""
+        guard = token_reduction(min_ratio=0.3)
+
+        ctx = CompactionContext(
+            before_messages=[],
+            after_messages=[],
+            before_tokens=100,
+            after_tokens=90,  # Only 10% reduction
+            summary="test",
+            summary_tokens=80,
+            attempt=0,
+        )
+
+        result = guard.validator(ctx)
+        assert result is not None
+        assert "10.0%" in result
+        assert "30.0%" in result

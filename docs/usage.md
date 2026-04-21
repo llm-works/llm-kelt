@@ -97,9 +97,11 @@ conv.add("main.py\nutils.py", Role.TOOL, tool_call_id="tc_1")
 ### Compaction
 
 When conversations approach token limits, compactors reduce size while preserving context.
+**Hard limit guarantee**: After compaction, `token_count` must be <= `max_tokens`.
+If compaction cannot achieve this, `ContextOverflowError` is raised.
 
 ```python
-from llm_kelt.conversation import SlidingWindowCompactor
+from llm_kelt.conversation import SlidingWindowCompactor, ContextOverflowError
 
 # Manual compaction
 compactor = SlidingWindowCompactor()
@@ -113,6 +115,20 @@ conv = Conversation(
     compactor=SlidingWindowCompactor(),
 )
 # Compaction fires automatically when threshold is exceeded on add()
+# Raises ContextOverflowError if compaction cannot reduce below max_tokens
+```
+
+For accurate token counting (instead of char/4 heuristic), provide a tokenizer:
+
+```python
+import tiktoken
+
+enc = tiktoken.encoding_for_model("gpt-4")
+conv = Conversation(
+    lg,
+    config=Config(max_tokens=24000, tokenizer=lambda text: len(enc.encode(text))),
+    compactor=SlidingWindowCompactor(),
+)
 ```
 
 For better context retention, use the summarizing compactor (requires an LLM client):

@@ -29,10 +29,11 @@ Usage::
         compactor.compact(conv)
 """
 
+from ..core.errors import ContextOverflowError
 from .compaction import AsyncCompactor, Compactor, SlidingWindowCompactor, SummarizingCompactor
 from .session import Config, Conversation
 from .storage import FileSessionStorage, SessionStorage, SessionSummary, StoredSession
-from .tokens import estimate_message_tokens, estimate_tokens
+from .tokens import Tokenizer, estimate_message_tokens, estimate_tokens
 from .types import Message, Role, ToolCall
 
 __all__ = [
@@ -54,6 +55,9 @@ __all__ = [
     "SessionSummary",
     "FileSessionStorage",
     # Tokens
+    "Tokenizer",
     "estimate_tokens",
     "estimate_message_tokens",
+    # Errors
+    "ContextOverflowError",
 ]
