@@ -800,6 +800,7 @@ class TestTokenReductionGuard:
             before_tokens=100,
             after_tokens=60,  # 40% reduction
             summary="test",
+            summary_tokens=50,
             attempt=0,
         )
 
@@ -816,6 +817,7 @@ class TestTokenReductionGuard:
             before_tokens=100,
             after_tokens=90,  # Only 10% reduction
             summary="test",
+            summary_tokens=80,
             attempt=0,
         )
 

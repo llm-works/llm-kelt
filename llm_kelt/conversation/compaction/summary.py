@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..tokens import Tokenizer, estimate_message_tokens
+from ..tokens import Tokenizer, estimate_message_tokens, estimate_tokens
 from ..types import Message, Role
 from .base import AsyncCompactor
 from .guard import CompactionContext, CompactionGuard, CompactionGuardError
@@ -162,12 +162,16 @@ class SummarizingCompactor(AsyncCompactor):
             for m in after_messages
         )
 
+        # Calculate summary-only tokens for max_summary_tokens guard
+        summary_tokens = estimate_tokens(summary, tokenizer=tokenizer)
+
         return CompactionContext(
             before_messages=before_messages,
             after_messages=after_messages,
             before_tokens=before_tokens,
             after_tokens=after_tokens,
             summary=summary,
+            summary_tokens=summary_tokens,
             attempt=attempt,
         )
 

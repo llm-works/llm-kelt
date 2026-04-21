@@ -32,8 +32,9 @@ class CompactionContext:
         before_messages: Messages before compaction.
         after_messages: Messages after compaction.
         before_tokens: Token count before compaction.
-        after_tokens: Token count after compaction.
+        after_tokens: Token count after compaction (includes preserved messages).
         summary: The generated summary text (for summarizing compactor).
+        summary_tokens: Token count of just the summary (for summarizing compactor).
         attempt: Current attempt number (0-indexed).
     """
 
@@ -42,6 +43,7 @@ class CompactionContext:
     before_tokens: int
     after_tokens: int
     summary: str | None
+    summary_tokens: int | None
     attempt: int
 
     @property
@@ -209,19 +211,22 @@ def max_summary_tokens(
     """
 
     def check(ctx: CompactionContext) -> str | None:
-        if ctx.after_tokens > max_tokens:
-            return f"Summary has {ctx.after_tokens} tokens (max: {max_tokens})"
+        if ctx.summary_tokens is None:
+            return None  # Not a summarizing compaction
+        if ctx.summary_tokens > max_tokens:
+            return f"Summary has {ctx.summary_tokens} tokens (max: {max_tokens})"
         return None
 
     def instruction(attempt: int, ctx: CompactionContext, error: str) -> str:
+        tokens = ctx.summary_tokens or 0
         if attempt == 0:
             return (
-                f"Your summary has {ctx.after_tokens} tokens but the limit is {max_tokens}. "
+                f"Your summary has {tokens} tokens but the limit is {max_tokens}. "
                 f"Shorten it while preserving key information."
             )
         return (
             f"YOU HAVE FAILED TO STAY UNDER {max_tokens} TOKENS {attempt + 1} TIMES. "
-            f"Current: {ctx.after_tokens}. Strip EVERYTHING non-essential. Do it NOW."
+            f"Current: {tokens}. Strip EVERYTHING non-essential. Do it NOW."
         )
 
     static = f"Your summary exceeds {max_tokens} tokens. Make it shorter."
