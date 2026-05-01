@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `Conversation.to_dict()` / `Conversation.from_dict()` for serializing conversation state
+  (enables mid-loop pause/resume by persisting messages and token count)
 - Hard context limit enforcement: `max_tokens` is now a guaranteed cap, not just a compaction trigger
 - `ContextOverflowError` raised BEFORE adding a message that would exceed `max_tokens`
 - `Config.tokenizer` option for accurate token counting (accepts `Callable[[str], int]`)

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from typing import Any
+from typing import Any, Self
 
 from appinfra import FieldDict
 from appinfra.log import Logger
@@ -411,3 +411,40 @@ class Conversation(AsyncConversationLike):
     def __len__(self) -> int:
         """Number of messages."""
         return len(self._messages)
+
+    # --- Serialization ---
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize conversation state for persistence.
+
+        Returns dict with messages and token count. Config and compactor are not
+        serialized — pass them fresh when restoring via from_dict().
+        """
+        return {
+            "messages": [m.to_dict() for m in self._messages],
+            "token_count": self._token_count,
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        lg: Logger,
+        config: Config | None = None,
+        compactor: Compactor | AsyncCompactor | None = None,
+    ) -> Self:
+        """Restore conversation from serialized state.
+
+        Args:
+            data: Dict from to_dict() containing messages and token_count.
+            lg: Logger instance.
+            config: Conversation config (uses defaults if None).
+            compactor: Optional compactor for automatic compaction.
+
+        Returns:
+            Restored Conversation instance.
+        """
+        conv = cls(lg, config=config, compactor=compactor)
+        conv._messages = [Message.from_dict(m) for m in data["messages"]]
+        conv._token_count = data["token_count"]
+        return conv

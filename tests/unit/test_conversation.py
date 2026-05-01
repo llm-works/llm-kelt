@@ -787,6 +787,111 @@ class TestSummarizingCompactor:
         assert any("The summary." in m.content for m in ctx.after_messages)
 
 
+class TestConversationSerialization:
+    """Tests for Conversation.to_dict() / from_dict()."""
+
+    def test_to_dict_basic(self, lg):
+        """Test basic serialization."""
+        conv = Conversation(lg)
+        conv.add("You are helpful.", Role.SYSTEM)
+        conv.add("Hello")
+        conv.add("Hi there!", Role.ASSISTANT)
+
+        d = conv.to_dict()
+        assert "messages" in d
+        assert "token_count" in d
+        assert len(d["messages"]) == 3
+        assert d["token_count"] == conv.token_count
+
+    def test_from_dict_basic(self, lg):
+        """Test basic deserialization."""
+        conv = Conversation(lg)
+        conv.add("Hello")
+        conv.add("Hi!", Role.ASSISTANT)
+
+        d = conv.to_dict()
+        restored = Conversation.from_dict(d, lg)
+
+        assert restored.message_count == 2
+        assert restored.token_count == conv.token_count
+        assert restored.messages[0].content == "Hello"
+        assert restored.messages[1].role == "assistant"
+
+    def test_roundtrip_with_tool_calls(self, lg):
+        """Test serialization preserves tool calls."""
+        conv = Conversation(lg)
+        conv.add(
+            "",
+            Role.ASSISTANT,
+            tool_calls=[ToolCall(id="tc_1", name="search", arguments={"q": "test"})],
+        )
+        conv.add("results", Role.TOOL, tool_call_id="tc_1")
+
+        d = conv.to_dict()
+        restored = Conversation.from_dict(d, lg)
+
+        assert restored.messages[0].tool_calls is not None
+        assert restored.messages[0].tool_calls[0].name == "search"
+        assert restored.messages[0].tool_calls[0].arguments == {"q": "test"}
+        assert restored.messages[1].tool_call_id == "tc_1"
+
+    def test_from_dict_with_config(self, lg):
+        """Test that config is applied on restore."""
+        conv = Conversation(lg)
+        conv.add("test")
+
+        d = conv.to_dict()
+        config = Config(max_tokens=5000, compact_threshold=0.6)
+        restored = Conversation.from_dict(d, lg, config=config)
+
+        assert restored.config.max_tokens == 5000
+        assert restored.config.compact_threshold == 0.6
+
+    def test_from_dict_with_compactor(self, lg):
+        """Test that compactor is applied on restore."""
+        from llm_kelt.conversation import SlidingWindowCompactor
+
+        conv = Conversation(lg)
+        conv.add("test")
+
+        d = conv.to_dict()
+        compactor = SlidingWindowCompactor()
+        restored = Conversation.from_dict(d, lg, compactor=compactor)
+
+        assert restored.compactor is compactor
+
+    def test_json_serializable(self, lg):
+        """Test that to_dict output is JSON-serializable."""
+        import json
+
+        conv = Conversation(lg)
+        conv.add("system", Role.SYSTEM)
+        conv.add("Hello")
+        conv.add(
+            "Let me search",
+            Role.ASSISTANT,
+            tool_calls=[ToolCall(id="tc_1", name="search", arguments={"q": "test"})],
+        )
+        conv.add("results", Role.TOOL, tool_call_id="tc_1")
+
+        d = conv.to_dict()
+        json_str = json.dumps(d)  # Should not raise
+        parsed = json.loads(json_str)
+
+        # Verify roundtrip through JSON
+        restored = Conversation.from_dict(parsed, lg)
+        assert restored.message_count == 4
+
+    def test_empty_conversation_roundtrip(self, lg):
+        """Test serialization of empty conversation."""
+        conv = Conversation(lg)
+        d = conv.to_dict()
+        restored = Conversation.from_dict(d, lg)
+
+        assert restored.message_count == 0
+        assert restored.token_count == 0
+
+
 class TestTokenReductionGuard:
     """Tests for the token_reduction pre-built guard."""
 
