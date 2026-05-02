@@ -891,6 +891,27 @@ class TestConversationSerialization:
         assert restored.message_count == 0
         assert restored.token_count == 0
 
+    def test_from_dict_recalculates_tokens_with_new_tokenizer(self, lg):
+        """Test that token count is recalculated using restored config's tokenizer."""
+        # Create conversation with default tokenizer
+        conv = Conversation(lg)
+        conv.add("Hello world")
+        original_tokens = conv.token_count
+
+        d = conv.to_dict()
+
+        # Restore with a custom tokenizer that counts differently (1 token per char)
+        def char_tokenizer(text: str) -> int:
+            return len(text)
+
+        config = Config(tokenizer=char_tokenizer)
+        restored = Conversation.from_dict(d, lg, config=config)
+
+        # Token count should be recalculated, not copied from serialized data
+        assert restored.token_count != original_tokens
+        # With char_tokenizer, "Hello world" = 11 chars, plus role overhead
+        assert restored.token_count > 0
+
 
 class TestTokenReductionGuard:
     """Tests for the token_reduction pre-built guard."""
