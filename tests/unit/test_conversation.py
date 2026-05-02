@@ -925,6 +925,9 @@ class TestConversationSerialization:
         with pytest.raises(ValueError, match="Expected 'messages' to be a list"):
             Conversation.from_dict({"messages": "not a list"}, lg)
 
+        with pytest.raises(ValueError, match=r"Expected messages\[1\] to be a dict"):
+            Conversation.from_dict({"messages": [{}, "not a dict"]}, lg)
+
 
 class TestTokenReductionGuard:
     """Tests for the token_reduction pre-built guard."""

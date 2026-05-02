@@ -459,6 +459,9 @@ class Conversation(AsyncConversationLike):
             raise ValueError(
                 f"Expected 'messages' to be a list, got {type(data['messages']).__name__}"
             )
+        for i, m in enumerate(data["messages"]):
+            if not isinstance(m, dict):
+                raise ValueError(f"Expected messages[{i}] to be a dict, got {type(m).__name__}")
 
         conv = cls(lg, config=config, compactor=compactor)
         conv.replace_messages([Message.from_dict(m) for m in data["messages"]])
