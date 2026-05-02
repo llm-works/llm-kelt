@@ -912,6 +912,19 @@ class TestConversationSerialization:
         # With char_tokenizer, "Hello world" = 11 chars, plus role overhead
         assert restored.token_count > 0
 
+    def test_from_dict_validates_input(self, lg):
+        """Test that from_dict raises ValueError on malformed input."""
+        import pytest
+
+        with pytest.raises(ValueError, match="Expected dict"):
+            Conversation.from_dict("not a dict", lg)
+
+        with pytest.raises(ValueError, match="Missing required key 'messages'"):
+            Conversation.from_dict({}, lg)
+
+        with pytest.raises(ValueError, match="Expected 'messages' to be a list"):
+            Conversation.from_dict({"messages": "not a list"}, lg)
+
 
 class TestTokenReductionGuard:
     """Tests for the token_reduction pre-built guard."""

@@ -447,7 +447,19 @@ class Conversation(AsyncConversationLike):
 
         Returns:
             Restored Conversation instance.
+
+        Raises:
+            ValueError: If data is malformed (missing 'messages' key or not a list).
         """
+        if not isinstance(data, dict):
+            raise ValueError(f"Expected dict, got {type(data).__name__}")
+        if "messages" not in data:
+            raise ValueError("Missing required key 'messages'")
+        if not isinstance(data["messages"], list):
+            raise ValueError(
+                f"Expected 'messages' to be a list, got {type(data['messages']).__name__}"
+            )
+
         conv = cls(lg, config=config, compactor=compactor)
         conv.replace_messages([Message.from_dict(m) for m in data["messages"]])
         return conv
