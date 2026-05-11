@@ -52,16 +52,14 @@ class Database:
                 session.add(record)
                 # Commits automatically on exit
         """
-        session = self._pg.session()
-        try:
-            yield session
-            session.commit()
-        except Exception as e:
-            self._lg.warning("session rollback", extra={"exception": e})
-            session.rollback()
-            raise
-        finally:
-            session.close()
+        # appinfra's PG.session() is now a context manager that handles
+        # commit/rollback/close automatically
+        with self._pg.session() as session:
+            try:
+                yield session
+            except Exception as e:
+                self._lg.warning("session rollback", extra={"exception": e})
+                raise
 
     def ensure_database(self) -> None:
         """Create the database if PG is configured with create_db and it doesn't exist.
