@@ -23,13 +23,15 @@ def ensure_alembic_version(logger, database):
     """
     manager = SchemaManager(logger, database.engine, schema_name=database.schema)
 
-    # Check current state - if it's TOO_NEW (fake future version), fix it first
+    # Check if alembic_version has a fake future version from a previous failed test.
+    # We must fix this BEFORE calling ensure_schema(), which would raise SchemaVersionError.
     try:
-        status = manager.get_status()
-        if status.state == SchemaState.TOO_NEW:
-            # Reset to head version before proceeding
-            head = manager._get_head_version()
-            with database.engine.connect() as conn:
+        with database.engine.connect() as conn:
+            result = conn.execute(text("SELECT version_num FROM alembic_version LIMIT 1"))
+            row = result.fetchone()
+            if row and row[0] == "9999_future_version":
+                # Reset to head version before ensure_schema() sees the bad state
+                head = manager._get_head_version()
                 conn.execute(text("DELETE FROM alembic_version"))
                 conn.execute(
                     text("INSERT INTO alembic_version (version_num) VALUES (:rev)"),
@@ -37,7 +39,7 @@ def ensure_alembic_version(logger, database):
                 )
                 conn.commit()
     except Exception:
-        pass  # Table might not exist yet, that's fine
+        pass  # Table might not exist yet, that's fine - ensure_schema will create it
 
     manager.ensure_schema()
     yield
