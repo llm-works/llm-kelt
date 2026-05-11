@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TieredCompactor` and `AsyncTieredCompactor` for two-phase compaction: trims large tool
   outputs first (web_fetch, web_search, etc.), only summarizes if still over threshold.
   Preserves conversation structure better than eager summarization.
+  - Supports guards with retry/escalation (parity with `SummarizingCompactor`)
+  - `trim_threshold_tokens` param for token-based trimming (uses tokenizer instead of chars)
 
 ### Changed
 - **Breaking**: `SummarizingCompactor` is now an `AsyncCompactor` (use `append_async()`, accepts guards)
