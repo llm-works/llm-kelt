@@ -17,9 +17,9 @@ from typing import TYPE_CHECKING
 
 from ..tokens import Tokenizer, estimate_message_tokens, estimate_tokens
 from ..types import Message, Role
-from ._helpers import build_compacted_messages, format_messages_for_summary
+from ._helpers import build_compacted_messages, check_guards, format_messages_for_summary
 from .base import AsyncCompactor, Compactor
-from .guard import CompactionContext, CompactionGuard, CompactionGuardError
+from .guard import CompactionContext, CompactionGuard
 
 if TYPE_CHECKING:
     from llm_infer.client import ChatClient
@@ -39,6 +39,16 @@ DEFAULT_TRIMMABLE_TOOLS: frozenset[str] = frozenset(
 )
 
 _DEFAULT_TRIM_THRESHOLD = 2000
+
+# Tool output summary extraction limits
+_SUMMARY_HEAD_CHARS = 500
+_SUMMARY_TAIL_CHARS = 200
+_SUMMARY_FALLBACK_CHARS = 500
+_SEARCH_MAX_LINES = 20
+_SEARCH_MAX_RESULTS = 10
+_FETCH_MAX_LINES = 10
+_FETCH_MAX_RESULTS = 5
+_MAX_LINE_LEN = 200
 
 _SUMMARY_PROMPT = (
     "Summarize this conversation VERY concisely. Target: 50% reduction "
@@ -171,23 +181,6 @@ class _TieredMixin:
             attempt=attempt,
         )
 
-    def _check_guards(self, ctx: CompactionContext, guard_attempts: dict[int, int]) -> str | None:
-        """Check guards and raise if any exhausted retries. Returns feedback or None."""
-        for i, guard in enumerate(self._guards):
-            if guard_attempts[i] > guard.max_retries:
-                continue
-            error = guard.validator(ctx)
-            if error is not None:
-                guard_attempts[i] += 1
-                if guard_attempts[i] > guard.max_retries:
-                    raise CompactionGuardError(
-                        guard_name=guard.name,
-                        error=error,
-                        attempts=guard_attempts[i],
-                    )
-                return guard.resolve_instruction(guard_attempts[i] - 1, ctx, error)
-        return None
-
 
 class TieredCompactor(_TieredMixin, Compactor):
     """Two-phase compaction: trim tool outputs first, summarize later.
@@ -273,7 +266,7 @@ class TieredCompactor(_TieredMixin, Compactor):
             ctx = self._build_guard_context(
                 preserved, before_messages, summary, before_tokens, attempt, tokenizer
             )
-            feedback = self._check_guards(ctx, guard_attempts)
+            feedback = check_guards(self._guards, ctx, guard_attempts)
             if feedback is None:
                 return summary
             attempt += 1
@@ -363,7 +356,7 @@ class AsyncTieredCompactor(_TieredMixin, AsyncCompactor):
             ctx = self._build_guard_context(
                 preserved, before_messages, summary, before_tokens, attempt, tokenizer
             )
-            feedback = self._check_guards(ctx, guard_attempts)
+            feedback = check_guards(self._guards, ctx, guard_attempts)
             if feedback is None:
                 return summary
             attempt += 1
@@ -467,33 +460,34 @@ def _extract_summary(tool_name: str, content: str) -> str:
     elif tool_name == "web_fetch":
         return _summarize_fetch_result(content)
     else:
-        # Generic: first 500 chars + last 200 chars
-        if len(content) > 800:
-            return f"{content[:500]}\n...[trimmed]...\n{content[-200:]}"
-        return content[:700]
+        # Generic: head + tail with middle trimmed
+        threshold = _SUMMARY_HEAD_CHARS + _SUMMARY_TAIL_CHARS + 100
+        if len(content) > threshold:
+            return f"{content[:_SUMMARY_HEAD_CHARS]}\n...[trimmed]...\n{content[-_SUMMARY_TAIL_CHARS:]}"
+        return content[: _SUMMARY_HEAD_CHARS + _SUMMARY_TAIL_CHARS]
 
 
 def _summarize_search_results(content: str) -> str:
     """Extract titles/URLs from search results."""
     lines = content.split("\n")
     summary_lines = []
-    for line in lines[:20]:
+    for line in lines[:_SEARCH_MAX_LINES]:
         line = line.strip()
-        if line and (line.startswith("http") or "://" in line or len(line) < 200):
+        if line and (line.startswith("http") or "://" in line or len(line) < _MAX_LINE_LEN):
             summary_lines.append(line)
-        if len(summary_lines) >= 10:
+        if len(summary_lines) >= _SEARCH_MAX_RESULTS:
             break
-    return "\n".join(summary_lines) if summary_lines else content[:500]
+    return "\n".join(summary_lines) if summary_lines else content[:_SUMMARY_FALLBACK_CHARS]
 
 
 def _summarize_fetch_result(content: str) -> str:
     """Extract title and key content from fetched page."""
     lines = content.split("\n")
     summary_parts = []
-    for line in lines[:10]:
+    for line in lines[:_FETCH_MAX_LINES]:
         line = line.strip()
-        if line and len(line) < 200:
+        if line and len(line) < _MAX_LINE_LEN:
             summary_parts.append(line)
     if summary_parts:
-        return "\n".join(summary_parts[:5])
-    return content[:500]
+        return "\n".join(summary_parts[:_FETCH_MAX_RESULTS])
+    return content[:_SUMMARY_FALLBACK_CHARS]

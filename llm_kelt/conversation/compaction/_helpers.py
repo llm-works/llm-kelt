@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..types import Message, Role
+from .guard import CompactionContext, CompactionGuard, CompactionGuardError
 
 
 def build_compacted_messages(preserved: list[Message], summary: str) -> list[Message]:
@@ -47,3 +48,37 @@ def format_messages_for_summary(
             role = msg.role.upper() if isinstance(msg.role, str) else msg.role.name
             lines.append(f"{role}: {msg.content or ''}")
     return "\n\n".join(lines)
+
+
+def check_guards(
+    guards: list[CompactionGuard],
+    ctx: CompactionContext,
+    guard_attempts: dict[int, int],
+) -> str | None:
+    """Check guards and raise if any exhausted retries.
+
+    Args:
+        guards: List of guards to check.
+        ctx: Current compaction context.
+        guard_attempts: Mutable dict tracking attempts per guard index.
+
+    Returns:
+        Feedback string if a guard failed but has retries left, None if all passed.
+
+    Raises:
+        CompactionGuardError: If a guard exhausted its retries.
+    """
+    for i, guard in enumerate(guards):
+        if guard_attempts[i] > guard.max_retries:
+            continue
+        error = guard.validator(ctx)
+        if error is not None:
+            guard_attempts[i] += 1
+            if guard_attempts[i] > guard.max_retries:
+                raise CompactionGuardError(
+                    guard_name=guard.name,
+                    error=error,
+                    attempts=guard_attempts[i],
+                )
+            return guard.resolve_instruction(guard_attempts[i] - 1, ctx, error)
+    return None

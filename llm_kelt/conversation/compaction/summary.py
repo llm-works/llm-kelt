@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING
 
 from ..tokens import Tokenizer, estimate_message_tokens, estimate_tokens
 from ..types import Message
-from ._helpers import build_compacted_messages, format_messages_for_summary
+from ._helpers import build_compacted_messages, check_guards, format_messages_for_summary
 from .base import AsyncCompactor
-from .guard import CompactionContext, CompactionGuard, CompactionGuardError
+from .guard import CompactionContext, CompactionGuard
 
 if TYPE_CHECKING:
     from llm_infer.client import ChatClient
@@ -117,18 +117,7 @@ class SummarizingCompactor(AsyncCompactor):
 
     def _check_guards(self, ctx: CompactionContext, guard_attempts: dict[int, int]) -> str | None:
         """Check guards and raise if any exhausted retries. Returns feedback or None."""
-        failed, error, feedback = self._run_guards_with_tracking(ctx, guard_attempts)
-        if failed is None:
-            return None
-
-        guard_idx, guard = failed
-        if guard_attempts[guard_idx] > guard.max_retries:
-            raise CompactionGuardError(
-                guard_name=guard.name,
-                error=error or "Unknown error",
-                attempts=guard_attempts[guard_idx],
-            )
-        return feedback
+        return check_guards(self._guards, ctx, guard_attempts)
 
     def _build_prompt(self, formatted: str, last_feedback: str | None, attempt: int) -> str:
         """Build summarization prompt, including retry feedback if applicable."""
@@ -182,24 +171,3 @@ class SummarizingCompactor(AsyncCompactor):
             summary_tokens=summary_tokens,
             attempt=attempt,
         )
-
-    def _run_guards_with_tracking(
-        self, ctx: CompactionContext, guard_attempts: dict[int, int]
-    ) -> tuple[tuple[int, CompactionGuard] | None, str | None, str | None]:
-        """Run guards and track attempts per guard.
-
-        Returns:
-            (failed_guard, error, feedback) where failed_guard is (index, guard) or None if passed.
-        """
-        for i, guard in enumerate(self._guards):
-            # Skip guards that have exhausted retries
-            if guard_attempts[i] > guard.max_retries:
-                continue
-
-            error = guard.validator(ctx)
-            if error is not None:
-                guard_attempts[i] += 1
-                feedback = guard.resolve_instruction(guard_attempts[i] - 1, ctx, error)
-                return (i, guard), error, feedback
-
-        return None, None, None
