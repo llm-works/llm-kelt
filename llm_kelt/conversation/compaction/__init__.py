@@ -27,6 +27,11 @@ from .guard import (
     token_reduction,
 )
 from .summary import SummarizingCompactor
+from .tiered import (
+    DEFAULT_TRIMMABLE_TOOLS,
+    AsyncTieredCompactor,
+    TieredCompactor,
+)
 from .window import SlidingWindowCompactor
 
 __all__ = [
@@ -36,6 +41,9 @@ __all__ = [
     # Compactors
     "SlidingWindowCompactor",
     "SummarizingCompactor",
+    "TieredCompactor",
+    "AsyncTieredCompactor",
+    "DEFAULT_TRIMMABLE_TOOLS",
     # Guards
     "CompactionContext",
     "CompactionGuard",

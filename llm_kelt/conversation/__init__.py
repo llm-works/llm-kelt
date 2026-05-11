@@ -30,7 +30,14 @@ Usage::
 """
 
 from ..core.errors import ContextOverflowError
-from .compaction import AsyncCompactor, Compactor, SlidingWindowCompactor, SummarizingCompactor
+from .compaction import (
+    AsyncCompactor,
+    AsyncTieredCompactor,
+    Compactor,
+    SlidingWindowCompactor,
+    SummarizingCompactor,
+    TieredCompactor,
+)
 from .session import Config, Conversation
 from .storage import FileSessionStorage, SessionStorage, SessionSummary, StoredSession
 from .tokens import Tokenizer, estimate_message_tokens, estimate_tokens
@@ -46,9 +53,11 @@ __all__ = [
     "Config",
     # Compaction
     "AsyncCompactor",
+    "AsyncTieredCompactor",
     "Compactor",
     "SlidingWindowCompactor",
     "SummarizingCompactor",
+    "TieredCompactor",
     # Storage
     "SessionStorage",
     "StoredSession",
