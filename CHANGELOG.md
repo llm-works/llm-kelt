@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `kelt session` CLI commands for listing, showing, and deleting sessions
   - Example script (`examples/05_conversation.py`)
 - Debug logging for conversation compaction (messages/tokens before/after, timing, usage ratio)
+- `TieredCompactor` and `AsyncTieredCompactor` for two-phase compaction: trims large tool
+  outputs first (web_fetch, web_search, etc.), only summarizes if still over threshold.
+  Preserves conversation structure better than eager summarization.
 
 ### Changed
 - **Breaking**: `SummarizingCompactor` is now an `AsyncCompactor` (use `append_async()`, accepts guards)
