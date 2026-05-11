@@ -12,13 +12,33 @@ from llm_kelt.core.schema import SchemaManager, SchemaState
 
 @pytest.fixture(autouse=True)
 def ensure_alembic_version(logger, database):
-    """Ensure alembic_version table exists before running schema tests.
+    """Ensure alembic_version table exists and is at correct version.
 
     This is needed because the tests manipulate the alembic_version table directly,
     and when running in parallel, the table might not exist if another test hasn't
     called ensure_schema() first.
+
+    Also handles recovery from bad states (e.g., fake future version left by
+    a previous failed test run).
     """
     manager = SchemaManager(logger, database.engine, schema_name=database.schema)
+
+    # Check current state - if it's TOO_NEW (fake future version), fix it first
+    try:
+        status = manager.get_status()
+        if status.state == SchemaState.TOO_NEW:
+            # Reset to head version before proceeding
+            head = manager._get_head_version()
+            with database.engine.connect() as conn:
+                conn.execute(text("DELETE FROM alembic_version"))
+                conn.execute(
+                    text("INSERT INTO alembic_version (version_num) VALUES (:rev)"),
+                    {"rev": head},
+                )
+                conn.commit()
+    except Exception:
+        pass  # Table might not exist yet, that's fine
+
     manager.ensure_schema()
     yield
 
@@ -92,6 +112,9 @@ class TestSchemaManager:
         """Test that SchemaVersionError is raised for unknown (future) versions."""
         manager = SchemaManager(logger, database.engine, schema_name=database.schema)
 
+        # Save original version for restoration
+        original_version = manager._get_head_version()
+
         # Insert a fake future version
         with database.engine.connect() as conn:
             conn.execute(text("DELETE FROM alembic_version"))
@@ -107,13 +130,12 @@ class TestSchemaManager:
             with pytest.raises(SchemaVersionError, match="newer than"):
                 manager.ensure_schema()
         finally:
-            # Restore correct version
-            head = manager._get_head_version()
+            # Always restore correct version, even if test fails
             with database.engine.connect() as conn:
                 conn.execute(text("DELETE FROM alembic_version"))
                 conn.execute(
                     text("INSERT INTO alembic_version (version_num) VALUES (:rev)"),
-                    {"rev": head},
+                    {"rev": original_version},
                 )
                 conn.commit()
 
