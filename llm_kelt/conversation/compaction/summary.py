@@ -12,7 +12,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..tokens import Tokenizer, estimate_message_tokens, estimate_tokens
-from ..types import Message, Role
+from ..types import Message
+from ._helpers import build_compacted_messages, format_messages_for_summary
 from .base import AsyncCompactor
 from .guard import CompactionContext, CompactionGuard, CompactionGuardError
 
@@ -80,7 +81,7 @@ class SummarizingCompactor(AsyncCompactor):
             to_compact, preserved, before_messages, before_tokens, tokenizer
         )
 
-        new_messages = self._build_compacted_messages(preserved, summary)
+        new_messages = build_compacted_messages(preserved, summary)
         conversation.replace_messages(new_messages)
 
     async def _summarize_with_guards(
@@ -92,7 +93,7 @@ class SummarizingCompactor(AsyncCompactor):
         tokenizer: Tokenizer | None,
     ) -> str:
         """Generate summary with guard validation and retry logic."""
-        formatted = _format_messages(to_compact)
+        formatted = format_messages_for_summary(to_compact)
         if not self._guards:
             return await self._call_llm(formatted)
 
@@ -161,7 +162,7 @@ class SummarizingCompactor(AsyncCompactor):
     ) -> CompactionContext:
         """Build context for guard validation."""
         # Build the actual after_messages for accurate token counting
-        after_messages = self._build_compacted_messages(preserved, summary)
+        after_messages = build_compacted_messages(preserved, summary)
 
         # Calculate actual after_tokens from the compacted messages
         after_tokens = sum(
@@ -202,35 +203,3 @@ class SummarizingCompactor(AsyncCompactor):
                 return (i, guard), error, feedback
 
         return None, None, None
-
-    def _build_compacted_messages(self, preserved: list[Message], summary: str) -> list[Message]:
-        """Build the final message list with summary inserted."""
-        new_messages: list[Message] = []
-
-        system_msgs = [m for m in preserved if m.role == Role.SYSTEM]
-        non_system = [m for m in preserved if m.role != Role.SYSTEM]
-        new_messages.extend(system_msgs)
-
-        new_messages.append(
-            Message(
-                role=Role.USER,
-                content=f"[Previous conversation summary]\n{summary}\n[End summary]",
-            )
-        )
-
-        new_messages.extend(non_system)
-        return new_messages
-
-
-def _format_messages(messages: list[Message]) -> str:
-    """Format messages as text for summarization."""
-    lines = []
-    for msg in messages:
-        if msg.role == "tool":
-            lines.append(f"TOOL RESULT: {msg.content}")
-        elif msg.tool_calls:
-            tools = ", ".join(tc.name for tc in msg.tool_calls)
-            lines.append(f"ASSISTANT [called: {tools}]: {msg.content}")
-        else:
-            lines.append(f"{msg.role.upper()}: {msg.content}")
-    return "\n\n".join(lines)

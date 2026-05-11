@@ -15,8 +15,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ..tokens import Tokenizer, estimate_message_tokens, estimate_tokens
 from ..types import Message, Role
+from ._helpers import build_compacted_messages, format_messages_for_summary
 from .base import AsyncCompactor, Compactor
+from .guard import CompactionContext, CompactionGuard, CompactionGuardError
 
 if TYPE_CHECKING:
     from llm_infer.client import ChatClient
@@ -55,7 +58,138 @@ _SUMMARY_PROMPT = (
 )
 
 
-class TieredCompactor(Compactor):
+class _TieredMixin:
+    """Shared configuration and helpers for tiered compactors."""
+
+    _client: ChatClient
+    _model: str | None
+    _trim_threshold: int
+    _trim_threshold_tokens: int | None
+    _trimmable_tools: frozenset[str]
+    _summary_prompt: str
+    _guards: list[CompactionGuard]
+    _tokenizer: Tokenizer | None
+
+    def _init_tiered(
+        self,
+        client: ChatClient,
+        model: str | None = None,
+        trim_threshold: int = _DEFAULT_TRIM_THRESHOLD,
+        trim_threshold_tokens: int | None = None,
+        trimmable_tools: frozenset[str] | set[str] | None = None,
+        summary_prompt: str | None = None,
+        guards: list[CompactionGuard] | None = None,
+        tokenizer: Tokenizer | None = None,
+    ) -> None:
+        """Initialize tiered compactor config."""
+        self._client = client
+        self._model = model
+        self._trim_threshold = trim_threshold
+        self._trim_threshold_tokens = trim_threshold_tokens
+        self._trimmable_tools = (
+            frozenset(trimmable_tools) if trimmable_tools else DEFAULT_TRIMMABLE_TOOLS
+        )
+        self._summary_prompt = summary_prompt or _SUMMARY_PROMPT
+        self._guards = guards or []
+        self._tokenizer = tokenizer
+
+    def _run_phase1(self, conversation: Conversation) -> bool:
+        """Phase 1: Trim tool results. Returns True if trimming was sufficient."""
+        tokenizer = None
+        if self._trim_threshold_tokens is not None:
+            tokenizer = self._tokenizer or conversation.config.tokenizer
+        trimmed = _trim_tool_results(
+            conversation,
+            self._trim_threshold,
+            self._trimmable_tools,
+            trim_threshold_tokens=self._trim_threshold_tokens,
+            tokenizer=tokenizer,
+        )
+        return trimmed and not conversation.needs_compaction()
+
+    def _prepare_summary(
+        self, conversation: Conversation
+    ) -> tuple[list[Message], list[Message], list[Message], int, Tokenizer | None] | None:
+        """Prepare for phase 2. Returns context needed for summarization or None."""
+        to_compact, preserved = conversation.split_for_compaction()
+        if not to_compact:
+            return None
+        before_messages = list(conversation.messages)
+        tokenizer = self._tokenizer or conversation.config.tokenizer
+        before_tokens = sum(
+            estimate_message_tokens(m.role, m.content, m.tool_calls, tokenizer=tokenizer)
+            for m in before_messages
+        )
+        return to_compact, preserved, before_messages, before_tokens, tokenizer
+
+    def _finalize_summary(
+        self, conversation: Conversation, preserved: list[Message], summary: str
+    ) -> None:
+        """Apply the summary to the conversation."""
+        new_messages = build_compacted_messages(preserved, summary)
+        conversation.replace_messages(new_messages)
+
+    def _build_summary_request(
+        self, messages: list[Message], feedback: str | None = None, attempt: int = 0
+    ) -> tuple[list[dict], dict]:
+        """Build LLM request for summary generation."""
+        formatted = format_messages_for_summary(messages, truncate_tool_content=500)
+        if attempt > 0 and feedback:
+            formatted = f"{formatted}\n\n---\n\n{feedback}"
+        llm_messages = [
+            {"role": "system", "content": self._summary_prompt},
+            {"role": "user", "content": formatted},
+        ]
+        kwargs: dict = {"temperature": 0.3}
+        if self._model:
+            kwargs["model"] = self._model
+        return llm_messages, kwargs
+
+    def _build_guard_context(
+        self,
+        preserved: list[Message],
+        before_messages: list[Message],
+        summary: str,
+        before_tokens: int,
+        attempt: int,
+        tokenizer: Tokenizer | None,
+    ) -> CompactionContext:
+        """Build context for guard validation."""
+        after_messages = build_compacted_messages(preserved, summary)
+        after_tokens = sum(
+            estimate_message_tokens(m.role, m.content, m.tool_calls, tokenizer=tokenizer)
+            for m in after_messages
+        )
+        summary_tokens = estimate_tokens(summary, tokenizer=tokenizer)
+        return CompactionContext(
+            before_messages=before_messages,
+            after_messages=after_messages,
+            before_tokens=before_tokens,
+            after_tokens=after_tokens,
+            summary=summary,
+            summary_tokens=summary_tokens,
+            attempt=attempt,
+        )
+
+    def _check_guards(self, ctx: CompactionContext, guard_attempts: dict[int, int]) -> str | None:
+        """Check guards and raise if any exhausted retries. Returns feedback or None."""
+        for i, guard in enumerate(self._guards):
+            if guard_attempts[i] > guard.max_retries:
+                continue
+            error = guard.validator(ctx)
+            if error is not None:
+                guard_attempts[i] += 1
+                if guard_attempts[i] > guard.max_retries:
+                    raise CompactionGuardError(
+                        guard_name=guard.name,
+                        error=error,
+                        attempts=guard_attempts[i],
+                    )
+                return guard.resolve_instruction(guard_attempts[i] - 1, ctx, error)
+        return None
+
+
+class TieredCompactor(_TieredMixin, Compactor):
     """Two-phase compaction: trim tool outputs first, summarize later.
 
     Phase 1: Truncate large tool results (web searches, fetched pages)
@@ -65,16 +199,22 @@ class TieredCompactor(Compactor):
     Phase 2: If still over threshold after trimming, summarize older
     messages using an LLM call.
 
-    Note: This compactor makes a synchronous LLM call in phase 2.
+    Supports guards for validating summary quality with retry/escalation.
+
+    Note: This compactor makes synchronous LLM calls in phase 2.
     Use ``AsyncTieredCompactor`` for non-blocking summarization.
 
     Args:
         client: LLM client for summarization (phase 2).
         model: Model to use for summarization (optional).
         trim_threshold: Character count above which tool results get trimmed.
+        trim_threshold_tokens: Token count above which tool results get trimmed.
+            When set, uses tokenizer for accurate counting instead of chars.
         trimmable_tools: Set of tool names whose output can be trimmed.
             Defaults to common bulk-data tools (web_search, web_fetch, etc.).
         summary_prompt: Custom prompt for phase 2 summarization.
+        guards: Optional guards for validating compaction quality.
+        tokenizer: Optional tokenizer for token counting.
     """
 
     def __init__(
@@ -82,70 +222,89 @@ class TieredCompactor(Compactor):
         client: ChatClient,
         model: str | None = None,
         trim_threshold: int = _DEFAULT_TRIM_THRESHOLD,
+        trim_threshold_tokens: int | None = None,
         trimmable_tools: frozenset[str] | set[str] | None = None,
         summary_prompt: str | None = None,
+        guards: list[CompactionGuard] | None = None,
+        tokenizer: Tokenizer | None = None,
     ) -> None:
-        self._client = client
-        self._model = model
-        self._trim_threshold = trim_threshold
-        self._trimmable_tools = (
-            frozenset(trimmable_tools) if trimmable_tools else DEFAULT_TRIMMABLE_TOOLS
+        self._init_tiered(
+            client,
+            model,
+            trim_threshold,
+            trim_threshold_tokens,
+            trimmable_tools,
+            summary_prompt,
+            guards,
+            tokenizer,
         )
-        self._summary_prompt = summary_prompt or _SUMMARY_PROMPT
 
     def compact(self, conversation: Conversation) -> None:
         """Compact conversation using tiered strategy."""
-        # Phase 1: Trim tool results
-        trimmed = _trim_tool_results(conversation, self._trim_threshold, self._trimmable_tools)
-        if trimmed and not conversation.needs_compaction():
-            return  # Trimming was sufficient
-
-        # Phase 2: Summarize if still over threshold
-        self._summarize(conversation)
-
-    def _summarize(self, conversation: Conversation) -> None:
-        """Phase 2: Summarize older messages using LLM."""
-        to_compact, preserved = conversation.split_for_compaction()
-        if not to_compact:
+        if self._run_phase1(conversation):
             return
+        prepared = self._prepare_summary(conversation)
+        if not prepared:
+            return
+        to_compact, preserved, before_messages, before_tokens, tokenizer = prepared
+        summary = self._summarize_with_guards(
+            to_compact, preserved, before_messages, before_tokens, tokenizer
+        )
+        self._finalize_summary(conversation, preserved, summary)
 
-        summary = self._generate_summary(to_compact)
-        new_messages = _build_compacted_messages(preserved, summary)
-        conversation.replace_messages(new_messages)
+    def _summarize_with_guards(
+        self,
+        to_compact: list[Message],
+        preserved: list[Message],
+        before_messages: list[Message],
+        before_tokens: int,
+        tokenizer: Tokenizer | None,
+    ) -> str:
+        """Generate summary with guard validation and retry logic."""
+        if not self._guards:
+            return self._call_llm(to_compact)
 
-    def _generate_summary(self, messages: list[Message]) -> str:
-        """Generate summary of messages using LLM."""
-        formatted = _format_messages(messages)
+        guard_attempts: dict[int, int] = {i: 0 for i in range(len(self._guards))}
+        feedback: str | None = None
+        attempt = 0
 
-        kwargs: dict = {"temperature": 0.3}
-        if self._model:
-            kwargs["model"] = self._model
-
-        try:
-            response = self._client.chat(
-                messages=[
-                    {"role": "system", "content": self._summary_prompt},
-                    {"role": "user", "content": formatted},
-                ],
-                **kwargs,
+        while True:
+            summary = self._call_llm(to_compact, feedback, attempt)
+            ctx = self._build_guard_context(
+                preserved, before_messages, summary, before_tokens, attempt, tokenizer
             )
-            return response.content or "[Summary unavailable]"
-        except Exception:
-            return "[Summarization failed - continuing with trimmed context]"
+            feedback = self._check_guards(ctx, guard_attempts)
+            if feedback is None:
+                return summary
+            attempt += 1
+
+    def _call_llm(
+        self, messages: list[Message], feedback: str | None = None, attempt: int = 0
+    ) -> str:
+        """Call the LLM to generate a summary."""
+        llm_messages, kwargs = self._build_summary_request(messages, feedback, attempt)
+        response = self._client.chat(messages=llm_messages, **kwargs)
+        return response.content or "[Summary unavailable]"
 
 
-class AsyncTieredCompactor(AsyncCompactor):
+class AsyncTieredCompactor(_TieredMixin, AsyncCompactor):
     """Async version of TieredCompactor for non-blocking summarization.
 
     Same two-phase strategy as ``TieredCompactor``, but uses async LLM
     calls in phase 2 to avoid blocking the event loop.
 
+    Supports guards for validating summary quality with retry/escalation.
+
     Args:
         client: LLM client for summarization (phase 2).
         model: Model to use for summarization (optional).
         trim_threshold: Character count above which tool results get trimmed.
+        trim_threshold_tokens: Token count above which tool results get trimmed.
+            When set, uses tokenizer for accurate counting instead of chars.
         trimmable_tools: Set of tool names whose output can be trimmed.
         summary_prompt: Custom prompt for phase 2 summarization.
+        guards: Optional guards for validating compaction quality.
+        tokenizer: Optional tokenizer for token counting.
     """
 
     def __init__(
@@ -153,56 +312,69 @@ class AsyncTieredCompactor(AsyncCompactor):
         client: ChatClient,
         model: str | None = None,
         trim_threshold: int = _DEFAULT_TRIM_THRESHOLD,
+        trim_threshold_tokens: int | None = None,
         trimmable_tools: frozenset[str] | set[str] | None = None,
         summary_prompt: str | None = None,
+        guards: list[CompactionGuard] | None = None,
+        tokenizer: Tokenizer | None = None,
     ) -> None:
-        self._client = client
-        self._model = model
-        self._trim_threshold = trim_threshold
-        self._trimmable_tools = (
-            frozenset(trimmable_tools) if trimmable_tools else DEFAULT_TRIMMABLE_TOOLS
+        self._init_tiered(
+            client,
+            model,
+            trim_threshold,
+            trim_threshold_tokens,
+            trimmable_tools,
+            summary_prompt,
+            guards,
+            tokenizer,
         )
-        self._summary_prompt = summary_prompt or _SUMMARY_PROMPT
 
     async def compact(self, conversation: Conversation) -> None:
         """Compact conversation using tiered strategy."""
-        # Phase 1: Trim tool results (sync - no I/O)
-        trimmed = _trim_tool_results(conversation, self._trim_threshold, self._trimmable_tools)
-        if trimmed and not conversation.needs_compaction():
-            return  # Trimming was sufficient
-
-        # Phase 2: Summarize if still over threshold
-        await self._summarize(conversation)
-
-    async def _summarize(self, conversation: Conversation) -> None:
-        """Phase 2: Summarize older messages using LLM."""
-        to_compact, preserved = conversation.split_for_compaction()
-        if not to_compact:
+        if self._run_phase1(conversation):
             return
+        prepared = self._prepare_summary(conversation)
+        if not prepared:
+            return
+        to_compact, preserved, before_messages, before_tokens, tokenizer = prepared
+        summary = await self._summarize_with_guards(
+            to_compact, preserved, before_messages, before_tokens, tokenizer
+        )
+        self._finalize_summary(conversation, preserved, summary)
 
-        summary = await self._generate_summary(to_compact)
-        new_messages = _build_compacted_messages(preserved, summary)
-        conversation.replace_messages(new_messages)
+    async def _summarize_with_guards(
+        self,
+        to_compact: list[Message],
+        preserved: list[Message],
+        before_messages: list[Message],
+        before_tokens: int,
+        tokenizer: Tokenizer | None,
+    ) -> str:
+        """Generate summary with guard validation and retry logic."""
+        if not self._guards:
+            return await self._call_llm(to_compact)
 
-    async def _generate_summary(self, messages: list[Message]) -> str:
-        """Generate summary of messages using async LLM call."""
-        formatted = _format_messages(messages)
+        guard_attempts: dict[int, int] = {i: 0 for i in range(len(self._guards))}
+        feedback: str | None = None
+        attempt = 0
 
-        kwargs: dict = {"temperature": 0.3}
-        if self._model:
-            kwargs["model"] = self._model
-
-        try:
-            response = await self._client.chat_async(
-                messages=[
-                    {"role": "system", "content": self._summary_prompt},
-                    {"role": "user", "content": formatted},
-                ],
-                **kwargs,
+        while True:
+            summary = await self._call_llm(to_compact, feedback, attempt)
+            ctx = self._build_guard_context(
+                preserved, before_messages, summary, before_tokens, attempt, tokenizer
             )
-            return response.content or "[Summary unavailable]"
-        except Exception:
-            return "[Summarization failed - continuing with trimmed context]"
+            feedback = self._check_guards(ctx, guard_attempts)
+            if feedback is None:
+                return summary
+            attempt += 1
+
+    async def _call_llm(
+        self, messages: list[Message], feedback: str | None = None, attempt: int = 0
+    ) -> str:
+        """Call the LLM to generate a summary."""
+        llm_messages, kwargs = self._build_summary_request(messages, feedback, attempt)
+        response = await self._client.chat_async(messages=llm_messages, **kwargs)
+        return response.content or "[Summary unavailable]"
 
 
 # --- Shared helpers ---
@@ -212,6 +384,8 @@ def _trim_tool_results(
     conversation: Conversation,
     trim_threshold: int,
     trimmable_tools: frozenset[str],
+    trim_threshold_tokens: int | None = None,
+    tokenizer: Tokenizer | None = None,
 ) -> bool:
     """Trim large tool results, preserving structure. Returns True if any trimming done."""
     messages = conversation.as_messages()
@@ -221,7 +395,10 @@ def _trim_tool_results(
     new_messages: list[Message] = []
 
     for msg in messages:
-        if msg.role == Role.TOOL and _should_trim(msg, tool_names, trim_threshold, trimmable_tools):
+        should_trim = msg.role == Role.TOOL and _should_trim(
+            msg, tool_names, trim_threshold, trimmable_tools, trim_threshold_tokens, tokenizer
+        )
+        if should_trim:
             trimmed_msg = _trim_message(msg, tool_names)
             new_messages.append(trimmed_msg)
             modified = True
@@ -249,17 +426,23 @@ def _should_trim(
     tool_names: dict[str, str],
     trim_threshold: int,
     trimmable_tools: frozenset[str],
+    trim_threshold_tokens: int | None = None,
+    tokenizer: Tokenizer | None = None,
 ) -> bool:
     """Check if a tool result should be trimmed."""
     if not msg.tool_call_id:
         return False
 
     tool_name = tool_names.get(msg.tool_call_id, "")
-    is_trimmable = tool_name in trimmable_tools
-    content_len = len(msg.content or "")
-    is_large = content_len > trim_threshold
+    if tool_name not in trimmable_tools:
+        return False
 
-    return is_trimmable and is_large
+    content = msg.content or ""
+    if trim_threshold_tokens is not None and tokenizer is not None:
+        content_size = estimate_tokens(content, tokenizer=tokenizer)
+        return content_size > trim_threshold_tokens
+
+    return len(content) > trim_threshold
 
 
 def _trim_message(msg: Message, tool_names: dict[str, str]) -> Message:
@@ -314,38 +497,3 @@ def _summarize_fetch_result(content: str) -> str:
     if summary_parts:
         return "\n".join(summary_parts[:5])
     return content[:500]
-
-
-def _build_compacted_messages(preserved: list[Message], summary: str) -> list[Message]:
-    """Build the final message list with summary inserted."""
-    new_messages: list[Message] = []
-
-    system_msgs = [m for m in preserved if m.role == Role.SYSTEM]
-    non_system = [m for m in preserved if m.role != Role.SYSTEM]
-    new_messages.extend(system_msgs)
-
-    new_messages.append(
-        Message(
-            role=Role.USER,
-            content=f"[Previous conversation summary]\n{summary}\n[End summary]",
-        )
-    )
-
-    new_messages.extend(non_system)
-    return new_messages
-
-
-def _format_messages(messages: list[Message]) -> str:
-    """Format messages for summarization."""
-    lines = []
-    for msg in messages:
-        if msg.role == Role.TOOL:
-            content = (msg.content or "")[:500]
-            lines.append(f"TOOL RESULT: {content}")
-        elif msg.tool_calls:
-            tools = ", ".join(tc.name for tc in msg.tool_calls)
-            lines.append(f"ASSISTANT [called: {tools}]: {msg.content or ''}")
-        else:
-            role = msg.role.upper() if isinstance(msg.role, str) else msg.role.name
-            lines.append(f"{role}: {msg.content or ''}")
-    return "\n\n".join(lines)
