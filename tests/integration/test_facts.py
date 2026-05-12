@@ -223,6 +223,56 @@ class TestAssertionsClient:
         with pytest.raises(TypeError, match="not str"):
             kelt_client.atomic.assertions.delete("123")
 
+    def test_get_many(self, kelt_client, clean_tables):
+        """Test batch retrieving multiple assertions."""
+        fact1_id = kelt_client.atomic.assertions.add("First assertion")
+        fact2_id = kelt_client.atomic.assertions.add("Second assertion")
+        fact3_id = kelt_client.atomic.assertions.add("Third assertion")
+
+        facts = kelt_client.atomic.assertions.get_many([fact1_id, fact2_id, fact3_id])
+
+        assert len(facts) == 3
+        retrieved_ids = {f.id for f in facts}
+        assert retrieved_ids == {fact1_id, fact2_id, fact3_id}
+
+    def test_get_many_partial_results(self, kelt_client, clean_tables):
+        """Test get_many with some missing IDs - should silently skip them."""
+        fact1_id = kelt_client.atomic.assertions.add("Existing assertion")
+        missing_id = 999999
+
+        facts = kelt_client.atomic.assertions.get_many([fact1_id, missing_id])
+
+        assert len(facts) == 1
+        assert facts[0].id == fact1_id
+
+    def test_get_many_empty_input(self, kelt_client, clean_tables):
+        """Test get_many with empty list returns empty list."""
+        facts = kelt_client.atomic.assertions.get_many([])
+        assert facts == []
+
+    def test_get_many_all_missing(self, kelt_client, clean_tables):
+        """Test get_many with all missing IDs returns empty list."""
+        facts = kelt_client.atomic.assertions.get_many([999998, 999999])
+        assert facts == []
+
+    def test_get_many_respects_context(self, kelt_client, database, logger, clean_tables):
+        """Test get_many only returns facts from the client's context."""
+        from llm_kelt import ClientContext
+        from llm_kelt.client import Client
+
+        # Create fact in default context
+        fact_in_ctx = kelt_client.atomic.assertions.add("In context")
+
+        # Create another client with different context
+        other_ctx = ClientContext(context_key="other:context", schema_name=None)
+        other_client = Client(database=database, context=other_ctx, lg=logger)
+        other_fact_id = other_client.atomic.assertions.add("Other context")
+
+        # Default client should not see other context's fact
+        facts = kelt_client.atomic.assertions.get_many([fact_in_ctx, other_fact_id])
+        assert len(facts) == 1
+        assert facts[0].id == fact_in_ctx
+
 
 class TestAssertionsEmbeddings:
     """Test embedding functionality via Protocol.embeddings (requires pgvector)."""
