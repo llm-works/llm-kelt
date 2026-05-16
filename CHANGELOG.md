@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Knowledge Graph layer (`llm_kelt.memory.kg`) for entity-centric knowledge management
+  - Canonical entities with alias-based deduplication and scoped visibility
+  - Entity relationships, fact-entity linkage, and reference tracking
+  - Batch queries: `get_by_names()`, `get_relationships_for_entities()`, `get_entities_for_facts()`
 - `Conversation.to_dict()` / `Conversation.from_dict()` for serializing conversation state
   (enables mid-loop pause/resume by persisting messages and token count)
 - Hard context limit enforcement: `max_tokens` is now a guaranteed cap, not just a compaction trigger
@@ -49,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `trim_threshold_tokens` param for token-based trimming (uses tokenizer instead of chars)
 
 ### Changed
+- **Breaking**: `metadata` column renamed to `extra` across all tables (avoids SQLAlchemy conflict)
+- **Breaking**: `metadata` parameter renamed to `extra` in storage APIs (`save()`, `record()`, `link()`, etc.)
 - **Breaking**: `SummarizingCompactor` is now an `AsyncCompactor` (use `append_async()`, accepts guards)
 - **Breaking**: Table `sessions` renamed to `conv_sessions` (avoids conflicts with agent tables)
 - **Breaking**: Table `embeddings` renamed to `fact_embeddings` (avoids conflicts with agent tables)

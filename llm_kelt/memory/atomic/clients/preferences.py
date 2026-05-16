@@ -78,7 +78,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
         rejected: str,
         margin: float | None = None,
         category: str | None = None,
-        metadata: dict | None = None,
+        extra: dict | None = None,
     ) -> int:
         """Record a preference pair."""
         self._validate_preference_inputs(context, chosen, rejected, margin)
@@ -94,7 +94,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
                 chosen=chosen.strip(),
                 rejected=rejected.strip(),
                 margin=margin,
-                metadata_=metadata,
+                extra=extra,
             )
             session.add(details)
             return fact.id

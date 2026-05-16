@@ -39,14 +39,14 @@ class TestRelationshipsClient:
         assert rels[0].relationship_type == "supports"
         assert rels[0].confidence == 1.0
 
-    def test_link_with_metadata(self, kelt_client, clean_tables):
+    def test_link_with_extra(self, kelt_client, clean_tables):
         a, b = self._create_facts(kelt_client, 2)
         meta = {"reason": "temporal overlap", "agent": "researcher"}
-        kelt_client.atomic.relationships.link(a, b, RelType.CONTRADICTS, metadata=meta)
+        kelt_client.atomic.relationships.link(a, b, RelType.CONTRADICTS, extra=meta)
 
         rels = kelt_client.atomic.relationships.get_related(a)
         assert len(rels) == 1
-        assert rels[0].metadata_ == meta
+        assert rels[0].extra == meta
 
     def test_link_with_confidence(self, kelt_client, clean_tables):
         a, b = self._create_facts(kelt_client, 2)

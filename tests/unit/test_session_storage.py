@@ -50,14 +50,14 @@ class TestSaveLoad:
 
     def test_load_roundtrip(self, storage: FileSessionStorage, lg):
         conv = _make_conversation(lg, [("user", "hello"), ("assistant", "hi")])
-        storage.save("s1", conv, metadata={"model": "qwen2.5"})
+        storage.save("s1", conv, extra={"model": "qwen2.5"})
 
         loaded = storage.load("s1")
         assert loaded.session_id == "s1"
         assert len(loaded.messages) == 2
         assert loaded.messages[0]["role"] == "user"
         assert loaded.messages[0]["content"] == "hello"
-        assert loaded.metadata == {"model": "qwen2.5"}
+        assert loaded.extra == {"model": "qwen2.5"}
         assert loaded.token_count == conv.token_count
 
     def test_load_preserves_config(self, storage: FileSessionStorage, lg):
@@ -227,7 +227,7 @@ class TestDataModels:
         s = StoredSession(session_id="s1")
         assert s.session_id == "s1"
         assert s.messages == []
-        assert s.metadata == {}
+        assert s.extra == {}
         assert s.token_count == 0
 
     def test_stored_session_is_dict(self):

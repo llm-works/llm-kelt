@@ -237,7 +237,7 @@ class PredictionDetails(Base):
     outcome_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     actual_result: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Additional metadata
+    # Additional extra data
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String(50)), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -382,7 +382,7 @@ class PreferenceDetails(Base):
     chosen: Mapped[str] = mapped_column(Text, nullable=False)
     rejected: Mapped[str] = mapped_column(Text, nullable=False)
     margin: Mapped[float | None] = mapped_column(Float, nullable=True)
-    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Relationships
     fact: Mapped["Fact"] = relationship(back_populates="preference_details")
@@ -439,7 +439,7 @@ class FactRelationship(Base):
     """
     Edge between two facts — enables graph-like queries over atomic facts.
 
-    Stores typed, directed edges with optional confidence and metadata.
+    Stores typed, directed edges with optional confidence and extra data.
     Symmetric relationship types (contradicts, related_to) are stored with
     normalized ID ordering so the unique constraint prevents duplicate edges.
     """
@@ -455,7 +455,7 @@ class FactRelationship(Base):
     )
     relationship_type: Mapped[str] = mapped_column(String(50), nullable=False)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     context_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False

@@ -72,8 +72,8 @@ def _print_session(session) -> None:
     print(f"Messages: {len(session.messages)}")
     print(f"Tokens: {session.token_count}")
 
-    if session.metadata:
-        print(f"Metadata: {json.dumps(session.metadata, default=str)}")
+    if session.extra:
+        print(f"Extra: {json.dumps(session.extra, default=str)}")
 
     print("\n--- Messages ---")
     for msg in session.messages:

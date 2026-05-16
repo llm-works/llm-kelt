@@ -39,17 +39,17 @@ class TestPreferencesClient:
         fact = kelt_client.atomic.preferences.get(fact_id)
         assert fact.preference_details.margin is None
 
-    def test_record_with_metadata(self, kelt_client, clean_tables):
-        """Test recording pair with metadata."""
+    def test_record_with_extra(self, kelt_client, clean_tables):
+        """Test recording pair with extra data."""
         fact_id = kelt_client.atomic.preferences.record(
             context="Context",
             chosen="Good",
             rejected="Bad",
-            metadata={"model": "gpt-4", "temperature": 0.7},
+            extra={"model": "gpt-4", "temperature": 0.7},
         )
 
         fact = kelt_client.atomic.preferences.get(fact_id)
-        assert fact.preference_details.metadata_ == {"model": "gpt-4", "temperature": 0.7}
+        assert fact.preference_details.extra == {"model": "gpt-4", "temperature": 0.7}
 
     def test_empty_context_raises(self, kelt_client, clean_tables):
         """Test that empty context raises ValidationError."""

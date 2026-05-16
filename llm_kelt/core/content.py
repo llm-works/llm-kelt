@@ -38,7 +38,7 @@ class Content(Base):
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
@@ -123,7 +123,7 @@ class ContentStore:
         external_id: str | None = None,
         url: str | None = None,
         title: str | None = None,
-        metadata: dict | None = None,
+        extra: dict | None = None,
     ) -> int:
         """
         Create a new content record.
@@ -134,7 +134,7 @@ class ContentStore:
             external_id: Original ID from source.
             url: URL of content.
             title: Title of content.
-            metadata: Additional metadata.
+            extra: Additional extra data.
 
         Returns:
             Created content ID.
@@ -158,7 +158,7 @@ class ContentStore:
                 title=title,
                 content_text=content_text,
                 content_hash=content_hash,
-                metadata_=metadata,
+                extra=extra,
             )
             session.add(content)
             session.flush()
@@ -172,7 +172,7 @@ class ContentStore:
         external_id: str | None = None,
         url: str | None = None,
         title: str | None = None,
-        metadata: dict | None = None,
+        extra: dict | None = None,
     ) -> tuple[int, bool]:
         """
         Get existing content by hash or create new.
@@ -183,7 +183,7 @@ class ContentStore:
             external_id: Original ID from source.
             url: URL of content.
             title: Title of content.
-            metadata: Additional metadata.
+            extra: Additional extra data.
 
         Returns:
             Tuple of (content_id, created) where created is True if new.
@@ -205,7 +205,7 @@ class ContentStore:
                 return existing.id, False
 
             return self._create_with_retry(
-                session, stmt, content_hash, content_text, source, external_id, url, title, metadata
+                session, stmt, content_hash, content_text, source, external_id, url, title, extra
             )
 
     def get(self, content_id: int) -> Content | None:
@@ -369,11 +369,11 @@ class ContentStore:
         return stmt
 
     def _create_with_retry(
-        self, session, stmt, content_hash, content_text, source, external_id, url, title, metadata
+        self, session, stmt, content_hash, content_text, source, external_id, url, title, extra
     ) -> tuple[int, bool]:
         """Create content with retry on integrity error."""
         content = self._create_content_record(
-            content_hash, content_text, source, external_id, url, title, metadata
+            content_hash, content_text, source, external_id, url, title, extra
         )
         try:
             session.add(content)
@@ -394,7 +394,7 @@ class ContentStore:
         external_id: str | None,
         url: str | None,
         title: str | None,
-        metadata: dict | None,
+        extra: dict | None,
     ) -> Content:
         """Build a Content record with the given parameters."""
         return Content(
@@ -405,7 +405,7 @@ class ContentStore:
             title=title,
             content_text=content_text,
             content_hash=content_hash,
-            metadata_=metadata,
+            extra=extra,
         )
 
     @staticmethod

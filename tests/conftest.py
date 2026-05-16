@@ -16,6 +16,9 @@ from llm_kelt.core.models import Base
 # Import atomic memory models so they're registered with Base for migrations
 from llm_kelt.memory.atomic import models as atomic_models  # noqa: F401
 
+# Import KG models so they're registered with Base for migrations
+from llm_kelt.memory.kg import models as kg_models  # noqa: F401
+
 # Import training models so they're registered with Base for migrations
 from llm_kelt.training import dpo as training_dpo  # noqa: F401
 from llm_kelt.training import sft as training_sft  # noqa: F401
@@ -276,7 +279,7 @@ def sample_content(kelt_client, clean_tables):
         source="test",
         external_id="test_001",
         title="Test Article",
-        metadata={"category": "tech"},
+        extra={"category": "tech"},
     )
     return content_id
 

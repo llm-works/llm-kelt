@@ -18,6 +18,7 @@ from .inference.embedder import Embedder
 from .inference.query import ContextQuery
 from .memory import atomic
 from .memory.isolation import ClientContext
+from .memory.kg import KGStore
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -122,6 +123,12 @@ class Client:
             self._lg,
             self._db.session,
             self._context.context_key,
+            embedder=self._embedder,
+            embedding_store=self._embedding_store,
+        )
+        self._kg = KGStore(
+            self._lg,
+            self._db.session,
             embedder=self._embedder,
             embedding_store=self._embedding_store,
         )
@@ -255,6 +262,32 @@ class Client:
     def atomic(self) -> Protocol:
         """Access atomic memory protocol."""
         return self._atomic
+
+    @property
+    def kg(self) -> KGStore:
+        """Access knowledge graph storage.
+
+        Provides entity-centric knowledge management with scoped subgraphs:
+        - Canonical entities with identity-based deduplication
+        - Entity resolution via aliases
+        - Fact-entity linkage
+        - Entity relationships
+
+        Example:
+            # Create entity in global scope
+            entity_id, _ = kelt.kg.entities.find_or_create(
+                scope_key="global",
+                name="Tesla",
+                entity_type="company",
+            )
+
+            # Add alias
+            kelt.kg.entities.add_alias(entity_id, "TSLA", scope_key="global")
+
+            # Link fact to entity
+            kelt.kg.fact_entities.link(fact_id=123, entity_id=entity_id, scope_key="global")
+        """
+        return self._kg
 
     @property
     def content(self) -> ContentStore:

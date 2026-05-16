@@ -23,7 +23,7 @@ class StoredSession(FieldDict):
         messages: List of message dicts (Message-as-dict).
         created_at: ISO 8601 timestamp of session creation.
         updated_at: ISO 8601 timestamp of last update.
-        metadata: Arbitrary metadata (token counts, model, etc.).
+        extra: Arbitrary extra data (token counts, model, etc.).
         token_count: Estimated token count at time of save.
         config: Config as dict (for restoring session state).
     """
@@ -32,7 +32,7 @@ class StoredSession(FieldDict):
     messages: list[dict] = field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
-    metadata: dict = field(default_factory=dict)
+    extra: dict = field(default_factory=dict)
     token_count: int = 0
     config: dict = field(default_factory=dict)
 
@@ -68,7 +68,7 @@ class SessionStorage(ABC):
         self,
         session_id: str,
         conversation: Conversation,
-        metadata: dict | None = None,
+        extra: dict | None = None,
     ) -> None:
         """Save a conversation session.
 
@@ -77,7 +77,7 @@ class SessionStorage(ABC):
         Args:
             session_id: Unique session identifier.
             conversation: Conversation to persist.
-            metadata: Optional metadata (token counts, model, etc.).
+            extra: Optional extra data (token counts, model, etc.).
         """
 
     @abstractmethod

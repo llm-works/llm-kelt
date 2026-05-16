@@ -65,11 +65,13 @@ from .core.errors import (
 from .core.schema import SchemaState, SchemaStatus
 from .factory import ClientFactory
 from .memory import ClientContext
+from .memory.kg import KGStore
 
 __all__ = [
     "Client",
     "ClientFactory",
     "EmbeddingStore",
+    "KGStore",
     "KeltError",
     "ValidationError",
     "NotFoundError",
