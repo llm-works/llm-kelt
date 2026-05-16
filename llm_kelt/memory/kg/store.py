@@ -98,10 +98,14 @@ class EntityStore:
     ) -> Entity | None:
         """Get entity by canonical name within scope hierarchy (case-insensitive)."""
         with self._scope(sa_session) as s:
-            stmt = select(Entity).where(
-                build_scope_filter(scope_key, Entity.scope_key),
-                func.lower(Entity.canonical_name) == name.lower().strip(),
-                Entity.entity_type == entity_type,
+            stmt = (
+                select(Entity)
+                .where(
+                    build_scope_filter(scope_key, Entity.scope_key),
+                    func.lower(Entity.canonical_name) == name.lower().strip(),
+                    Entity.entity_type == entity_type,
+                )
+                .order_by(Entity.id)
             )
             entity = s.scalar(stmt)
             return detach(entity, s) if entity else None
@@ -208,8 +212,10 @@ class EntityStore:
                 .join(EntityAlias, Entity.id == EntityAlias.entity_id)
                 .where(
                     build_scope_filter(scope_key, EntityAlias.scope_key),
+                    build_scope_filter(scope_key, Entity.scope_key),
                     EntityAlias.alias_normalized == normalized,
                 )
+                .order_by(Entity.id)
             )
             if entity_type:
                 stmt = stmt.where(Entity.entity_type == entity_type)
@@ -558,10 +564,11 @@ class EntityRelationshipStore:
             results: dict[int, list[EntityRelationship]] = {eid: [] for eid in entity_ids}
             rels = list(s.scalars(stmt))
             for rel in rels:
-                if rel.from_entity_id in results:
+                if direction in ("from", "both") and rel.from_entity_id in results:
                     results[rel.from_entity_id].append(rel)
-                if rel.to_entity_id in results and rel.to_entity_id != rel.from_entity_id:
-                    results[rel.to_entity_id].append(rel)
+                if direction in ("to", "both") and rel.to_entity_id in results:
+                    if rel.to_entity_id != rel.from_entity_id or direction == "to":
+                        results[rel.to_entity_id].append(rel)
             detach_all(rels, s)
             return results
 
