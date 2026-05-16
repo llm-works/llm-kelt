@@ -31,7 +31,7 @@ class FileSessionStorage(SessionStorage):
     """File-based session storage.
 
     Each session is stored as a single JSON file containing the full
-    conversation state: messages, config, metadata, and timestamps.
+    conversation state: messages, config, extra, and timestamps.
 
     Args:
         lg: Logger instance.
@@ -46,7 +46,7 @@ class FileSessionStorage(SessionStorage):
         self,
         session_id: str,
         conversation: Conversation,
-        metadata: dict | None = None,
+        extra: dict | None = None,
     ) -> None:
         """Save conversation to a JSON file."""
         self._base_path.mkdir(parents=True, exist_ok=True)
@@ -68,7 +68,7 @@ class FileSessionStorage(SessionStorage):
             messages=conversation.messages_as_dicts(),
             created_at=created_at,
             updated_at=now,
-            metadata=metadata or {},
+            extra=extra or {},
             token_count=conversation.token_count,
             config=dict(conversation.config),
         )

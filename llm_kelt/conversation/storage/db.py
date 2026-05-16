@@ -47,9 +47,7 @@ class Session(Base):
     messages: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    metadata_: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
-    )
+    extra: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -62,7 +60,7 @@ class DbSessionStorage(SessionStorage):
     """PostgreSQL-backed session storage.
 
     Uses the ``conv_sessions`` table with JSONB columns for messages, config,
-    and metadata. Follows kelt's session_factory pattern.
+    and extra. Follows kelt's session_factory pattern.
 
     Args:
         lg: Logger instance.
@@ -77,7 +75,7 @@ class DbSessionStorage(SessionStorage):
         self,
         session_id: str,
         conversation: Conversation,
-        metadata: dict | None = None,
+        extra: dict | None = None,
     ) -> None:
         """Save conversation to database."""
         now = datetime.now(UTC)
@@ -91,7 +89,7 @@ class DbSessionStorage(SessionStorage):
                 existing.messages = conversation.messages_as_dicts()
                 existing.token_count = conversation.token_count
                 existing.config = dict(conversation.config)
-                existing.metadata_ = metadata or {}
+                existing.extra = extra or {}
                 existing.updated_at = now
             else:
                 record = Session(
@@ -99,7 +97,7 @@ class DbSessionStorage(SessionStorage):
                     messages=conversation.messages_as_dicts(),
                     token_count=conversation.token_count,
                     config=dict(conversation.config),
-                    metadata_=metadata or {},
+                    extra=extra or {},
                     created_at=now,
                     updated_at=now,
                 )
@@ -122,7 +120,7 @@ class DbSessionStorage(SessionStorage):
                 messages=record.messages,
                 created_at=record.created_at.isoformat(),
                 updated_at=record.updated_at.isoformat(),
-                metadata=record.metadata_,
+                extra=record.extra,
                 token_count=record.token_count,
                 config=record.config,
             )

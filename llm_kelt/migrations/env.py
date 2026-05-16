@@ -1,44 +1,53 @@
-"""Alembic environment configuration for Kelt framework."""
+"""Alembic environment configuration for Kelt framework.
+
+This env.py supports two modes:
+1. Called via SchemaManager (normal app usage): URL is pre-set in alembic config
+2. Called via alembic CLI (development): loads config from KELT_CONFIG env var
+"""
 
 import os
-import sys
-from pathlib import Path
 
 from alembic import context
-from sqlalchemy import inspect, text
-from sqlalchemy.exc import OperationalError
+from appinfra.log import LogConfig, LoggerFactory
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
-# Add project root to path (migrations is now inside llm_kelt package)
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-from appinfra.config import Config  # noqa: E402
-from appinfra.db.pg import PG  # noqa: E402
-from appinfra.log import LogConfig, LoggerFactory  # noqa: E402
-
-from llm_kelt.core.models import Base  # noqa: E402
-
-# Load configuration
-config_path = os.environ.get("KELT_CONFIG", str(project_root / "etc" / "infra.yaml"))
-db_key = os.environ.get("KELT_DB_KEY", "main")
-
-app_config = Config(config_path)
-db_config = app_config.dbs[db_key]
+from llm_kelt.core.models import Base
 
 # This is the Alembic Config object
 config = context.config
-
-# Set URL from our config
-config.set_main_option("sqlalchemy.url", db_config.url)
 
 # Create logger for migrations
 _log_config = LogConfig.from_params(level="info")
 _lg = LoggerFactory.create_root(_log_config)
 
 
-def _get_pg() -> PG:
-    """Create appinfra PG instance."""
-    return PG(_lg, db_config)
+def _get_database_url() -> str:
+    """Get database URL from alembic config or fall back to app config file.
+
+    Priority:
+    1. URL already set in alembic config (by SchemaManager)
+    2. Load from KELT_CONFIG file (for standalone alembic CLI)
+    """
+    url = config.get_main_option("sqlalchemy.url")
+    if url:
+        return url
+
+    # Fall back to loading from config file (standalone CLI mode)
+    config_path = os.environ.get("KELT_CONFIG")
+    if not config_path:
+        raise RuntimeError(
+            "Database URL not configured. Either:\n"
+            "  1. Use SchemaManager.ensure_schema() (recommended)\n"
+            "  2. Set KELT_CONFIG env var to config file path for alembic CLI"
+        )
+
+    from appinfra.config import Config
+
+    db_key = os.environ.get("KELT_DB_KEY", "main")
+    app_config = Config(config_path)
+    db_config = app_config.dbs[db_key]
+    return str(db_config.url)
 
 
 # SQLAlchemy metadata for autogenerate
@@ -48,7 +57,7 @@ target_metadata = Base.metadata
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode (generates SQL without connecting)."""
     _lg.info("running offline migration (SQL generation mode)")
-    url = config.get_main_option("sqlalchemy.url")
+    url = _get_database_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -61,57 +70,44 @@ def run_migrations_offline() -> None:
     _lg.info("offline migration complete")
 
 
-def _bootstrap_fresh_database(pg: PG) -> None:
-    """Bootstrap a fresh database with schema from models."""
-    from alembic.script import ScriptDirectory
-
-    _lg.info("bootstrapping fresh database")
-
-    # Use appinfra to create db, extensions, and tables
-    pg.migrate(Base)
-
-    # Stamp with head revision
-    script = ScriptDirectory.from_config(config)
-    head_rev = script.get_current_head()
-    _lg.info("stamping database with head revision", extra={"revision": head_rev})
-
-    with pg.engine.connect() as conn:
-        conn.execute(
-            text("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)")
-        )
-        conn.execute(
-            text("INSERT INTO alembic_version (version_num) VALUES (:rev) ON CONFLICT DO NOTHING"),
-            {"rev": head_rev},
-        )
-        conn.commit()
-
-    _lg.info("bootstrap complete")
-
-
 def run_migrations_online() -> None:  # cq: exempt
-    """Run migrations in 'online' mode."""
+    """Run migrations in 'online' mode.
+
+    When called via SchemaManager, just runs the migrations.
+    SchemaManager handles bootstrapping and version checking separately.
+    """
     from alembic.script import ScriptDirectory
 
-    _lg.info("starting online migration", extra={"db_key": db_key})
-    pg = _get_pg()
+    url = _get_database_url()
+    schema_name = config.get_main_option("version_table_schema") or "public"
+    _lg.info("starting online migration", extra={"schema": schema_name})
 
-    # Check if database needs bootstrapping (pg.migrate handles db creation)
+    engine = create_engine(url)
+
     try:
-        with pg.engine.connect() as connection:
-            inspector = inspect(connection)
-            tables = inspector.get_table_names()
+        with engine.connect() as connection:
+            # Set search_path for DDL operations in target schema
+            connection.execute(text(f'SET LOCAL search_path TO "{schema_name}", public'))
 
-            if "alembic_version" not in tables:
-                _lg.info("no alembic_version table found, bootstrapping database")
-                _bootstrap_fresh_database(pg)
-                return
+            # Ensure pgvector extension exists (required for embeddings table)
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
-            # Get current and target revisions
-            result = connection.execute(text("SELECT version_num FROM alembic_version"))
-            current_rev = result.scalar()
-
+            # Get current and target revisions for logging
             script = ScriptDirectory.from_config(config)
             head_rev = script.get_current_head()
+
+            # Use savepoint to check version without poisoning transaction on failure
+            connection.execute(text("SAVEPOINT check_version"))
+            try:
+                result = connection.execute(
+                    text(f'SELECT version_num FROM "{schema_name}".alembic_version')
+                )
+                current_rev = result.scalar()
+                connection.execute(text("RELEASE SAVEPOINT check_version"))
+            except (OperationalError, ProgrammingError):
+                # Table doesn't exist on first run - alembic will create it
+                connection.execute(text("ROLLBACK TO SAVEPOINT check_version"))
+                current_rev = None
 
             _lg.info(
                 "migration state",
@@ -127,30 +123,28 @@ def run_migrations_online() -> None:  # cq: exempt
                 extra={"from_revision": current_rev, "to_revision": head_rev},
             )
 
-            context.configure(connection=connection, target_metadata=target_metadata)
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+                version_table_schema=schema_name,
+            )
             with context.begin_transaction():
                 context.run_migrations()
                 connection.commit()
                 _lg.info("migration transaction committed")
 
             # Verify the migration succeeded
-            result = connection.execute(text("SELECT version_num FROM alembic_version"))
+            result = connection.execute(
+                text(f'SELECT version_num FROM "{schema_name}".alembic_version')
+            )
             new_rev = result.scalar()
             _lg.info("migration complete", extra={"new_revision": new_rev})
 
     except OperationalError as e:
-        # Database doesn't exist - bootstrap it
-        # Check pgcode 3D000 or fallback to error message (pgcode not always set on connection errors)
-        pgcode = getattr(e.orig, "pgcode", None) if e.orig else None
-        err_str = str(e).lower()
-        is_db_missing = pgcode == "3D000" or ("database" in err_str and "does not exist" in err_str)
-
-        if is_db_missing:
-            _lg.info("database does not exist, bootstrapping")
-            _bootstrap_fresh_database(pg)
-        else:
-            _lg.error("migration failed", extra={"exception": e})
-            raise
+        _lg.error("migration failed", extra={"exception": e})
+        raise
+    finally:
+        engine.dispose()
 
 
 if context.is_offline_mode():

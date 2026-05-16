@@ -21,7 +21,7 @@ Usage::
 
     # Persist
     storage = FileSessionStorage(lg, "~/.my-agent/sessions")
-    storage.save("session-123", conv, metadata={"model": "qwen2.5-7b"})
+    storage.save("session-123", conv, extra={"model": "qwen2.5-7b"})
 
     # Compact when needed
     if conv.needs_compaction():

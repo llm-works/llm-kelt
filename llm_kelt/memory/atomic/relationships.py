@@ -23,7 +23,7 @@ class RelationshipsClient:
     """
     Client for managing edges between atomic facts.
 
-    Supports typed, directed relationships with optional confidence and metadata.
+    Supports typed, directed relationships with optional confidence and extra data.
     Symmetric relationship types (contradicts, related_to) are stored with
     normalized ID ordering so (A, B) and (B, A) map to the same row.
 
@@ -36,7 +36,7 @@ class RelationshipsClient:
 
     Usage:
         client = RelationshipsClient(lg, session_factory, context_key)
-        client.link(fact_a, fact_b, RelType.CONTRADICTS, metadata={"reason": "..."})
+        client.link(fact_a, fact_b, RelType.CONTRADICTS, extra={"reason": "..."})
         related = client.get_related(fact_a, RelType.CONTRADICTS)
         chain = client.get_chain(fact_a, RelType.DERIVED_FROM)
     """
@@ -172,7 +172,7 @@ class RelationshipsClient:
         target_id: int,
         rel_type: RelType,
         confidence: float | None = 1.0,
-        metadata: dict | None = None,
+        extra: dict | None = None,
     ) -> int:
         """
         Create a relationship edge between two facts.
@@ -194,7 +194,7 @@ class RelationshipsClient:
                 target_id=tgt,
                 relationship_type=rel_type.db_value,
                 confidence=confidence,
-                metadata_=metadata,
+                extra=extra,
                 context_key=self.context_key,
             )
             session.add(rel)
