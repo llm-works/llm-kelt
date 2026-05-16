@@ -39,6 +39,7 @@ from .models import (
     FactEntity,
 )
 from .store import (
+    AliasConflictError,
     EntityRefStore,
     EntityRelationshipStore,
     EntityStore,
@@ -59,6 +60,8 @@ __all__ = [
     "EntityRefStore",
     "EntityRelationshipStore",
     "FactEntityStore",
+    # Errors
+    "AliasConflictError",
     # Embedding
     "EntityEmbeddingAdapter",
 ]

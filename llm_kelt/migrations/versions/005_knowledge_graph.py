@@ -2,6 +2,7 @@
 
 Renames metadata → extra in existing tables:
 - atomic_facts.metadata → atomic_facts.extra
+- atomic_preference_details.metadata → atomic_preference_details.extra
 - contents.metadata → contents.extra
 - conv_sessions.metadata → conv_sessions.extra
 - fact_relationships.metadata → fact_relationships.extra
@@ -35,6 +36,7 @@ def upgrade() -> None:  # cq: exempt
     # Rename metadata → extra in existing tables
     # =========================================================================
     op.alter_column("atomic_facts", "metadata", new_column_name="extra")
+    op.alter_column("atomic_preference_details", "metadata", new_column_name="extra")
     op.alter_column("contents", "metadata", new_column_name="extra")
     op.alter_column("conv_sessions", "metadata", new_column_name="extra")
     op.alter_column("fact_relationships", "metadata", new_column_name="extra")
@@ -208,4 +210,5 @@ def downgrade() -> None:
     op.alter_column("fact_relationships", "extra", new_column_name="metadata")
     op.alter_column("conv_sessions", "extra", new_column_name="metadata")
     op.alter_column("contents", "extra", new_column_name="metadata")
+    op.alter_column("atomic_preference_details", "extra", new_column_name="metadata")
     op.alter_column("atomic_facts", "extra", new_column_name="metadata")

@@ -450,7 +450,10 @@ class EntityRefStore:
             stmt = (
                 select(Entity, func.count(EntityRef.id).label("ref_count"))
                 .join(EntityRef, Entity.id == EntityRef.entity_id)
-                .where(build_scope_filter(scope_key, EntityRef.scope_key))
+                .where(
+                    build_scope_filter(scope_key, EntityRef.scope_key),
+                    build_scope_filter(scope_key, Entity.scope_key),
+                )
             )
             if since:
                 stmt = stmt.where(EntityRef.ref_at >= since)
@@ -609,6 +612,7 @@ class FactEntityStore:
         *,
         role: str = "subject",
         confidence: float = 1.0,
+        extra: dict[str, Any] | None = None,
         sa_session: SASession | None = None,
     ) -> FactEntity:
         """Link a fact to an entity."""
@@ -619,6 +623,7 @@ class FactEntityStore:
                 scope_key=scope_key,
                 role=role,
                 confidence=confidence,
+                extra=extra or {},
             )
             s.add(fe)
             s.flush()
@@ -640,6 +645,7 @@ class FactEntityStore:
                 .where(
                     FactEntity.fact_id == fact_id,
                     build_scope_filter(scope_key, FactEntity.scope_key),
+                    build_scope_filter(scope_key, Entity.scope_key),
                 )
             )
             if role:
@@ -669,6 +675,7 @@ class FactEntityStore:
                 .where(
                     FactEntity.fact_id.in_(fact_ids),
                     build_scope_filter(scope_key, FactEntity.scope_key),
+                    build_scope_filter(scope_key, Entity.scope_key),
                 )
             )
             if role:

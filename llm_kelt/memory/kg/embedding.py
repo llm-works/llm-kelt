@@ -165,6 +165,10 @@ class EntityEmbeddingAdapter:
 
         Returns:
             List of (Entity, similarity_score) tuples, ordered by similarity.
+
+        Note:
+            Over-fetches 3x to account for scope filtering. May return fewer than
+            `limit` results if most embeddings are in scopes outside the query scope.
         """
         raw_results = self._store.search(
             query=query_embedding,

@@ -420,6 +420,27 @@ class TestFactEntityLinkage:
         assert link.fact_id == fact_id
         assert link.entity_id == tesla_id
 
+    def test_link_fact_to_entity_with_extra(self, kelt_client):
+        """Link a fact to an entity with extra metadata."""
+        fact_id = kelt_client.atomic.assertions.add(
+            content="Key finding about Tesla",
+            category="analysis",
+        )
+        tesla_id, _ = kelt_client.kg.entities.find_or_create(
+            scope_key="global", name="Tesla", entity_type="company"
+        )
+
+        link = kelt_client.kg.fact_entities.link(
+            fact_id=fact_id,
+            entity_id=tesla_id,
+            scope_key="global",
+            role="finding",
+            extra={"order": 1, "stat": "85%", "sentiment": "positive"},
+        )
+        assert link.fact_id == fact_id
+        assert link.entity_id == tesla_id
+        assert link.extra == {"order": 1, "stat": "85%", "sentiment": "positive"}
+
     def test_get_entities_for_fact(self, kelt_client):
         """Get entities linked to a fact."""
         fact_id = kelt_client.atomic.assertions.add(
