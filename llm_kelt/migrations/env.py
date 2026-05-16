@@ -29,7 +29,7 @@ def _get_database_url() -> str:
     1. URL already set in alembic config (by SchemaManager)
     2. Load from KELT_CONFIG file (for standalone alembic CLI)
     """
-    url = config.get_main_option("sqlalchemy.url")
+    url: str | None = config.get_main_option("sqlalchemy.url")
     if url:
         return url
 

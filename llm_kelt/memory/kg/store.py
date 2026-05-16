@@ -181,7 +181,7 @@ class EntityStore:
             if extra is not None:
                 entity.extra = {**entity.extra, **extra}
             entity.updated_at = datetime.now(UTC)
-            return detach(entity, s)
+            return cast(Entity, detach(entity, s))
 
     def delete(self, entity_id: int, *, sa_session: SASession | None = None) -> bool:
         """Delete entity and all related data (cascades)."""
@@ -273,7 +273,7 @@ class EntityStore:
             if ea.entity_id != entity_id:
                 return None
             s.flush()
-            return detach(ea, s)
+            return cast(EntityAlias, detach(ea, s))
 
     def _add_alias(
         self,
