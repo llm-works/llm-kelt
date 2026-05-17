@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
+import heapq
 import math
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from ..quantize import dequantize_int4, quantize_int4
 from ..types import Calibration, QuantizationFormat, QuantizedEmbedding
-from .base import ensure_session, table_exists
+from .base import StoreBase, ensure_session, table_exists
 
 
-class Int4Store:
+class Int4Store(StoreBase):
     """Int4 embedding store using application-level scalar quantization.
 
     Stores embeddings as packed 4-bit values (2 values per byte) with per-embedding scale/offset.
@@ -48,16 +49,6 @@ class Int4Store:
             self._model.__table__.create(conn, checkfirst=True)
             session.commit()
         self._table_ensured = True
-
-    @property
-    def dimensions(self) -> int:
-        """Vector dimensions for this store."""
-        return self._dimensions
-
-    @property
-    def table_name(self) -> str:
-        """Database table name."""
-        return cast(str, self._model.__tablename__)
 
     def _update_record(self, record: Any, qemb: QuantizedEmbedding) -> None:
         """Update existing record with quantized data."""
@@ -152,18 +143,18 @@ class Int4Store:
             if entity_id_subquery is not None:
                 stmt = stmt.where(self._model.entity_id.in_(entity_id_subquery))
 
-            rows = list(session.scalars(stmt).all())
-
-            results = []
-            for row in rows:
+            heap: list[tuple[float, str]] = []
+            for row in session.scalars(stmt):
                 qemb = self._row_to_quantized(row)
                 dequantized = dequantize_int4(qemb)
                 sim = self._cosine_similarity(query, dequantized)
                 if sim >= min_similarity:
-                    results.append((row.entity_id, sim))
+                    if len(heap) < top_k:
+                        heapq.heappush(heap, (sim, row.entity_id))
+                    elif sim > heap[0][0]:
+                        heapq.heapreplace(heap, (sim, row.entity_id))
 
-            results.sort(key=lambda x: x[1], reverse=True)
-            return results[:top_k]
+            return [(eid, sim) for sim, eid in sorted(heap, reverse=True)]
 
     def get(
         self,
@@ -184,63 +175,6 @@ class Int4Store:
 
             qemb = self._row_to_quantized(row)
             return dequantize_int4(qemb)
-
-    def delete(
-        self,
-        entity_type: str,
-        entity_id: str,
-        session: Any | None = None,
-    ) -> int:
-        """Delete embeddings for an entity."""
-
-        def _do_delete(sess: Any) -> int:
-            stmt = delete(self._model).where(
-                self._model.entity_type == entity_type,
-                self._model.entity_id == entity_id,
-            )
-            result = sess.execute(stmt)
-            return cast(int, result.rowcount)
-
-        if session is not None:
-            return _do_delete(session)
-
-        with self._session_factory() as sess:
-            count = _do_delete(sess)
-            sess.commit()
-            return count
-
-    def exists(
-        self,
-        entity_type: str,
-        entity_id: str,
-        model_name: str,
-    ) -> bool:
-        """Check if embedding exists."""
-        with self._session_factory() as session:
-            stmt = (
-                select(func.count())
-                .select_from(self._model)
-                .where(
-                    self._model.entity_type == entity_type,
-                    self._model.entity_id == entity_id,
-                    self._model.model_name == model_name,
-                )
-            )
-            return (session.scalar(stmt) or 0) > 0
-
-    def count(
-        self,
-        entity_type: str | None = None,
-        model_name: str | None = None,
-    ) -> int:
-        """Count embeddings with optional filters."""
-        with self._session_factory() as session:
-            stmt = select(func.count()).select_from(self._model)
-            if entity_type:
-                stmt = stmt.where(self._model.entity_type == entity_type)
-            if model_name:
-                stmt = stmt.where(self._model.model_name == model_name)
-            return session.scalar(stmt) or 0
 
     def get_quantized(
         self,

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from llm_kelt.core.errors import ValidationError
 
-from .types import Config
+from .types import Calibration, Config
 
 if TYPE_CHECKING:
     from .store.base import EmbeddingStoreProtocol
@@ -91,6 +91,7 @@ class Client:
         entity_id: str,
         embedding: list[float],
         model_name: str,
+        calibration: Calibration | None = None,
         session: Any | None = None,
     ) -> None:
         """Store embedding.
@@ -100,6 +101,7 @@ class Client:
             entity_id: Entity identifier.
             embedding: Float32 embedding vector.
             model_name: Embedding model name.
+            calibration: Optional calibration for quantized formats (I8/I4).
             session: Optional session for transaction participation.
 
         Raises:
@@ -107,7 +109,9 @@ class Client:
         """
         _validate_embedding(embedding)
         self._ensure_table()
-        self._store.store(entity_type, entity_id, embedding, model_name, session=session)
+        self._store.store(
+            entity_type, entity_id, embedding, model_name, calibration, session=session
+        )
 
     def search(
         self,
@@ -239,7 +243,8 @@ class Client:
             return []
 
         self._ensure_table()
-        return [eid for eid in entity_ids if not self._store.exists(entity_type, eid, model_name)]
+        existing = self._store.list_existing(entity_type, entity_ids, model_name)
+        return [eid for eid in entity_ids if eid not in existing]
 
     def ensure_table(self) -> None:
         """Explicitly ensure table exists.

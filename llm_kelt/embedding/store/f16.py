@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from .base import ensure_session, index_exists, table_exists
+from .base import StoreBase, ensure_session, index_exists, table_exists
 
 if TYPE_CHECKING:
     from ..types import Calibration
 
 
-class Float16Store:
+class Float16Store(StoreBase):
     """Float16 embedding store using pgvector halfvec type.
 
     Uses native pgvector halfvec for 2x storage reduction with ~0% accuracy loss.
@@ -60,16 +60,6 @@ class Float16Store:
 
             session.commit()
         self._table_ensured = True
-
-    @property
-    def dimensions(self) -> int:
-        """Vector dimensions for this store."""
-        return self._dimensions
-
-    @property
-    def table_name(self) -> str:
-        """Database table name."""
-        return cast(str, self._model.__tablename__)
 
     def _upsert(
         self, sess: Any, entity_type: str, entity_id: str, model_name: str, embedding: list[float]
@@ -132,6 +122,7 @@ class Float16Store:
                 .where(
                     self._model.entity_type == entity_type,
                     self._model.model_name == model_name,
+                    self._model.embedding.cosine_distance(query) <= (1 - min_similarity),
                 )
                 .order_by(self._model.embedding.cosine_distance(query))
                 .limit(top_k)
@@ -141,7 +132,7 @@ class Float16Store:
                 stmt = stmt.where(self._model.entity_id.in_(entity_id_subquery))
 
             results = session.execute(stmt).all()
-            return [(eid, sim) for eid, sim in results if sim >= min_similarity]
+            return [(eid, float(sim)) for eid, sim in results]
 
     def get(
         self,
@@ -158,60 +149,3 @@ class Float16Store:
             )
             result = session.scalar(stmt)
             return result.to_list() if result is not None else None
-
-    def delete(
-        self,
-        entity_type: str,
-        entity_id: str,
-        session: Any | None = None,
-    ) -> int:
-        """Delete embeddings for an entity."""
-
-        def _do_delete(sess: Any) -> int:
-            stmt = delete(self._model).where(
-                self._model.entity_type == entity_type,
-                self._model.entity_id == entity_id,
-            )
-            result = sess.execute(stmt)
-            return cast(int, result.rowcount)
-
-        if session is not None:
-            return _do_delete(session)
-
-        with self._session_factory() as sess:
-            count = _do_delete(sess)
-            sess.commit()
-            return count
-
-    def exists(
-        self,
-        entity_type: str,
-        entity_id: str,
-        model_name: str,
-    ) -> bool:
-        """Check if embedding exists."""
-        with self._session_factory() as session:
-            stmt = (
-                select(func.count())
-                .select_from(self._model)
-                .where(
-                    self._model.entity_type == entity_type,
-                    self._model.entity_id == entity_id,
-                    self._model.model_name == model_name,
-                )
-            )
-            return (session.scalar(stmt) or 0) > 0
-
-    def count(
-        self,
-        entity_type: str | None = None,
-        model_name: str | None = None,
-    ) -> int:
-        """Count embeddings with optional filters."""
-        with self._session_factory() as session:
-            stmt = select(func.count()).select_from(self._model)
-            if entity_type:
-                stmt = stmt.where(self._model.entity_type == entity_type)
-            if model_name:
-                stmt = stmt.where(self._model.model_name == model_name)
-            return session.scalar(stmt) or 0

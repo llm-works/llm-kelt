@@ -70,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking**: `Conversation.__init__` now requires `lg: Logger` as the first parameter
 - **Breaking**: `FactClient.delete()` now returns `DeleteResult` instead of `bool`, accepts
   `int | Iterable[int]`, and automatically cleans up associated embeddings
+- **Breaking**: `EmbeddingStore` replaced by `EmbeddingClient` with new quantization-aware API
+  (import from `llm_kelt` or `llm_kelt.embedding`)
 - `Conversation` moved from `llm_kelt.inference.query` to `llm_kelt.conversation.session`
   (re-exported from `llm_kelt.inference` for backward compatibility)
 - `ContextQuery` now uses the new `Conversation` class with `messages_as_dicts()` for

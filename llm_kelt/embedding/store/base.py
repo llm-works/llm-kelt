@@ -143,6 +143,24 @@ class EmbeddingStoreProtocol(Protocol):
         """
         ...
 
+    def list_existing(
+        self,
+        entity_type: str,
+        entity_ids: list[str],
+        model_name: str,
+    ) -> set[str]:
+        """Find which entity IDs have embeddings (single query).
+
+        Args:
+            entity_type: Type prefix.
+            entity_ids: List of entity IDs to check.
+            model_name: Embedding model name.
+
+        Returns:
+            Set of entity IDs that have embeddings.
+        """
+        ...
+
     def ensure_table(self) -> None:
         """Ensure the embedding table exists (on-demand creation).
 
@@ -150,6 +168,106 @@ class EmbeddingStoreProtocol(Protocol):
         indexes (e.g., HNSW for pgvector types).
         """
         ...
+
+
+class StoreBase:
+    """Base class for embedding stores with common operations."""
+
+    _session_factory: Callable[[], Any]
+    _model: Any
+    _dimensions: int
+
+    @property
+    def dimensions(self) -> int:
+        """Vector dimensions."""
+        return self._dimensions
+
+    @property
+    def table_name(self) -> str:
+        """Table name."""
+        return str(self._model.__tablename__)
+
+    def delete(
+        self,
+        entity_type: str,
+        entity_id: str,
+        session: Session | None = None,
+    ) -> int:
+        """Delete embeddings for an entity."""
+        from sqlalchemy import delete as sql_delete
+
+        def _do_delete(sess: Any) -> int:
+            stmt = sql_delete(self._model).where(
+                self._model.entity_type == entity_type,
+                self._model.entity_id == entity_id,
+            )
+            result = sess.execute(stmt)
+            return int(result.rowcount)
+
+        if session is not None:
+            return _do_delete(session)
+
+        with self._session_factory() as sess:
+            count = _do_delete(sess)
+            sess.commit()
+            return count
+
+    def exists(
+        self,
+        entity_type: str,
+        entity_id: str,
+        model_name: str,
+    ) -> bool:
+        """Check if embedding exists."""
+        from sqlalchemy import func, select
+
+        with self._session_factory() as session:
+            stmt = (
+                select(func.count())
+                .select_from(self._model)
+                .where(
+                    self._model.entity_type == entity_type,
+                    self._model.entity_id == entity_id,
+                    self._model.model_name == model_name,
+                )
+            )
+            return (session.scalar(stmt) or 0) > 0
+
+    def count(
+        self,
+        entity_type: str | None = None,
+        model_name: str | None = None,
+    ) -> int:
+        """Count embeddings with optional filters."""
+        from sqlalchemy import func, select
+
+        with self._session_factory() as session:
+            stmt = select(func.count()).select_from(self._model)
+            if entity_type:
+                stmt = stmt.where(self._model.entity_type == entity_type)
+            if model_name:
+                stmt = stmt.where(self._model.model_name == model_name)
+            return session.scalar(stmt) or 0
+
+    def list_existing(
+        self,
+        entity_type: str,
+        entity_ids: list[str],
+        model_name: str,
+    ) -> set[str]:
+        """Find which entity IDs have embeddings (single query)."""
+        from sqlalchemy import select
+
+        if not entity_ids:
+            return set()
+
+        with self._session_factory() as session:
+            stmt = select(self._model.entity_id).where(
+                self._model.entity_type == entity_type,
+                self._model.entity_id.in_(entity_ids),
+                self._model.model_name == model_name,
+            )
+            return set(session.scalars(stmt).all())
 
 
 @contextmanager
