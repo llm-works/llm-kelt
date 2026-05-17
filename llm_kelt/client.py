@@ -10,9 +10,11 @@ from llm_infer.client import ChatClient
 
 from .core.content import ContentStore
 from .core.database import Database
-from .core.embedding import EmbeddingStore
 from .core.errors import SchemaVersionError
 from .core.schema import SchemaManager, SchemaState, SchemaStatus
+from .embedding import Client as EmbeddingClient
+from .embedding import Config as EmbeddingConfig
+from .embedding import Factory as EmbeddingFactory
 from .inference.context import ContextBuilder
 from .inference.embedder import Embedder
 from .inference.query import ContextQuery
@@ -87,6 +89,7 @@ class Client:
         kelt_config: DotDict | None = None,
         training_config: DotDict | None = None,
         ensure_schema: bool = True,
+        embeddings: EmbeddingClient | None = None,
     ) -> None:
         """
         Initialize Client with isolation context.
@@ -100,6 +103,7 @@ class Client:
             kelt_config: Optional kelt settings (config.kelt section)
             training_config: Optional training settings (config.training section)
             ensure_schema: If True (default), auto-migrate schema on init
+            embeddings: Optional EmbeddingClient. If None, creates default (F16, 384 dims).
         """
         self._db = database
         self._context = context
@@ -109,6 +113,7 @@ class Client:
         self._kelt_config = kelt_config
         self._training_config = training_config
         self._ensure_schema = ensure_schema
+        self._embeddings = embeddings
 
         self._ensure_schema_config(ensure=ensure_schema)
         self._verify_schema(ensure=ensure_schema)
@@ -117,20 +122,30 @@ class Client:
 
     def _setup_stores(self) -> None:
         """Initialize storage components."""
-        self._embedding_store = EmbeddingStore(self._db.session)
+        if self._embeddings is None:
+            from .embedding import QuantizationFormat
+
+            config = EmbeddingConfig(
+                context_key=self._context.context_key or "_default",
+                format=QuantizationFormat.F16,
+                dimensions=384,
+            )
+            factory = EmbeddingFactory()
+            self._embeddings = factory.create(self._db.session, config)
+
         self._content = ContentStore(self._db.session, self._context.context_key)
         self._atomic = atomic.Protocol(
             self._lg,
             self._db.session,
             self._context.context_key,
             embedder=self._embedder,
-            embedding_store=self._embedding_store,
+            embeddings=self._embeddings,
         )
         self._kg = KGStore(
             self._lg,
             self._db.session,
             embedder=self._embedder,
-            embedding_store=self._embedding_store,
+            embeddings=self._embeddings,
         )
         self._context_builder = ContextBuilder(self._atomic.assertions)
         self._train: TrainFactory | None = None
@@ -357,8 +372,8 @@ class Client:
         return self._embedder
 
     @property
-    def embedding_store(self) -> EmbeddingStore:
-        """Access embedding storage for custom entity types.
+    def embeddings(self) -> EmbeddingClient:
+        """Access embeddings client for custom entity types.
 
         Provides entity-type agnostic vector storage and similarity search.
         Use this for storing embeddings of non-fact entities (e.g., queries,
@@ -372,7 +387,7 @@ class Client:
 
         Example:
             # Store embedding for a custom entity type
-            kelt.embedding_store.store(
+            kelt.embeddings.store(
                 entity_type="myapp.query",
                 entity_id="q123",
                 embedding=[0.1, 0.2, ...],
@@ -380,7 +395,7 @@ class Client:
             )
 
             # Search for similar entities
-            results = kelt.embedding_store.search(
+            results = kelt.embeddings.search(
                 query=[0.1, 0.2, ...],
                 entity_type="myapp.query",
                 model_name="text-embedding-3-small",
@@ -388,9 +403,10 @@ class Client:
             )
 
             # Delete when entity is removed
-            kelt.embedding_store.delete("myapp.query", "q123")
+            kelt.embeddings.delete("myapp.query", "q123")
         """
-        return self._embedding_store
+        assert self._embeddings is not None  # Always set in _setup_stores
+        return self._embeddings
 
     @property
     def kelt_config(self) -> DotDict | None:

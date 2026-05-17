@@ -620,28 +620,31 @@ class TestEntityRefs:
 class TestEntityEmbeddings:
     """Tests for entity embedding operations."""
 
-    @pytest.fixture(autouse=True)
-    def clean_embeddings(self, database):
-        """Clean embedding table before each test."""
-        from llm_kelt.core.embedding import Embedding
+    TEST_DIMS = 384
 
-        with database.session() as session:
-            session.query(Embedding).delete()
-            session.commit()
-        yield
+    @staticmethod
+    def make_embedding(seed: float = 0.1) -> list[float]:
+        """Create a test embedding with proper dimensions."""
+        return [seed + i * 0.001 for i in range(TestEntityEmbeddings.TEST_DIMS)]
 
     @pytest.fixture
     def kg_with_embeddings(self, logger, database):
         """Create KGStore with embedding support (no embedder for manual tests)."""
-        from llm_kelt.core.embedding import EmbeddingStore
+        from llm_kelt.embedding import Config, Factory, QuantizationFormat
         from llm_kelt.memory.kg import KGStore
 
-        embedding_store = EmbeddingStore(database.session)
+        config = Config(
+            context_key="_test",
+            format=QuantizationFormat.F16,
+            dimensions=self.TEST_DIMS,
+        )
+        factory = Factory()
+        embeddings = factory.create(database.session, config)
         return KGStore(
             logger,
             database.session,
             embedder=None,
-            embedding_store=embedding_store,
+            embeddings=embeddings,
         )
 
     def test_set_and_get_embedding(self, kg_with_embeddings):
@@ -652,7 +655,7 @@ class TestEntityEmbeddings:
             entity_type="company",
         )
 
-        embedding = [0.1, 0.2, 0.3]
+        embedding = self.make_embedding(0.1)
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=entity.id,
             embedding=embedding,
@@ -664,10 +667,10 @@ class TestEntityEmbeddings:
             model_name="test-model",
         )
         assert retrieved is not None
-        assert len(retrieved) == 3
-        # Check approximate equality for floats
+        assert len(retrieved) == self.TEST_DIMS
+        # Check approximate equality for floats (F16 has some precision loss)
         for i, val in enumerate(embedding):
-            assert abs(retrieved[i] - val) < 0.0001
+            assert abs(retrieved[i] - val) < 0.01
 
     def test_get_nonexistent_embedding(self, kg_with_embeddings):
         """Get returns None for entity without embedding."""
@@ -693,7 +696,7 @@ class TestEntityEmbeddings:
 
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=entity.id,
-            embedding=[0.1, 0.2, 0.3],
+            embedding=self.make_embedding(0.1),
             model_name="test-model",
         )
 
@@ -730,25 +733,29 @@ class TestEntityEmbeddings:
         )
 
         # Set embeddings - Tesla and SpaceX are more similar (Elon companies)
+        tesla_emb = self.make_embedding(0.9)  # High values
+        apple_emb = self.make_embedding(0.1)  # Low values - different
+        spacex_emb = self.make_embedding(0.85)  # Similar to Tesla
+
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=tesla.id,
-            embedding=[0.9, 0.1, 0.8],  # Similar to SpaceX
+            embedding=tesla_emb,
             model_name="test-model",
         )
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=apple.id,
-            embedding=[0.1, 0.9, 0.1],  # Different
+            embedding=apple_emb,
             model_name="test-model",
         )
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=spacex.id,
-            embedding=[0.85, 0.15, 0.75],  # Similar to Tesla
+            embedding=spacex_emb,
             model_name="test-model",
         )
 
         # Search for entities similar to Tesla's embedding
         results = kg_with_embeddings.embeddings.search_similar(
-            query_embedding=[0.9, 0.1, 0.8],
+            query_embedding=tesla_emb,
             scope_key="global",
             model_name="test-model",
             limit=3,
@@ -783,16 +790,17 @@ class TestEntityEmbeddings:
         )
 
         # Add embeddings
+        test_emb = self.make_embedding(0.5)
         for entity in [global_entity, org_entity, other_entity]:
             kg_with_embeddings.embeddings.set_embedding(
                 entity_id=entity.id,
-                embedding=[0.5, 0.5, 0.5],
+                embedding=test_emb,
                 model_name="test-model",
             )
 
         # Search from org:acme scope - should see global and org:acme, not org:other
         results = kg_with_embeddings.embeddings.search_similar(
-            query_embedding=[0.5, 0.5, 0.5],
+            query_embedding=test_emb,
             scope_key="org:acme",
             model_name="test-model",
             limit=10,
@@ -820,10 +828,10 @@ class TestEntityEmbeddings:
             kg_with_embeddings.embeddings.embed_text("some query")
 
     def test_embeddings_not_configured_raises(self, logger, database):
-        """Accessing embeddings without embedding_store raises error."""
+        """Accessing embeddings without embeddings client raises error."""
         from llm_kelt.memory.kg import KGStore
 
-        # Create KGStore without embedding_store
-        kg = KGStore(logger, database.session, embedder=None, embedding_store=None)
+        # Create KGStore without embeddings client
+        kg = KGStore(logger, database.session, embedder=None, embeddings=None)
         with pytest.raises(RuntimeError, match="Embeddings not configured"):
             _ = kg.embeddings

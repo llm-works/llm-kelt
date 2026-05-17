@@ -1,4 +1,4 @@
-"""Atomic memory embedding adapter - uses core EmbeddingStore."""
+"""Atomic memory embedding adapter - uses embedding.Client."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from sqlalchemy import cast as sa_cast
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from llm_kelt.core.embedding import EmbeddingStore
 from llm_kelt.core.types import ScoredEntity
+from llm_kelt.embedding import Client as EmbeddingClient
 from llm_kelt.memory.isolation import build_context_filter
 
 from .models import Fact
@@ -100,11 +100,11 @@ class EmbeddingAdapter:
     """
     Embedding operations for atomic facts.
 
-    Provides a fact-specific interface on top of the core EmbeddingStore.
+    Provides a fact-specific interface on top of EmbeddingClient.
     Uses entity_type "atomic.fact" to namespace embeddings.
 
     Example:
-        adapter = EmbeddingAdapter(session_factory, context_key, store, embedder)
+        adapter = EmbeddingAdapter(session_factory, context_key, embeddings, embedder)
 
         # Embed a fact
         adapter.embed_fact(fact, "text-embedding-3-small")
@@ -122,7 +122,7 @@ class EmbeddingAdapter:
         self,
         session_factory: Callable[[], Any],
         context_key: str | None,
-        store: EmbeddingStore,
+        embeddings: EmbeddingClient,
         embedder: Embedder | None = None,
     ) -> None:
         """
@@ -131,12 +131,12 @@ class EmbeddingAdapter:
         Args:
             session_factory: Callable that returns a context manager for database sessions.
             context_key: Profile ID (32-char hash) to scope operations to.
-            store: Core EmbeddingStore for vector operations.
+            embeddings: EmbeddingClient for vector operations.
             embedder: Optional Embedder for generating embeddings.
         """
         self._session_factory = session_factory
         self._context_key = context_key
-        self._store = store
+        self._embeddings = embeddings
         self._embedder = embedder
 
     def embed_fact(
@@ -163,7 +163,7 @@ class EmbeddingAdapter:
                 f"embedder model {self._embedder.model!r} does not match requested {model_name!r}"
             )
         result = self._embedder.embed(fact.content)
-        self._store.store(
+        self._embeddings.store(
             entity_type=self.ENTITY_TYPE,
             entity_id=str(fact.id),
             embedding=result.embedding,
@@ -185,7 +185,7 @@ class EmbeddingAdapter:
             embedding: Pre-computed embedding vector.
             model_name: Embedding model name.
         """
-        self._store.store(
+        self._embeddings.store(
             entity_type=self.ENTITY_TYPE,
             entity_id=str(fact_id),
             embedding=embedding,
@@ -203,7 +203,7 @@ class EmbeddingAdapter:
         Returns:
             Embedding vector if found, None otherwise.
         """
-        return self._store.get(self.ENTITY_TYPE, str(fact_id), model_name)
+        return self._embeddings.get(self.ENTITY_TYPE, str(fact_id), model_name)
 
     def _build_entity_id_subquery(
         self,
@@ -287,7 +287,7 @@ class EmbeddingAdapter:
         # Build subquery for pre-filtering (context + active + user filter)
         entity_id_subquery = self._build_entity_id_subquery(effective_filter)
 
-        results = self._store.search(
+        results = self._embeddings.search(
             query=query,
             entity_type=self.ENTITY_TYPE,
             model_name=model_name,
@@ -354,7 +354,7 @@ class EmbeddingAdapter:
         Returns:
             Number of embeddings deleted.
         """
-        return self._store.delete(self.ENTITY_TYPE, str(fact_id), session=session)
+        return self._embeddings.delete(self.ENTITY_TYPE, str(fact_id), session=session)
 
     def has_embedding(self, fact_id: int, model_name: str) -> bool:
         """
@@ -367,7 +367,7 @@ class EmbeddingAdapter:
         Returns:
             True if embedding exists.
         """
-        return self._store.exists(self.ENTITY_TYPE, str(fact_id), model_name)
+        return self._embeddings.exists(self.ENTITY_TYPE, str(fact_id), model_name)
 
     def list_without_embeddings(
         self,
@@ -409,7 +409,7 @@ class EmbeddingAdapter:
 
             # Filter to those without embeddings
             fact_ids = [str(f.id) for f in facts]
-            missing_ids = set(self._store.list_missing(self.ENTITY_TYPE, fact_ids, model_name))
+            missing_ids = set(self._embeddings.list_missing(self.ENTITY_TYPE, fact_ids, model_name))
 
             result = [f for f in facts if str(f.id) in missing_ids][:limit]
             return cast(list[Fact], detach_all(result, session))
@@ -424,51 +424,23 @@ class EmbeddingAdapter:
         Returns:
             Total count.
         """
-        return self._store.count(entity_type=self.ENTITY_TYPE, model_name=model_name)
+        return self._embeddings.count(entity_type=self.ENTITY_TYPE, model_name=model_name)
 
     def delete_orphans(self, dry_run: bool = False) -> int:
-        """
-        Delete embeddings for facts that no longer exist.
-
-        Finds embeddings with entity_type='atomic.fact' where the entity_id
-        does not match any existing Fact.id, and deletes them.
+        """Delete embeddings for facts that no longer exist.
 
         Note:
-            This method operates globally across all contexts, ignoring any
-            context_key set on this adapter. Orphan embeddings have no associated
-            fact to derive context from, so context filtering is not applicable.
+            Not yet implemented for new quantized embedding tables.
 
         Args:
             dry_run: If True, count orphans but don't delete them.
 
         Returns:
             Number of orphan embeddings deleted (or found if dry_run).
+
+        Raises:
+            NotImplementedError: This method needs reimplementation for new tables.
         """
-        from sqlalchemy import delete as sa_delete
-        from sqlalchemy import func
-
-        from llm_kelt.core.embedding import Embedding
-
-        with self._session_factory() as session:
-            # Subquery for valid fact IDs (as strings)
-            valid_ids = select(sa_cast(Fact.id, String)).scalar_subquery()
-
-            # Build WHERE clause for orphan embeddings
-            orphan_filter = and_(
-                Embedding.entity_type == self.ENTITY_TYPE,
-                Embedding.entity_id.not_in(valid_ids),
-            )
-
-            if dry_run:
-                # Count without loading vectors into memory
-                count = (
-                    session.scalar(select(func.count()).select_from(Embedding).where(orphan_filter))
-                    or 0
-                )
-            else:
-                # Set-based delete without materializing rows
-                result = session.execute(sa_delete(Embedding).where(orphan_filter))
-                count = result.rowcount
-                session.commit()
-
-            return count
+        raise NotImplementedError(
+            "delete_orphans not yet implemented for quantized embedding tables"
+        )

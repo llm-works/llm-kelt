@@ -4,70 +4,14 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
-from sqlalchemy import (
-    BigInteger,
-    DateTime,
-    Float,
-    Index,
-    LargeBinary,
-    String,
-    UniqueConstraint,
-    delete,
-    func,
-    select,
-)
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Mapped, mapped_column
-
-from llm_kelt.core.base import Base
 
 from ..quantize import dequantize_int8, quantize_int8
 from ..types import Calibration, QuantizationFormat, QuantizedEmbedding
-from .base import ensure_session
-
-if TYPE_CHECKING:
-    pass
-
-
-def make_i8_model(dimensions: int) -> Any:
-    """Create an Int8 embedding model class for specific dimensions.
-
-    Args:
-        dimensions: Vector dimensions (e.g., 384, 1536).
-
-    Returns:
-        SQLAlchemy model class for the embeddings_{dimensions}_i8 table.
-    """
-    table_name = f"embeddings_{dimensions}_i8"
-
-    class EmbeddingI8(Base):
-        __tablename__ = table_name
-        __table_args__ = (
-            UniqueConstraint(
-                "entity_type", "entity_id", "model_name", name=f"uq_{table_name}_entity_model"
-            ),
-            Index(f"idx_{table_name}_entity", "entity_type", "entity_id"),
-            Index(f"idx_{table_name}_model", "model_name"),
-            {"extend_existing": True},
-        )
-
-        id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-        entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
-        entity_id: Mapped[str] = mapped_column(String(64), nullable=False)
-        model_name: Mapped[str] = mapped_column(String(100), nullable=False)
-        embedding_bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-        scale: Mapped[float] = mapped_column(Float, nullable=False)
-        offset: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-        created_at: Mapped[datetime] = mapped_column(
-            DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
-        )
-
-    EmbeddingI8.__name__ = f"EmbeddingI8_{dimensions}"
-    EmbeddingI8.__qualname__ = f"EmbeddingI8_{dimensions}"
-    return EmbeddingI8
+from .base import ensure_session, table_exists
 
 
 class Int8Store:
@@ -78,11 +22,17 @@ class Int8Store:
     Search requires dequantization or approximate int8 distance computation.
     """
 
-    def __init__(self, session_factory: Callable[[], Any], dimensions: int) -> None:
-        """Initialize Int8Store."""
+    def __init__(self, session_factory: Callable[[], Any], dimensions: int, model: Any) -> None:
+        """Initialize Int8Store.
+
+        Args:
+            session_factory: Callable that returns a context manager for DB sessions.
+            dimensions: Vector dimensions.
+            model: SQLAlchemy model class for this store's table.
+        """
         self._session_factory = session_factory
         self._dimensions = dimensions
-        self._model = make_i8_model(dimensions)
+        self._model = model
         self._table_ensured = False
 
     def ensure_table(self) -> None:
@@ -92,6 +42,9 @@ class Int8Store:
 
         with self._session_factory() as session:
             conn = session.connection()
+            if table_exists(conn, self.table_name):
+                self._table_ensured = True
+                return
             self._model.__table__.create(conn, checkfirst=True)
             session.commit()
         self._table_ensured = True

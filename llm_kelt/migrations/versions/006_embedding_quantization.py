@@ -1,4 +1,4 @@
-"""Drop legacy embeddings table in favor of quantized format-specific tables.
+"""Drop legacy fact_embeddings table in favor of quantized format-specific tables.
 
 Revision ID: 006
 Revises: 005
@@ -22,10 +22,10 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.drop_index("idx_embeddings_vector_1536", table_name="embeddings")
-    op.drop_index("idx_embedding_model", table_name="embeddings")
-    op.drop_index("idx_embedding_entity", table_name="embeddings")
-    op.drop_table("embeddings")
+    op.drop_index("idx_fact_embeddings_vector_1536", table_name="fact_embeddings")
+    op.drop_index("idx_fact_embedding_model", table_name="fact_embeddings")
+    op.drop_index("idx_fact_embedding_entity", table_name="fact_embeddings")
+    op.drop_table("fact_embeddings")
 
 
 def downgrade() -> None:

@@ -1,5 +1,7 @@
 """Embedding quantization framework - multi-format vector storage."""
 
+from .client import Client
+from .factory import Factory, get_factory
 from .quantize import (
     dequantize,
     dequantize_int4,
@@ -8,17 +10,18 @@ from .quantize import (
     quantize_int4,
     quantize_int8,
 )
-from .router import EmbeddingRouter
-from .types import Calibration, EmbeddingConfig, QuantizationFormat, QuantizedEmbedding
+from .types import Calibration, Config, QuantizationFormat, QuantizedEmbedding
 
 __all__ = [
+    # Client and Factory
+    "Client",
+    "Factory",
+    "get_factory",
     # Types
     "Calibration",
-    "EmbeddingConfig",
+    "Config",
     "QuantizationFormat",
     "QuantizedEmbedding",
-    # Router
-    "EmbeddingRouter",
     # Quantization functions
     "dequantize",
     "dequantize_int4",

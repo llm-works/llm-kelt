@@ -3,66 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from pgvector.sqlalchemy import HalfVector
-from sqlalchemy import (
-    BigInteger,
-    DateTime,
-    Index,
-    String,
-    UniqueConstraint,
-    delete,
-    func,
-    select,
-    text,
-)
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Mapped, mapped_column
 
-from llm_kelt.core.base import Base
-
-from .base import ensure_session
+from .base import ensure_session, index_exists, table_exists
 
 if TYPE_CHECKING:
     from ..types import Calibration
-
-
-def make_f16_model(dimensions: int) -> Any:
-    """Create a Float16 embedding model class for specific dimensions.
-
-    Args:
-        dimensions: Vector dimensions (e.g., 384, 1536).
-
-    Returns:
-        SQLAlchemy model class for the embeddings_{dimensions}_f16 table.
-    """
-    table_name = f"embeddings_{dimensions}_f16"
-
-    class EmbeddingF16(Base):
-        __tablename__ = table_name
-        __table_args__ = (
-            UniqueConstraint(
-                "entity_type", "entity_id", "model_name", name=f"uq_{table_name}_entity_model"
-            ),
-            Index(f"idx_{table_name}_entity", "entity_type", "entity_id"),
-            Index(f"idx_{table_name}_model", "model_name"),
-            {"extend_existing": True},
-        )
-
-        id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-        entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
-        entity_id: Mapped[str] = mapped_column(String(64), nullable=False)
-        model_name: Mapped[str] = mapped_column(String(100), nullable=False)
-        embedding: Mapped[list[float]] = mapped_column(HalfVector(dimensions), nullable=False)
-        created_at: Mapped[datetime] = mapped_column(
-            DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
-        )
-
-    EmbeddingF16.__name__ = f"EmbeddingF16_{dimensions}"
-    EmbeddingF16.__qualname__ = f"EmbeddingF16_{dimensions}"
-    return EmbeddingF16
 
 
 class Float16Store:
@@ -72,11 +21,17 @@ class Float16Store:
     Embeddings are converted to float16 on storage, returned as float32 on retrieval.
     """
 
-    def __init__(self, session_factory: Callable[[], Any], dimensions: int) -> None:
-        """Initialize Float16Store."""
+    def __init__(self, session_factory: Callable[[], Any], dimensions: int, model: Any) -> None:
+        """Initialize Float16Store.
+
+        Args:
+            session_factory: Callable that returns a context manager for DB sessions.
+            dimensions: Vector dimensions.
+            model: SQLAlchemy model class for this store's table.
+        """
         self._session_factory = session_factory
         self._dimensions = dimensions
-        self._model = make_f16_model(dimensions)
+        self._model = model
         self._table_ensured = False
 
     def ensure_table(self) -> None:
@@ -86,19 +41,22 @@ class Float16Store:
 
         with self._session_factory() as session:
             conn = session.connection()
+
+            if table_exists(conn, self.table_name):
+                self._table_ensured = True
+                return
+
             self._model.__table__.create(conn, checkfirst=True)
 
             hnsw_idx = f"idx_{self.table_name}_hnsw"
-            check_idx = text("SELECT 1 FROM pg_indexes WHERE indexname = :idx_name").bindparams(
-                idx_name=hnsw_idx
-            )
-            if not conn.execute(check_idx).scalar():
-                create_hnsw = text(
-                    f"CREATE INDEX {hnsw_idx} ON {self.table_name} "
-                    f"USING hnsw (embedding halfvec_cosine_ops) "
-                    f"WITH (m = 16, ef_construction = 64)"
+            if not index_exists(conn, hnsw_idx):
+                conn.execute(
+                    text(
+                        f"CREATE INDEX {hnsw_idx} ON {self.table_name} "
+                        f"USING hnsw (embedding halfvec_cosine_ops) "
+                        f"WITH (m = 16, ef_construction = 64)"
+                    )
                 )
-                conn.execute(create_hnsw)
 
             session.commit()
         self._table_ensured = True
@@ -199,7 +157,7 @@ class Float16Store:
                 self._model.model_name == model_name,
             )
             result = session.scalar(stmt)
-            return list(result) if result is not None else None
+            return result.to_list() if result is not None else None
 
     def delete(
         self,

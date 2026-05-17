@@ -176,19 +176,19 @@ class TestEmbedMissingFactsIntegration:
 
 
 class TestPublicEmbeddingStore:
-    """Test the public embedding_store property for custom entity types."""
+    """Test the public embeddings property for custom entity types."""
 
-    def test_embedding_store_property_exists(self, kelt_client):
-        """Test that embedding_store is publicly accessible."""
-        from llm_kelt import EmbeddingStore
+    def test_embeddings_property_exists(self, kelt_client):
+        """Test that embeddings is publicly accessible."""
+        from llm_kelt import EmbeddingClient
 
-        store = kelt_client.embedding_store
+        store = kelt_client.embeddings
         assert store is not None
-        assert isinstance(store, EmbeddingStore)
+        assert isinstance(store, EmbeddingClient)
 
     def test_store_custom_entity_type(self, kelt_client, clean_tables):
         """Test storing embeddings for a custom entity type."""
-        store = kelt_client.embedding_store
+        store = kelt_client.embeddings
 
         # Store embedding for a custom entity type
         store.store(
@@ -207,7 +207,7 @@ class TestPublicEmbeddingStore:
 
     def test_search_custom_entity_type(self, kelt_client, clean_tables):
         """Test searching embeddings for a custom entity type."""
-        store = kelt_client.embedding_store
+        store = kelt_client.embeddings
 
         # Store multiple embeddings
         store.store("myapp.query", "q1", [1.0, 0.0, 0.0], "test-model")
@@ -229,7 +229,7 @@ class TestPublicEmbeddingStore:
 
     def test_delete_custom_entity_type(self, kelt_client, clean_tables):
         """Test deleting embeddings for a custom entity type."""
-        store = kelt_client.embedding_store
+        store = kelt_client.embeddings
 
         # Store and verify
         store.store("myapp.query", "q999", [0.5, 0.5, 0.5], "test-model")
@@ -244,7 +244,7 @@ class TestPublicEmbeddingStore:
 
     def test_custom_entity_isolated_from_facts(self, kelt_client, clean_tables):
         """Test that custom entity embeddings don't interfere with fact embeddings."""
-        store = kelt_client.embedding_store
+        store = kelt_client.embeddings
 
         # Store custom embedding
         store.store("myapp.query", "1", [0.5, 0.5, 0.5], "test-model")

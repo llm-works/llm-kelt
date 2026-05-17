@@ -52,7 +52,6 @@ Usage:
 
 from .bootstrap import ensure_schema
 from .client import Client
-from .core.embedding import EmbeddingStore
 from .core.errors import (
     ConfigError,
     ConflictError,
@@ -63,6 +62,9 @@ from .core.errors import (
     ValidationError,
 )
 from .core.schema import SchemaState, SchemaStatus
+from .embedding import Client as EmbeddingClient
+from .embedding import Config as EmbeddingConfig
+from .embedding import QuantizationFormat
 from .factory import ClientFactory
 from .memory import ClientContext
 from .memory.kg import KGStore
@@ -70,8 +72,10 @@ from .memory.kg import KGStore
 __all__ = [
     "Client",
     "ClientFactory",
-    "EmbeddingStore",
+    "EmbeddingClient",
+    "EmbeddingConfig",
     "KGStore",
+    "QuantizationFormat",
     "KeltError",
     "ValidationError",
     "NotFoundError",

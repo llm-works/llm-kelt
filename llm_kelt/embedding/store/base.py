@@ -6,10 +6,23 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Protocol
 
+from sqlalchemy.orm import DeclarativeBase
+
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from ..types import Calibration
+
+
+class EmbeddingBase(DeclarativeBase):
+    """Separate base for dynamic embedding models.
+
+    Embedding tables are created on-demand, not via migrations. Using a separate
+    base prevents them from polluting the main Base.metadata used by schema
+    migrations and ensures test isolation.
+    """
+
+    pass
 
 
 class EmbeddingStoreProtocol(Protocol):
@@ -151,3 +164,28 @@ def ensure_session(session: Any | None, session_factory: Callable[[], Any]):
     else:
         with session_factory() as sess:
             yield sess
+
+
+def table_exists(conn: Any, table_name: str) -> bool:
+    """Check if a table exists in the current search_path."""
+    from sqlalchemy import text
+
+    result = conn.execute(
+        text(
+            "SELECT 1 FROM pg_catalog.pg_class c "
+            "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE c.relname = :table_name "
+            "AND pg_catalog.pg_table_is_visible(c.oid)"
+        ).bindparams(table_name=table_name)
+    )
+    return result.scalar() is not None
+
+
+def index_exists(conn: Any, index_name: str) -> bool:
+    """Check if an index exists in the database."""
+    from sqlalchemy import text
+
+    result = conn.execute(
+        text("SELECT 1 FROM pg_indexes WHERE indexname = :idx_name").bindparams(idx_name=index_name)
+    )
+    return result.scalar() is not None

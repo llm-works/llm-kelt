@@ -1,6 +1,6 @@
 """Core types for embedding quantization."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -64,31 +64,18 @@ class Calibration:
 
 
 @dataclass
-class EmbeddingConfig:
-    """Embedding configuration for a context."""
+class Config:
+    """Embedding configuration.
+
+    Each config defines ONE format and dimension. Want multiple formats?
+    Create multiple clients with different configs.
+    """
 
     context_key: str
-    primary_format: QuantizationFormat = QuantizationFormat.F32
-    search_format: QuantizationFormat = QuantizationFormat.F32
-    store_formats: list[QuantizationFormat] = field(
-        default_factory=lambda: [QuantizationFormat.F32]
-    )
-    rerank_format: QuantizationFormat | None = None
-    rerank_oversample: int = 10
+    format: QuantizationFormat = QuantizationFormat.F16
     dimensions: int = 384
 
-    def __post_init__(self) -> None:
-        if self.rerank_format and self.rerank_oversample < 2:
-            raise ValueError("rerank_oversample must be >= 2 when rerank_format is set")
-        if self.search_format not in self.store_formats:
-            raise ValueError(
-                f"search_format {self.search_format} must be in store_formats {self.store_formats}"
-            )
-        if self.rerank_format and self.rerank_format not in self.store_formats:
-            raise ValueError(
-                f"rerank_format {self.rerank_format} must be in store_formats {self.store_formats}"
-            )
-
-    def table_names(self) -> list[str]:
-        """Get all table names for configured formats."""
-        return [fmt.table_name(self.dimensions) for fmt in self.store_formats]
+    @property
+    def table_name(self) -> str:
+        """Get table name for this config."""
+        return self.format.table_name(self.dimensions)

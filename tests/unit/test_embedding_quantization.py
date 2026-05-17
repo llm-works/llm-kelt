@@ -1,10 +1,8 @@
 """Unit tests for embedding quantization."""
 
-import pytest
-
 from llm_kelt.embedding import (
     Calibration,
-    EmbeddingConfig,
+    Config,
     QuantizationFormat,
     dequantize,
     dequantize_int4,
@@ -157,54 +155,31 @@ class TestQuantizationFormat:
         assert QuantizationFormat.I4.table_name(768) == "embeddings_768_i4"
 
 
-class TestEmbeddingConfig:
-    """Tests for EmbeddingConfig dataclass."""
+class TestConfig:
+    """Tests for Config dataclass."""
 
     def test_default_config(self) -> None:
-        """Default config uses f32."""
-        config = EmbeddingConfig(context_key="test")
-        assert config.primary_format == QuantizationFormat.F32
-        assert config.search_format == QuantizationFormat.F32
-        assert config.store_formats == [QuantizationFormat.F32]
-        assert config.rerank_format is None
+        """Default config uses F16 and 384 dimensions."""
+        config = Config(context_key="test")
+        assert config.format == QuantizationFormat.F16
+        assert config.dimensions == 384
 
-    def test_table_names(self) -> None:
-        """Generate table names for all configured formats."""
-        config = EmbeddingConfig(
+    def test_table_name(self) -> None:
+        """Generate table name from format and dimensions."""
+        config = Config(
             context_key="test",
-            store_formats=[QuantizationFormat.F32, QuantizationFormat.I8],
-            search_format=QuantizationFormat.I8,
-            dimensions=384,
+            format=QuantizationFormat.I8,
+            dimensions=1536,
         )
-        names = config.table_names()
-        assert names == ["embeddings_384_f32", "embeddings_384_i8"]
+        assert config.table_name == "embeddings_1536_i8"
 
-    def test_validation_search_in_store(self) -> None:
-        """Search format must be in store formats."""
-        with pytest.raises(ValueError, match="search_format.*must be in store_formats"):
-            EmbeddingConfig(
-                context_key="test",
-                store_formats=[QuantizationFormat.F32],
-                search_format=QuantizationFormat.I8,
-            )
-
-    def test_validation_rerank_in_store(self) -> None:
-        """Rerank format must be in store formats."""
-        with pytest.raises(ValueError, match="rerank_format.*must be in store_formats"):
-            EmbeddingConfig(
-                context_key="test",
-                store_formats=[QuantizationFormat.I8],
-                search_format=QuantizationFormat.I8,
-                rerank_format=QuantizationFormat.F32,
-            )
-
-    def test_validation_rerank_oversample(self) -> None:
-        """Rerank oversample must be >= 2 when rerank is set."""
-        with pytest.raises(ValueError, match="rerank_oversample must be >= 2"):
-            EmbeddingConfig(
-                context_key="test",
-                store_formats=[QuantizationFormat.F32, QuantizationFormat.I8],
-                search_format=QuantizationFormat.I8,
-                rerank_format=QuantizationFormat.F32,
-                rerank_oversample=1,
-            )
+    def test_custom_format(self) -> None:
+        """Config with custom format."""
+        config = Config(
+            context_key="test",
+            format=QuantizationFormat.F32,
+            dimensions=768,
+        )
+        assert config.format == QuantizationFormat.F32
+        assert config.dimensions == 768
+        assert config.table_name == "embeddings_768_f32"

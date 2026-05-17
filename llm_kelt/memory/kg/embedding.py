@@ -1,4 +1,4 @@
-"""Entity embedding adapter - uses core EmbeddingStore for entity vectors."""
+"""Entity embedding adapter - uses embedding.Client for entity vectors."""
 
 from __future__ import annotations
 
@@ -12,20 +12,20 @@ from .models import Entity
 from .store import build_scope_filter
 
 if TYPE_CHECKING:
-    from llm_kelt.core.embedding import EmbeddingStore
+    from llm_kelt.embedding import Client as EmbeddingClient
     from llm_kelt.inference.embedder import Embedder
 
 
 class EntityEmbeddingAdapter:
     """Embedding operations for KG entities.
 
-    Provides entity-specific interface on top of the core EmbeddingStore.
+    Provides entity-specific interface on top of EmbeddingClient.
     Uses entity_type "kg.entity" to namespace embeddings.
 
     Entities are embedded by concatenating canonical_name + description.
 
     Example:
-        adapter = EntityEmbeddingAdapter(session_factory, store, embedder)
+        adapter = EntityEmbeddingAdapter(session_factory, embeddings, embedder)
 
         # Embed an entity
         adapter.embed_entity(entity, "text-embedding-3-small")
@@ -42,18 +42,18 @@ class EntityEmbeddingAdapter:
     def __init__(
         self,
         session_factory: Callable[[], Any],
-        store: EmbeddingStore,
+        embeddings: EmbeddingClient,
         embedder: Embedder | None = None,
     ) -> None:
         """Initialize EntityEmbeddingAdapter.
 
         Args:
             session_factory: Callable that returns a context manager for database sessions.
-            store: Core EmbeddingStore for vector operations.
+            embeddings: EmbeddingClient for vector operations.
             embedder: Optional Embedder for generating embeddings.
         """
         self._session_factory = session_factory
-        self._store = store
+        self._embeddings = embeddings
         self._embedder = embedder
 
     def _entity_text(self, entity: Entity) -> str:
@@ -87,7 +87,7 @@ class EntityEmbeddingAdapter:
 
         text = self._entity_text(entity)
         result = self._embedder.embed(text)
-        self._store.store(
+        self._embeddings.store(
             entity_type=self.ENTITY_TYPE,
             entity_id=str(entity.id),
             embedding=result.embedding,
@@ -108,7 +108,7 @@ class EntityEmbeddingAdapter:
             embedding: Pre-computed embedding vector.
             model_name: Embedding model name.
         """
-        self._store.store(
+        self._embeddings.store(
             entity_type=self.ENTITY_TYPE,
             entity_id=str(entity_id),
             embedding=embedding,
@@ -125,7 +125,7 @@ class EntityEmbeddingAdapter:
         Returns:
             The embedding vector, or None if not found.
         """
-        return self._store.get(
+        return self._embeddings.get(
             entity_type=self.ENTITY_TYPE,
             entity_id=str(entity_id),
             model_name=model_name,
@@ -140,7 +140,7 @@ class EntityEmbeddingAdapter:
         Returns:
             Number of embeddings deleted.
         """
-        return self._store.delete(
+        return self._embeddings.delete(
             entity_type=self.ENTITY_TYPE,
             entity_id=str(entity_id),
         )
@@ -170,7 +170,7 @@ class EntityEmbeddingAdapter:
             Over-fetches 3x to account for scope filtering. May return fewer than
             `limit` results if most embeddings are in scopes outside the query scope.
         """
-        raw_results = self._store.search(
+        raw_results = self._embeddings.search(
             query=query_embedding,
             entity_type=self.ENTITY_TYPE,
             model_name=model_name,
