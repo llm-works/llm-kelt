@@ -17,7 +17,7 @@ from .models import Entity, EntityAlias, EntityRef, EntityRelationship, FactEnti
 if TYPE_CHECKING:
     from appinfra.log import Logger
 
-    from llm_kelt.core.embedding import EmbeddingStore
+    from llm_kelt.embedding import Client as EmbeddingClient
     from llm_kelt.inference.embedder import Embedder
 
     from .embedding import EntityEmbeddingAdapter
@@ -739,33 +739,33 @@ class KGStore:
         lg: Logger,
         session_factory: SessionFactory,
         embedder: Embedder | None = None,
-        embedding_store: EmbeddingStore | None = None,
+        embeddings: EmbeddingClient | None = None,
     ) -> None:
 
         self._lg = lg
         self._session_factory = session_factory
         self._embedder = embedder
-        self._embedding_store = embedding_store
+        self._embeddings_client = embeddings
 
         self.entities = EntityStore(lg, session_factory)
         self.refs = EntityRefStore(lg, session_factory)
         self.relationships = EntityRelationshipStore(lg, session_factory)
         self.fact_entities = FactEntityStore(lg, session_factory)
 
-        # Embedding adapter (only if embedding_store provided)
-        self._embeddings: EntityEmbeddingAdapter | None = None
-        if embedding_store is not None:
+        # Embedding adapter (only if embeddings client provided)
+        self._embedding_adapter: EntityEmbeddingAdapter | None = None
+        if embeddings is not None:
             from .embedding import EntityEmbeddingAdapter
 
-            self._embeddings = EntityEmbeddingAdapter(session_factory, embedding_store, embedder)
+            self._embedding_adapter = EntityEmbeddingAdapter(session_factory, embeddings, embedder)
 
     @property
     def embeddings(self) -> EntityEmbeddingAdapter:
         """Access entity embedding operations.
 
         Raises:
-            RuntimeError: If embedding_store was not provided at construction.
+            RuntimeError: If embeddings client was not provided at construction.
         """
-        if self._embeddings is None:
-            raise RuntimeError("Embeddings not configured: embedding_store not provided")
-        return self._embeddings
+        if self._embedding_adapter is None:
+            raise RuntimeError("Embeddings not configured: embeddings client not provided")
+        return self._embedding_adapter

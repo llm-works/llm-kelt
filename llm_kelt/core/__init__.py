@@ -12,7 +12,6 @@ from .content import Content, ContentStore
 
 # Database
 from .database import Database
-from .embedding import Embedding, EmbeddingStore
 
 # Exceptions
 from .errors import (
@@ -38,8 +37,6 @@ __all__ = [
     # Models
     "Content",
     "ContentStore",
-    "Embedding",
-    "EmbeddingStore",
     # Types
     "ScoredEntity",
     "PagedResult",

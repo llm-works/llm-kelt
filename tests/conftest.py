@@ -254,20 +254,56 @@ def test_context(request):
 
 @pytest.fixture
 def kelt_client(logger, database, test_context):
-    """Create Client for testing, scoped to test context."""
+    """Create Client for testing, scoped to test context.
+
+    Uses 3-dimensional embeddings for test simplicity (matching test vectors).
+    """
     from llm_kelt import ClientContext
+    from llm_kelt.embedding import Config as EmbeddingConfig
+    from llm_kelt.embedding import Factory as EmbeddingFactory
+    from llm_kelt.embedding import QuantizationFormat
+
+    # Use small dimensions for tests (3-element vectors are common in test data)
+    embedding_config = EmbeddingConfig(
+        context_key=test_context or "_test",
+        format=QuantizationFormat.F32,  # F32 avoids HalfVector issues
+        dimensions=3,
+    )
+    factory = EmbeddingFactory()
+    embeddings = factory.create(database.session, embedding_config)
 
     context = ClientContext(context_key=test_context, schema_name=None)
-    return Client(database=database, context=context, lg=logger)
+    return Client(lg=logger, database=database, context=context, embeddings=embeddings)
 
 
 @pytest.fixture
 def clean_tables(database, test_context):
     """Clean all tables before each test."""
+    from sqlalchemy import inspect, text
+    from sqlalchemy.exc import ProgrammingError
+
     with database.session() as session:
+        inspector = inspect(session.bind)
+        existing_tables = set(inspector.get_table_names())
+
         # Delete in reverse order to respect foreign keys
         for table in reversed(Base.metadata.sorted_tables):
-            session.execute(table.delete())
+            # Skip dynamically-created tables that may not exist
+            if table.name not in existing_tables:
+                continue
+            try:
+                session.execute(table.delete())
+            except ProgrammingError:
+                # Table doesn't exist yet (dynamic embedding tables)
+                session.rollback()
+
+        # Also clean dynamic embedding tables (not in Base.metadata)
+        for table_name in existing_tables:
+            if table_name.startswith("embeddings_"):
+                try:
+                    session.execute(text(f"DELETE FROM {table_name}"))
+                except ProgrammingError:
+                    session.rollback()
     yield
 
 
@@ -299,3 +335,26 @@ def sample_feedback(kelt_client, clean_tables):
         tags=["interesting"],
     )
     return feedback_id
+
+
+# Default embedding dimensions (matches default EmbeddingConfig)
+TEST_EMBEDDING_DIMS = 384
+
+
+def make_test_embedding(seed: float = 0.1, dims: int = TEST_EMBEDDING_DIMS) -> list[float]:
+    """Create a test embedding vector with proper dimensions.
+
+    Args:
+        seed: Base value for the embedding (varies the values).
+        dims: Number of dimensions (default matches EmbeddingConfig default).
+
+    Returns:
+        List of floats with the specified dimensions.
+    """
+    return [seed + i * 0.001 for i in range(dims)]
+
+
+@pytest.fixture
+def test_embedding():
+    """Factory fixture for creating test embeddings."""
+    return make_test_embedding

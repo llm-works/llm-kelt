@@ -280,7 +280,7 @@ class TestAssertionsEmbeddings:
     def test_set_embedding(self, kelt_client, clean_tables):
         """Test setting an embedding for an assertion."""
         fact_id = kelt_client.atomic.assertions.add("User prefers Python")
-        embedding = [0.1, 0.2, 0.3, 0.4, 0.5]
+        embedding = [0.1, 0.2, 0.3]
 
         # Should not raise - use embeddings adapter
         kelt_client.atomic.embeddings.set_embedding(fact_id, embedding, "test-model")
@@ -312,7 +312,7 @@ class TestAssertionsEmbeddings:
         """Test setting embeddings with different model names."""
         fact_id = kelt_client.atomic.assertions.add("Multi-model assertion")
         embedding1 = [0.1, 0.2, 0.3]
-        embedding2 = [0.4, 0.5, 0.6, 0.7]  # Different dimensions
+        embedding2 = [0.4, 0.5, 0.6]
 
         kelt_client.atomic.embeddings.set_embedding(fact_id, embedding1, "model-a")
         kelt_client.atomic.embeddings.set_embedding(fact_id, embedding2, "model-b")
@@ -431,13 +431,13 @@ class TestAssertionsEmbeddings:
         fact1_id = kelt_client.atomic.assertions.add("Active assertion")
         fact2_id = kelt_client.atomic.assertions.add("Inactive assertion")
 
-        kelt_client.atomic.embeddings.set_embedding(fact1_id, [1.0, 0.0], "test")
-        kelt_client.atomic.embeddings.set_embedding(fact2_id, [1.0, 0.0], "test")
+        kelt_client.atomic.embeddings.set_embedding(fact1_id, [1.0, 0.0, 0.0], "test")
+        kelt_client.atomic.embeddings.set_embedding(fact2_id, [1.0, 0.0, 0.0], "test")
         kelt_client.atomic.assertions.deactivate(fact2_id)
 
         # Default: active assertions only
         results = kelt_client.atomic.embeddings.search_similar(
-            query=[1.0, 0.0],
+            query=[1.0, 0.0, 0.0],
             model_name="test",
             min_similarity=0.0,
         )
@@ -463,10 +463,10 @@ class TestAssertionsEmbeddings:
     def test_search_similar_wrong_model_returns_empty(self, kelt_client, clean_tables):
         """Test search_similar returns empty when model doesn't match."""
         fact_id = kelt_client.atomic.assertions.add("Test assertion")
-        kelt_client.atomic.embeddings.set_embedding(fact_id, [1.0, 0.0], "model-a")
+        kelt_client.atomic.embeddings.set_embedding(fact_id, [1.0, 0.0, 0.0], "model-a")
 
         results = kelt_client.atomic.embeddings.search_similar(
-            query=[1.0, 0.0],
+            query=[1.0, 0.0, 0.0],
             model_name="model-b",  # Different model
             min_similarity=0.0,
         )
@@ -476,11 +476,11 @@ class TestAssertionsEmbeddings:
     def test_delete_embedding_on_fact_delete(self, kelt_client, clean_tables, database):
         """Test that embeddings can be cleaned up when deleting facts."""
         fact_id = kelt_client.atomic.assertions.add("Assertion to delete")
-        kelt_client.atomic.embeddings.set_embedding(fact_id, [0.1, 0.2], "test")
+        kelt_client.atomic.embeddings.set_embedding(fact_id, [0.1, 0.2, 0.3], "test")
 
         # Verify embedding exists
         results = kelt_client.atomic.embeddings.search_similar(
-            query=[0.1, 0.2],
+            query=[0.1, 0.2, 0.3],
             model_name="test",
             min_similarity=0.9,
         )
@@ -492,7 +492,7 @@ class TestAssertionsEmbeddings:
 
         # Embedding should be gone
         results_after = kelt_client.atomic.embeddings.search_similar(
-            query=[0.1, 0.2],
+            query=[0.1, 0.2, 0.3],
             model_name="test",
             min_similarity=0.0,
         )
@@ -505,7 +505,7 @@ class TestAssertionsEmbeddings:
         as fact deletion, ensuring both succeed or fail together.
         """
         fact_id = kelt_client.atomic.assertions.add("Fact with embedding")
-        kelt_client.atomic.embeddings.set_embedding(fact_id, [0.5, 0.5], "test-model")
+        kelt_client.atomic.embeddings.set_embedding(fact_id, [0.5, 0.5, 0.5], "test-model")
 
         # Verify both exist
         assert kelt_client.atomic.assertions.exists(fact_id)
@@ -521,7 +521,7 @@ class TestAssertionsEmbeddings:
 
         # Verify no orphan embeddings left
         results = kelt_client.atomic.embeddings.search_similar(
-            query=[0.5, 0.5],
+            query=[0.5, 0.5, 0.5],
             model_name="test-model",
             min_similarity=0.9,
         )

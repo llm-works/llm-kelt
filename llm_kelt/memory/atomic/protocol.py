@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from appinfra.log import Logger
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
-from llm_kelt.core.embedding import EmbeddingStore
+from llm_kelt.embedding import Client as EmbeddingClient
 
 from .clients import (
     AssertionsClient,
@@ -54,7 +54,7 @@ class Protocol:
         context_key: str | None,
         *,
         embedder: Embedder | None = None,
-        embedding_store: EmbeddingStore | None = None,
+        embeddings: EmbeddingClient | None = None,
     ) -> None:
         """
         Initialize Atomic memory protocol.
@@ -64,13 +64,13 @@ class Protocol:
             session_factory: Database session factory.
             context_key: Context key to scope all operations to (None = no filtering).
             embedder: Optional embedder for generating embeddings.
-            embedding_store: Optional embedding store for vector operations.
+            embeddings: Optional embeddings client for vector operations.
         """
         self._lg = lg
         self._session_factory = session_factory
         self._context_key = context_key
         self._embedder = embedder
-        self._embedding_store = embedding_store
+        self._embedding_client = embeddings
 
         # Lazy-initialized clients
         self._assertions: AssertionsClient | None = None
@@ -84,11 +84,11 @@ class Protocol:
 
         # Eagerly initialize embedding adapter so clients can use it
         self._embedding_adapter: EmbeddingAdapter | None = None
-        if self._embedding_store is not None:
+        if self._embedding_client is not None:
             self._embedding_adapter = EmbeddingAdapter(
                 self._session_factory,
                 self._context_key,
-                self._embedding_store,
+                self._embedding_client,
                 self._embedder,
             )
 
@@ -165,15 +165,15 @@ class Protocol:
     @property
     def embeddings(self) -> EmbeddingAdapter:
         """Embedding operations for atomic facts."""
-        # Defensive: adapter is eagerly created in __init__ if embedding_store is set
+        # Defensive: adapter is eagerly created in __init__ if embedding client is set
         # This lazy fallback handles edge cases where adapter was reset or not initialized
         if self._embedding_adapter is None:
-            if self._embedding_store is None:
-                raise RuntimeError("No embedding store configured")
+            if self._embedding_client is None:
+                raise RuntimeError("No embedding client configured")
             self._embedding_adapter = EmbeddingAdapter(
                 self._session_factory,
                 self._context_key,
-                self._embedding_store,
+                self._embedding_client,
                 self._embedder,
             )
         return self._embedding_adapter

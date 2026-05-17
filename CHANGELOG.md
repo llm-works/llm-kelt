@@ -24,9 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Conversation.append_async()` for non-blocking compaction in async contexts
 - Warns at construction when `AsyncCompactor` is used (reminds to use `append_async()`)
 - Raises `RuntimeError` if sync `append()` triggers async compaction
-- `Client.embedding_store` public property for entity-type agnostic vector storage
+- `Client.embeddings` public property for entity-type agnostic vector storage
   (enables custom embeddings for non-fact entities like queries or documents)
-- `EmbeddingStore` re-exported from `llm_kelt` for type hints
+- `EmbeddingClient` re-exported from `llm_kelt` for type hints
+- Embedding quantization framework (`llm_kelt.embedding`) with pluggable storage formats:
+  - F32 (pgvector `vector`) — full precision, native similarity search
+  - F16 (pgvector `halfvec`) — 2x compression, native similarity search
+  - I8 (bytea + scalar quantization) — 4x compression, application-side search
+  - I4 (bytea + packed 4-bit) — 8x compression, application-side search
+  - `Factory` for creating embedding clients with automatic table creation
+  - `Config.prefix` option for custom table names (tenant/application isolation)
 - `DeleteResult` dataclass for atomic fact deletion results (`.deleted`, `.not_found`, `.count`)
 - `EmbeddingAdapter.delete_orphans(dry_run=False)` to clean up embeddings for deleted facts
 - `kelt atomic vacuum [--dry-run]` CLI command for orphan embedding cleanup
@@ -57,10 +64,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking**: `metadata` parameter renamed to `extra` in storage APIs (`save()`, `record()`, `link()`, etc.)
 - **Breaking**: `SummarizingCompactor` is now an `AsyncCompactor` (use `append_async()`, accepts guards)
 - **Breaking**: Table `sessions` renamed to `conv_sessions` (avoids conflicts with agent tables)
-- **Breaking**: Table `embeddings` renamed to `fact_embeddings` (avoids conflicts with agent tables)
+- **Breaking**: Migration 006 replaces `fact_embeddings` table with format-specific tables
+  (`embeddings_{prefix}_{dim}_{format}`, e.g., `embeddings_384_f16`). Existing embeddings
+  must be regenerated after migration.
 - **Breaking**: `Conversation.__init__` now requires `lg: Logger` as the first parameter
 - **Breaking**: `FactClient.delete()` now returns `DeleteResult` instead of `bool`, accepts
   `int | Iterable[int]`, and automatically cleans up associated embeddings
+- **Breaking**: `EmbeddingStore` replaced by `EmbeddingClient` with new quantization-aware API
+  (import from `llm_kelt` or `llm_kelt.embedding`)
 - `Conversation` moved from `llm_kelt.inference.query` to `llm_kelt.conversation.session`
   (re-exported from `llm_kelt.inference` for backward compatibility)
 - `ContextQuery` now uses the new `Conversation` class with `messages_as_dicts()` for

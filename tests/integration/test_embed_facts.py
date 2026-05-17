@@ -176,19 +176,19 @@ class TestEmbedMissingFactsIntegration:
 
 
 class TestPublicEmbeddingStore:
-    """Test the public embedding_store property for custom entity types."""
+    """Test the public embeddings property for custom entity types."""
 
-    def test_embedding_store_property_exists(self, kelt_client):
-        """Test that embedding_store is publicly accessible."""
-        from llm_kelt import EmbeddingStore
+    def test_embeddings_property_exists(self, kelt_client):
+        """Test that embeddings is publicly accessible."""
+        from llm_kelt import EmbeddingClient
 
-        store = kelt_client.embedding_store
+        store = kelt_client.embeddings
         assert store is not None
-        assert isinstance(store, EmbeddingStore)
+        assert isinstance(store, EmbeddingClient)
 
     def test_store_custom_entity_type(self, kelt_client, clean_tables):
         """Test storing embeddings for a custom entity type."""
-        store = kelt_client.embedding_store
+        store = kelt_client.embeddings
 
         # Store embedding for a custom entity type
         store.store(
@@ -207,7 +207,7 @@ class TestPublicEmbeddingStore:
 
     def test_search_custom_entity_type(self, kelt_client, clean_tables):
         """Test searching embeddings for a custom entity type."""
-        store = kelt_client.embedding_store
+        store = kelt_client.embeddings
 
         # Store multiple embeddings
         store.store("myapp.query", "q1", [1.0, 0.0, 0.0], "test-model")
@@ -229,7 +229,7 @@ class TestPublicEmbeddingStore:
 
     def test_delete_custom_entity_type(self, kelt_client, clean_tables):
         """Test deleting embeddings for a custom entity type."""
-        store = kelt_client.embedding_store
+        store = kelt_client.embeddings
 
         # Store and verify
         store.store("myapp.query", "q999", [0.5, 0.5, 0.5], "test-model")
@@ -244,7 +244,7 @@ class TestPublicEmbeddingStore:
 
     def test_custom_entity_isolated_from_facts(self, kelt_client, clean_tables):
         """Test that custom entity embeddings don't interfere with fact embeddings."""
-        store = kelt_client.embedding_store
+        store = kelt_client.embeddings
 
         # Store custom embedding
         store.store("myapp.query", "1", [0.5, 0.5, 0.5], "test-model")
@@ -262,3 +262,69 @@ class TestPublicEmbeddingStore:
         fact_results = store.search([0.5, 0.5, 0.5], "atomic.fact", "test-model")
         assert len(fact_results) == 1
         assert fact_results[0][0] == str(fact_id)
+
+
+class TestCustomTablePrefix:
+    """Test custom table prefix for tenant/application isolation."""
+
+    def test_prefix_creates_separate_table(self, database, clean_tables):
+        """Test that prefix creates a separate table."""
+        from llm_kelt.embedding import Config, Factory, QuantizationFormat
+
+        factory = Factory()
+
+        # Create two clients with different prefixes
+        config_a = Config(
+            context_key="_test",
+            format=QuantizationFormat.F32,
+            dimensions=3,
+            prefix="tenant_a",
+        )
+        config_b = Config(
+            context_key="_test",
+            format=QuantizationFormat.F32,
+            dimensions=3,
+            prefix="tenant_b",
+        )
+
+        client_a = factory.create(database.session, config_a)
+        client_b = factory.create(database.session, config_b)
+
+        # Verify table names
+        assert config_a.table_name == "embeddings_tenant_a_3_f32"
+        assert config_b.table_name == "embeddings_tenant_b_3_f32"
+
+        # Store in tenant_a
+        client_a.store("doc", "1", [1.0, 0.0, 0.0], "test-model")
+
+        # tenant_b should not see it
+        assert client_a.exists("doc", "1", "test-model")
+        assert not client_b.exists("doc", "1", "test-model")
+
+        # Store in tenant_b
+        client_b.store("doc", "1", [0.0, 1.0, 0.0], "test-model")
+
+        # Both should exist independently
+        emb_a = client_a.get("doc", "1", "test-model")
+        emb_b = client_b.get("doc", "1", "test-model")
+        assert emb_a == [1.0, 0.0, 0.0]
+        assert emb_b == [0.0, 1.0, 0.0]
+
+    def test_no_prefix_uses_default_table(self, database, clean_tables):
+        """Test that no prefix uses default table naming."""
+        from llm_kelt.embedding import Config, QuantizationFormat
+
+        config = Config(
+            context_key="_test",
+            format=QuantizationFormat.F16,
+            dimensions=384,
+        )
+        assert config.table_name == "embeddings_384_f16"
+
+        config_with_prefix = Config(
+            context_key="_test",
+            format=QuantizationFormat.F16,
+            dimensions=384,
+            prefix="custom",
+        )
+        assert config_with_prefix.table_name == "embeddings_custom_384_f16"

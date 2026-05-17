@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from appinfra.log import Logger
 
-from .core.embedding import EmbeddingStore
 from .core.schema import SchemaManager
 from .memory import atomic
 
@@ -84,14 +83,13 @@ class ScopedClient:
                 )
                 manager.ensure_schema()
 
-            # Create stores with scoped database
-            embedding_store = EmbeddingStore(self._scoped_db.session)
+            # Create stores with scoped database, using parent's embeddings client
             self._atomic = atomic.Protocol(
                 self._lg,
                 self._scoped_db.session,
                 self._parent._context.context_key,
                 embedder=self._parent._embedder,
-                embedding_store=embedding_store,
+                embeddings=self._parent._embeddings,
             )
             self._initialized = True
 
