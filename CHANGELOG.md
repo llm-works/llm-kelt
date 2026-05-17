@@ -64,9 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking**: `metadata` parameter renamed to `extra` in storage APIs (`save()`, `record()`, `link()`, etc.)
 - **Breaking**: `SummarizingCompactor` is now an `AsyncCompactor` (use `append_async()`, accepts guards)
 - **Breaking**: Table `sessions` renamed to `conv_sessions` (avoids conflicts with agent tables)
-- **Breaking**: Table `embeddings` renamed to `fact_embeddings` (avoids conflicts with agent tables)
-- **Breaking**: Migration 006 drops legacy `fact_embeddings` table — embeddings now stored in
-  format-specific tables (`embeddings_{dim}_{format}`, e.g., `embeddings_384_f16`)
+- **Breaking**: Migration 006 replaces `fact_embeddings` table with format-specific tables
+  (`embeddings_{prefix}_{dim}_{format}`, e.g., `embeddings_384_f16`). Existing embeddings
+  must be regenerated after migration.
 - **Breaking**: `Conversation.__init__` now requires `lg: Logger` as the first parameter
 - **Breaking**: `FactClient.delete()` now returns `DeleteResult` instead of `bool`, accepts
   `int | Iterable[int]`, and automatically cleans up associated embeddings

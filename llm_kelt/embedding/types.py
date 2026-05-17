@@ -1,5 +1,6 @@
 """Core types for embedding quantization."""
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 
@@ -83,6 +84,14 @@ class Config:
     format: QuantizationFormat = QuantizationFormat.F16
     dimensions: int = 384
     prefix: str | None = None
+
+    _PREFIX_PATTERN: re.Pattern[str] = re.compile(r"^[A-Za-z0-9_]+$")
+
+    def __post_init__(self) -> None:
+        if self.dimensions <= 0:
+            raise ValueError(f"dimensions must be positive, got {self.dimensions}")
+        if self.prefix is not None and not self._PREFIX_PATTERN.match(self.prefix):
+            raise ValueError(f"prefix must be alphanumeric/underscore, got {self.prefix!r}")
 
     @property
     def table_name(self) -> str:

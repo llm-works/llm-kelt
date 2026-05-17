@@ -42,11 +42,8 @@ class Float16Store(StoreBase):
         with self._session_factory() as session:
             conn = session.connection()
 
-            if table_exists(conn, self.table_name):
-                self._table_ensured = True
-                return
-
-            self._model.__table__.create(conn, checkfirst=True)
+            if not table_exists(conn, self.table_name):
+                self._model.__table__.create(conn, checkfirst=True)
 
             hnsw_idx = f"idx_{self.table_name}_hnsw"
             if not index_exists(conn, hnsw_idx):
