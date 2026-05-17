@@ -3,6 +3,7 @@
 import re
 from dataclasses import dataclass
 from enum import Enum
+from typing import ClassVar
 
 
 class QuantizationFormat(Enum):
@@ -85,7 +86,7 @@ class Config:
     dimensions: int = 384
     prefix: str | None = None
 
-    _PREFIX_PATTERN: re.Pattern[str] = re.compile(r"^[A-Za-z0-9_]+$")
+    _PREFIX_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_]+$")
 
     def __post_init__(self) -> None:
         if self.dimensions <= 0:
