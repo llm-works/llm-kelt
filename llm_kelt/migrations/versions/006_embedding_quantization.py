@@ -22,10 +22,11 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.drop_index("idx_fact_embeddings_vector_1536", table_name="fact_embeddings")
-    op.drop_index("idx_fact_embedding_model", table_name="fact_embeddings")
-    op.drop_index("idx_fact_embedding_entity", table_name="fact_embeddings")
-    op.drop_table("fact_embeddings")
+    # Use IF EXISTS - indexes/table may not exist on all deployments
+    op.execute("DROP INDEX IF EXISTS idx_fact_embeddings_vector_1536")
+    op.execute("DROP INDEX IF EXISTS idx_fact_embedding_model")
+    op.execute("DROP INDEX IF EXISTS idx_fact_embedding_entity")
+    op.execute("DROP TABLE IF EXISTS fact_embeddings")
 
 
 def downgrade() -> None:
