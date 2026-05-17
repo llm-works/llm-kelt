@@ -1,0 +1,34 @@
+"""Drop legacy embeddings table in favor of quantized format-specific tables.
+
+Revision ID: 006
+Revises: 005
+Create Date: 2025-05-17
+
+New embedding tables are created on-demand by the application:
+- embeddings_{dim}_f32 (pgvector vector)
+- embeddings_{dim}_f16 (pgvector halfvec)
+- embeddings_{dim}_i8 (bytea + scalar quantization)
+- embeddings_{dim}_i4 (bytea + packed 4-bit quantization)
+"""
+
+from collections.abc import Sequence
+
+from alembic import op
+
+revision: str = "006"
+down_revision: str = "005"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+def upgrade() -> None:
+    op.drop_index("idx_embeddings_vector_1536", table_name="embeddings")
+    op.drop_index("idx_embedding_model", table_name="embeddings")
+    op.drop_index("idx_embedding_entity", table_name="embeddings")
+    op.drop_table("embeddings")
+
+
+def downgrade() -> None:
+    raise NotImplementedError(
+        "Downgrade not supported - embedding data would be lost. Restore from backup if needed."
+    )

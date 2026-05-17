@@ -130,6 +130,14 @@ class EmbeddingStoreProtocol(Protocol):
         """
         ...
 
+    def ensure_table(self) -> None:
+        """Ensure the embedding table exists (on-demand creation).
+
+        Creates the table if it doesn't exist, including any format-specific
+        indexes (e.g., HNSW for pgvector types).
+        """
+        ...
+
 
 @contextmanager
 def ensure_session(session: Any | None, session_factory: Callable[[], Any]):

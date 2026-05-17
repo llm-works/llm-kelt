@@ -56,6 +56,11 @@ class EmbeddingRouter:
         """Get the store for a specific format."""
         return self._stores[fmt]
 
+    def ensure_tables(self, config: EmbeddingConfig) -> None:
+        """Ensure tables exist for all formats in config."""
+        for fmt in config.store_formats:
+            self._stores[fmt].ensure_table()
+
     def store(
         self,
         entity_type: str,

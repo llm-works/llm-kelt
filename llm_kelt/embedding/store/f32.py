@@ -16,6 +16,7 @@ from sqlalchemy import (
     delete,
     func,
     select,
+    text,
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
@@ -76,6 +77,31 @@ class Float32Store:
         self._session_factory = session_factory
         self._dimensions = dimensions
         self._model = make_f32_model(dimensions)
+        self._table_ensured = False
+
+    def ensure_table(self) -> None:
+        """Create table and HNSW index if they don't exist."""
+        if self._table_ensured:
+            return
+
+        with self._session_factory() as session:
+            conn = session.connection()
+            self._model.__table__.create(conn, checkfirst=True)
+
+            hnsw_idx = f"idx_{self.table_name}_hnsw"
+            check_idx = text("SELECT 1 FROM pg_indexes WHERE indexname = :idx_name").bindparams(
+                idx_name=hnsw_idx
+            )
+            if not conn.execute(check_idx).scalar():
+                create_hnsw = text(
+                    f"CREATE INDEX {hnsw_idx} ON {self.table_name} "
+                    f"USING hnsw (embedding vector_cosine_ops) "
+                    f"WITH (m = 16, ef_construction = 64)"
+                )
+                conn.execute(create_hnsw)
+
+            session.commit()
+        self._table_ensured = True
 
     @property
     def dimensions(self) -> int:

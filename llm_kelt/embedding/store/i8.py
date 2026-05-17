@@ -83,6 +83,18 @@ class Int8Store:
         self._session_factory = session_factory
         self._dimensions = dimensions
         self._model = make_i8_model(dimensions)
+        self._table_ensured = False
+
+    def ensure_table(self) -> None:
+        """Create table if it doesn't exist."""
+        if self._table_ensured:
+            return
+
+        with self._session_factory() as session:
+            conn = session.connection()
+            self._model.__table__.create(conn, checkfirst=True)
+            session.commit()
+        self._table_ensured = True
 
     @property
     def dimensions(self) -> int:
