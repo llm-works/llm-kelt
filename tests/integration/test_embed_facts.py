@@ -262,3 +262,69 @@ class TestPublicEmbeddingStore:
         fact_results = store.search([0.5, 0.5, 0.5], "atomic.fact", "test-model")
         assert len(fact_results) == 1
         assert fact_results[0][0] == str(fact_id)
+
+
+class TestCustomTablePrefix:
+    """Test custom table prefix for tenant/application isolation."""
+
+    def test_prefix_creates_separate_table(self, database, clean_tables):
+        """Test that prefix creates a separate table."""
+        from llm_kelt.embedding import Config, Factory, QuantizationFormat
+
+        factory = Factory()
+
+        # Create two clients with different prefixes
+        config_a = Config(
+            context_key="_test",
+            format=QuantizationFormat.F32,
+            dimensions=3,
+            prefix="tenant_a",
+        )
+        config_b = Config(
+            context_key="_test",
+            format=QuantizationFormat.F32,
+            dimensions=3,
+            prefix="tenant_b",
+        )
+
+        client_a = factory.create(database.session, config_a)
+        client_b = factory.create(database.session, config_b)
+
+        # Verify table names
+        assert config_a.table_name == "embeddings_tenant_a_3_f32"
+        assert config_b.table_name == "embeddings_tenant_b_3_f32"
+
+        # Store in tenant_a
+        client_a.store("doc", "1", [1.0, 0.0, 0.0], "test-model")
+
+        # tenant_b should not see it
+        assert client_a.exists("doc", "1", "test-model")
+        assert not client_b.exists("doc", "1", "test-model")
+
+        # Store in tenant_b
+        client_b.store("doc", "1", [0.0, 1.0, 0.0], "test-model")
+
+        # Both should exist independently
+        emb_a = client_a.get("doc", "1", "test-model")
+        emb_b = client_b.get("doc", "1", "test-model")
+        assert emb_a == [1.0, 0.0, 0.0]
+        assert emb_b == [0.0, 1.0, 0.0]
+
+    def test_no_prefix_uses_default_table(self, database, clean_tables):
+        """Test that no prefix uses default table naming."""
+        from llm_kelt.embedding import Config, QuantizationFormat
+
+        config = Config(
+            context_key="_test",
+            format=QuantizationFormat.F16,
+            dimensions=384,
+        )
+        assert config.table_name == "embeddings_384_f16"
+
+        config_with_prefix = Config(
+            context_key="_test",
+            format=QuantizationFormat.F16,
+            dimensions=384,
+            prefix="custom",
+        )
+        assert config_with_prefix.table_name == "embeddings_custom_384_f16"

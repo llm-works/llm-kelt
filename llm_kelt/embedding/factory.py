@@ -16,40 +16,41 @@ if TYPE_CHECKING:
     from .client import Client
 
 
-_model_cache: dict[tuple[QuantizationFormat, int], type] = {}
+_model_cache: dict[str, type] = {}
 
 
 class ModelCache:
     """Cache for dynamically-created embedding model classes.
 
-    Embedding models are created on-demand for specific (format, dimensions)
-    combinations. Uses a module-level cache shared across all Factory instances
-    to prevent duplicate index/constraint accumulation.
+    Embedding models are created on-demand for specific table names (derived from
+    format, dimensions, and optional prefix). Uses a module-level cache shared
+    across all Factory instances to prevent duplicate index/constraint accumulation.
     """
 
-    def get_or_create(self, fmt: QuantizationFormat, dimensions: int) -> type:
+    def get_or_create(self, config: Config) -> type:
         """Get cached model or create and cache a new one."""
-        key = (fmt, dimensions)
-        if key not in _model_cache:
-            _model_cache[key] = self._create_model(fmt, dimensions)
-        return _model_cache[key]
+        table_name = config.table_name
+        if table_name not in _model_cache:
+            _model_cache[table_name] = self._create_model(config)
+        return _model_cache[table_name]
 
-    def _create_model(self, fmt: QuantizationFormat, dimensions: int) -> type:
-        """Create a new model class for the given format and dimensions."""
-        match fmt:
+    def _create_model(self, config: Config) -> type:
+        """Create a new model class for the given config."""
+        match config.format:
             case QuantizationFormat.F32:
-                return self._create_f32_model(dimensions)
+                return self._create_f32_model(config)
             case QuantizationFormat.F16:
-                return self._create_f16_model(dimensions)
+                return self._create_f16_model(config)
             case QuantizationFormat.I8:
-                return self._create_i8_model(dimensions)
+                return self._create_i8_model(config)
             case QuantizationFormat.I4:
-                return self._create_i4_model(dimensions)
+                return self._create_i4_model(config)
 
-    def _create_f32_model(self, dimensions: int) -> type:
+    def _create_f32_model(self, config: Config) -> type:
         from pgvector.sqlalchemy import Vector
 
-        table_name = f"embeddings_{dimensions}_f32"
+        table_name = config.table_name
+        dimensions = config.dimensions
 
         class EmbeddingF32(EmbeddingBase):
             __tablename__ = table_name
@@ -70,14 +71,15 @@ class ModelCache:
                 DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
             )
 
-        EmbeddingF32.__name__ = f"EmbeddingF32_{dimensions}"
-        EmbeddingF32.__qualname__ = f"EmbeddingF32_{dimensions}"
+        EmbeddingF32.__name__ = f"EmbeddingF32_{table_name}"
+        EmbeddingF32.__qualname__ = f"EmbeddingF32_{table_name}"
         return EmbeddingF32
 
-    def _create_f16_model(self, dimensions: int) -> type:
+    def _create_f16_model(self, config: Config) -> type:
         from pgvector.sqlalchemy import HALFVEC
 
-        table_name = f"embeddings_{dimensions}_f16"
+        table_name = config.table_name
+        dimensions = config.dimensions
 
         class EmbeddingF16(EmbeddingBase):
             __tablename__ = table_name
@@ -98,12 +100,12 @@ class ModelCache:
                 DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
             )
 
-        EmbeddingF16.__name__ = f"EmbeddingF16_{dimensions}"
-        EmbeddingF16.__qualname__ = f"EmbeddingF16_{dimensions}"
+        EmbeddingF16.__name__ = f"EmbeddingF16_{table_name}"
+        EmbeddingF16.__qualname__ = f"EmbeddingF16_{table_name}"
         return EmbeddingF16
 
-    def _create_i8_model(self, dimensions: int) -> type:
-        table_name = f"embeddings_{dimensions}_i8"
+    def _create_i8_model(self, config: Config) -> type:
+        table_name = config.table_name
 
         class EmbeddingI8(EmbeddingBase):
             __tablename__ = table_name
@@ -126,12 +128,12 @@ class ModelCache:
                 DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
             )
 
-        EmbeddingI8.__name__ = f"EmbeddingI8_{dimensions}"
-        EmbeddingI8.__qualname__ = f"EmbeddingI8_{dimensions}"
+        EmbeddingI8.__name__ = f"EmbeddingI8_{table_name}"
+        EmbeddingI8.__qualname__ = f"EmbeddingI8_{table_name}"
         return EmbeddingI8
 
-    def _create_i4_model(self, dimensions: int) -> type:
-        table_name = f"embeddings_{dimensions}_i4"
+    def _create_i4_model(self, config: Config) -> type:
+        table_name = config.table_name
 
         class EmbeddingI4(EmbeddingBase):
             __tablename__ = table_name
@@ -154,8 +156,8 @@ class ModelCache:
                 DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
             )
 
-        EmbeddingI4.__name__ = f"EmbeddingI4_{dimensions}"
-        EmbeddingI4.__qualname__ = f"EmbeddingI4_{dimensions}"
+        EmbeddingI4.__name__ = f"EmbeddingI4_{table_name}"
+        EmbeddingI4.__qualname__ = f"EmbeddingI4_{table_name}"
         return EmbeddingI4
 
 
@@ -190,7 +192,7 @@ class Factory:
 
     def _create_store(self, session_factory: Callable[[], Any], config: Config) -> Any:
         """Create a store for the given config."""
-        model = self._model_cache.get_or_create(config.format, config.dimensions)
+        model = self._model_cache.get_or_create(config)
 
         match config.format:
             case QuantizationFormat.F32:

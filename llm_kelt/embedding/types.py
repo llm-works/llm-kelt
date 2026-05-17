@@ -69,13 +69,24 @@ class Config:
 
     Each config defines ONE format and dimension. Want multiple formats?
     Create multiple clients with different configs.
+
+    Args:
+        context_key: Context key for isolation (used by adapters, not table naming).
+        format: Quantization format (F32, F16, I8, I4).
+        dimensions: Vector dimensions.
+        prefix: Optional table prefix for custom tables. Results in
+            embeddings_{prefix}_{dimensions}_{format}. If None, uses
+            embeddings_{dimensions}_{format}.
     """
 
     context_key: str
     format: QuantizationFormat = QuantizationFormat.F16
     dimensions: int = 384
+    prefix: str | None = None
 
     @property
     def table_name(self) -> str:
         """Get table name for this config."""
-        return self.format.table_name(self.dimensions)
+        if self.prefix:
+            return f"embeddings_{self.prefix}_{self.dimensions}_{self.format.value}"
+        return f"embeddings_{self.dimensions}_{self.format.value}"
