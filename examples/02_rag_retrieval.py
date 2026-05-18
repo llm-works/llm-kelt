@@ -123,8 +123,8 @@ async def embed_facts(lg: Logger, kelt: Client, config: Config) -> EmbeddingClie
         )
         return embedder
     except (ConnectError, ConnectTimeout, OSError):
-        # Server not running - fall back to synthetic embeddings
-        pass
+        # Server not running - close client before fallback
+        await embedder.aclose()
 
     print(f"  {MUTED}[Skipped] Embedding server not available{RESET}")
     print(f"  {MUTED}Using synthetic embeddings for demo...{RESET}")

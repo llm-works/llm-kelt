@@ -36,7 +36,7 @@ def _get_embeddings_client(database):
         format=QuantizationFormat.F16,
         dimensions=384,
     )
-    return StoreClient(database.session, config)
+    return StoreClient(config, database.session)
 
 
 def _create_embedding_adapter(lg: Any, app_config: Any):
