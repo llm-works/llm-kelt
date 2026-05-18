@@ -13,7 +13,7 @@ from .store.base import EmbeddingBase
 from .types import Config, QuantizationFormat
 
 if TYPE_CHECKING:
-    from .client import Client
+    from .client import StoreClient
 
 
 _model_cache: dict[str, type] = {}
@@ -175,7 +175,7 @@ class Factory:
     def __init__(self) -> None:
         self._model_cache = ModelCache()
 
-    def create(self, session_factory: Callable[[], Any], config: Config) -> Client:
+    def create(self, session_factory: Callable[[], Any], config: Config) -> StoreClient:
         """Create an embedding client.
 
         Args:
@@ -185,10 +185,10 @@ class Factory:
         Returns:
             Configured embedding client.
         """
-        from .client import Client as ClientImpl
+        from .client import StoreClient
 
         store = self._create_store(session_factory, config)
-        return ClientImpl(config, store)
+        return StoreClient(config, store)
 
     def _create_store(self, session_factory: Callable[[], Any], config: Config) -> Any:
         """Create a store for the given config."""

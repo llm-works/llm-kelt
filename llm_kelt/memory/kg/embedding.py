@@ -1,4 +1,4 @@
-"""Entity embedding adapter - uses embedding.Client for entity vectors."""
+"""Entity embedding adapter - uses embedding.StoreClient for entity vectors."""
 
 from __future__ import annotations
 
@@ -12,8 +12,9 @@ from .models import Entity
 from .store import build_scope_filter
 
 if TYPE_CHECKING:
-    from llm_kelt.embedding import Client as EmbeddingClient
-    from llm_kelt.inference.embedder import Embedder
+    from llm_infer.client import EmbeddingClient
+
+    from llm_kelt.embedding import StoreClient as EmbeddingStoreClient
 
 
 class EntityEmbeddingAdapter:
@@ -42,15 +43,15 @@ class EntityEmbeddingAdapter:
     def __init__(
         self,
         session_factory: Callable[[], Any],
-        embeddings: EmbeddingClient,
-        embedder: Embedder | None = None,
+        embeddings: EmbeddingStoreClient,
+        embedder: EmbeddingClient | None = None,
     ) -> None:
         """Initialize EntityEmbeddingAdapter.
 
         Args:
             session_factory: Callable that returns a context manager for database sessions.
-            embeddings: EmbeddingClient for vector operations.
-            embedder: Optional Embedder for generating embeddings.
+            embeddings: EmbeddingStoreClient for vector storage operations.
+            embedder: Optional EmbeddingClient for generating embeddings via HTTP.
         """
         self._session_factory = session_factory
         self._embeddings = embeddings

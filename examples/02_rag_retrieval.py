@@ -41,13 +41,14 @@ from _helpers import (
 from appinfra.config import Config
 from appinfra.log import LogConfig, Logger, LoggerFactory
 from httpx import ConnectError, ConnectTimeout
+from llm_infer.client import EmbeddingClient
 from llm_infer.client import Factory as LLMClientFactory
+from llm_infer.client.backends import RetryConfig
 
 from llm_kelt import Client, ClientFactory
 from llm_kelt.inference import (
     ContextBuilder,
     ContextQuery,
-    Embedder,
     RAGArgs,
     embed_missing_facts,
 )
@@ -98,12 +99,15 @@ def populate_facts(kelt: Client):
     )
 
 
-async def embed_facts(lg: Logger, kelt: Client, config: Config) -> Embedder | None:
+async def embed_facts(lg: Logger, kelt: Client, config: Config) -> EmbeddingClient | None:
     """Embed facts for semantic search. Returns embedder if successful."""
     print(f"\n{H2}▶ Embedding Facts for Semantic Search{RESET}")
 
     embedding_config = config.embedding
-    embedder = Embedder(base_url=embedding_config.base_url, model=embedding_config.model_name)
+    retry = RetryConfig(timeout=120.0)
+    embedder = EmbeddingClient(
+        lg, base_url=embedding_config.base_url, model=embedding_config.model_name, retry=retry
+    )
 
     try:
         print(f"  {MUTED}Connecting to embedding server...{RESET}")
@@ -119,8 +123,8 @@ async def embed_facts(lg: Logger, kelt: Client, config: Config) -> Embedder | No
         )
         return embedder
     except (ConnectError, ConnectTimeout, OSError):
-        # Server not running - fall back to synthetic embeddings
-        pass
+        # Server not running - close client before fallback
+        await embedder.aclose()
 
     print(f"  {MUTED}[Skipped] Embedding server not available{RESET}")
     print(f"  {MUTED}Using synthetic embeddings for demo...{RESET}")
@@ -145,7 +149,7 @@ async def embed_facts(lg: Logger, kelt: Client, config: Config) -> Embedder | No
     return None
 
 
-async def demo_similarity_search(kelt: Client, embedder: Embedder):
+async def demo_similarity_search(kelt: Client, embedder: EmbeddingClient):
     """Demonstrate similarity search with embeddings."""
     print(f"\n{H2}▶ Similarity Search{RESET}")
     print(f"  {MUTED}Finding facts similar to a query using vector similarity{RESET}")
@@ -182,7 +186,7 @@ async def demo_similarity_search(kelt: Client, embedder: Embedder):
         )
 
 
-async def demo_rag_vs_static(kelt: Client, config: Config, embedder: Embedder | None):
+async def demo_rag_vs_static(kelt: Client, config: Config, embedder: EmbeddingClient | None):
     """Demonstrate RAG vs static context injection - the key comparison."""
     print(f"\n{H2}▶ RAG vs Static Context Injection{RESET}")
     print(f"  {MUTED}Comparing which facts get included in the LLM prompt{RESET}")
@@ -223,7 +227,9 @@ async def demo_rag_vs_static(kelt: Client, config: Config, embedder: Embedder | 
     )
 
 
-async def demo_rag_query(kelt: Client, config: Config, lg: Logger, embedder: Embedder | None):
+async def demo_rag_query(
+    kelt: Client, config: Config, lg: Logger, embedder: EmbeddingClient | None
+):
     """Demonstrate full RAG query with LLM."""
     print(f"\n{H2}▶ Full RAG Query (LLM + Context){RESET}")
 
@@ -289,7 +295,7 @@ async def main():
     await demo_rag_query(kelt, config, lg, embedder)
 
     if embedder:
-        await embedder.close_async()
+        await embedder.aclose()
 
     print(f"\n{H1}{'━' * 50}{RESET}")
     print(f"{OK}✓ Done!{RESET} Next: {CMD}python examples/03_training_export.py{RESET}")

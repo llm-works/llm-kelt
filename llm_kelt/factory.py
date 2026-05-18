@@ -5,12 +5,12 @@ from __future__ import annotations
 from appinfra.db.pg import PG
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
-from llm_infer.client import ChatClient
+from llm_infer.client import ChatClient, EmbeddingClient
 from llm_infer.client import Factory as LLMClientFactory
+from llm_infer.client.backends import RetryConfig
 
 from .client import Client
 from .core.database import Database
-from .inference.embedder import Embedder
 from .memory.isolation import ClientContext
 
 
@@ -42,12 +42,18 @@ class ClientFactory:
         """
         self._lg = lg
 
-    def _create_embedder(self, config: DotDict) -> Embedder | None:
-        """Create Embedder from config if embedding section exists."""
+    def _create_embedder(self, config: DotDict) -> EmbeddingClient | None:
+        """Create EmbeddingClient from config if embedding section exists."""
         embed_cfg = getattr(config, "embedding", None)
         if embed_cfg is None:
             return None
-        return Embedder(base_url=embed_cfg.base_url, model=embed_cfg.model_name)
+        retry = RetryConfig(base=1.0, factor=2.0, max_delay=30.0, timeout=120.0)
+        return EmbeddingClient(
+            self._lg,
+            base_url=embed_cfg.base_url,
+            model=embed_cfg.model_name,
+            retry=retry,
+        )
 
     def _create_llm_client(self, config: DotDict) -> ChatClient | None:
         """Create LLM client from config if llm section exists."""
@@ -109,7 +115,7 @@ class ClientFactory:
         self,
         context: ClientContext,
         database: Database,
-        embedder: Embedder | None = None,
+        embedder: EmbeddingClient | None = None,
         llm_client: ChatClient | None = None,
         kelt_config: DotDict | None = None,
         training_config: DotDict | None = None,
@@ -123,7 +129,7 @@ class ClientFactory:
         Args:
             context: ClientContext for data partitioning
             database: Existing Database instance
-            embedder: Optional existing Embedder instance
+            embedder: Optional existing EmbeddingClient instance
             llm_client: Optional existing LLM client instance
             kelt_config: Optional kelt settings (config.kelt section)
             training_config: Optional training settings (config.training section)

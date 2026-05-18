@@ -3,9 +3,9 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from llm_infer.client import EmbeddingResult
 
 from llm_kelt.inference.embed_facts import embed_missing_facts
-from llm_kelt.inference.embedder import EmbeddingResult
 
 
 class TestEmbedMissingFactsIntegration:
@@ -180,11 +180,11 @@ class TestPublicEmbeddingStore:
 
     def test_embeddings_property_exists(self, kelt_client):
         """Test that embeddings is publicly accessible."""
-        from llm_kelt import EmbeddingClient
+        from llm_kelt import EmbeddingStoreClient
 
         store = kelt_client.embeddings
         assert store is not None
-        assert isinstance(store, EmbeddingClient)
+        assert isinstance(store, EmbeddingStoreClient)
 
     def test_store_custom_entity_type(self, kelt_client, clean_tables):
         """Test storing embeddings for a custom entity type."""

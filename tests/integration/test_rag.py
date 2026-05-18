@@ -3,10 +3,9 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from llm_infer.client import ChatResponse
+from llm_infer.client import ChatResponse, EmbeddingResult
 
 from llm_kelt.inference.context import ContextBuilder
-from llm_kelt.inference.embedder import EmbeddingResult
 from llm_kelt.inference.query import ContextQuery, RAGArgs
 
 

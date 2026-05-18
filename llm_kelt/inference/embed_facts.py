@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from appinfra.log import Logger
+from llm_infer.client import EmbeddingClient, EmbeddingResult
 
 from ..memory.atomic.embedding import EmbeddingAdapter
 from ..memory.atomic.models import Fact
-from .embedder import Embedder, EmbeddingResult
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -47,7 +47,7 @@ def _store_embeddings(
 async def _embed_individually(
     lg: Logger,
     facts: "Sequence[Fact]",
-    embedder: Embedder,
+    embedder: EmbeddingClient,
     embedding_adapter: EmbeddingAdapter,
     model_name: str,
 ) -> tuple[int, int]:
@@ -71,7 +71,7 @@ async def _embed_individually(
 async def _process_batch(
     lg: Logger,
     facts: "Sequence[Fact]",
-    embedder: Embedder,
+    embedder: EmbeddingClient,
     embedding_adapter: EmbeddingAdapter,
     model_name: str,
 ) -> tuple[int, int]:
@@ -89,7 +89,7 @@ async def _process_batch(
 
 async def embed_missing_facts(
     lg: Logger,
-    embedder: Embedder,
+    embedder: EmbeddingClient,
     embedding_adapter: EmbeddingAdapter,
     batch_size: int = 50,
 ) -> EmbedFactsResult:
@@ -103,7 +103,7 @@ async def embed_missing_facts(
 
     Args:
         lg: Logger instance.
-        embedder: Embedder client for generating embeddings.
+        embedder: EmbeddingClient client for generating embeddings.
         embedding_adapter: EmbeddingAdapter for storing embeddings.
         batch_size: Number of facts to embed per batch.
 

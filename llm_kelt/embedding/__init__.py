@@ -1,6 +1,6 @@
 """Embedding quantization framework - multi-format vector storage."""
 
-from .client import Client
+from .client import StoreClient
 from .factory import Factory, get_factory
 from .quantize import (
     dequantize,
@@ -14,7 +14,7 @@ from .types import Calibration, Config, QuantizationFormat, QuantizedEmbedding
 
 __all__ = [
     # Client and Factory
-    "Client",
+    "StoreClient",
     "Factory",
     "get_factory",
     # Types

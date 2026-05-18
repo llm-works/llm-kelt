@@ -71,13 +71,13 @@ system_prompt = builder.build_system_prompt(
 RAG (Retrieval-Augmented Generation) finds facts relevant to each query using semantic similarity.
 
 ```python
-from llm_infer.client import LLMClient
+from llm_infer.client import EmbeddingClient, LLMClient
 from llm_kelt.inference import (
-    ContextBuilder, ContextQuery, Embedder, RAGArgs, embed_missing_facts
+    ContextBuilder, ContextQuery, RAGArgs, embed_missing_facts
 )
 
-# 1. Embed facts for semantic search (model name discovered from server)
-embedder = Embedder(base_url="http://localhost:8001/v1")
+# 1. Embed facts for semantic search
+embedder = EmbeddingClient(logger, base_url="http://localhost:8001/v1")
 await embed_missing_facts(logger, embedder, kelt.facts)
 
 # 2. Create context-aware query interface
@@ -102,7 +102,7 @@ response = await query.ask(
 )
 
 # Clean up
-await embedder.close_async()
+await embedder.aclose()
 ```
 
 ### Training Data Export
@@ -355,7 +355,6 @@ See the [`examples/`](examples/) directory for complete working examples:
 |----------------|-------------|
 | `ContextBuilder` | Build system prompts with injected facts |
 | `ContextQuery` | High-level context-aware query interface |
-| `Embedder` | Generate embeddings via OpenAI-compatible API |
 | `RAGArgs` | Configuration for RAG retrieval |
 | `embed_missing_facts` | Batch embed facts without embeddings |
 

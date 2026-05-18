@@ -1,4 +1,4 @@
-"""Atomic memory embedding adapter - uses embedding.Client."""
+"""Atomic memory embedding adapter - uses embedding.StoreClient."""
 
 from __future__ import annotations
 
@@ -12,13 +12,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from llm_kelt.core.types import ScoredEntity
-from llm_kelt.embedding import Client as EmbeddingClient
+from llm_kelt.embedding import StoreClient as EmbeddingStoreClient
 from llm_kelt.memory.isolation import build_context_filter
 
 from .models import Fact
 
 if TYPE_CHECKING:
-    from llm_kelt.inference.embedder import Embedder
+    from llm_infer.client import EmbeddingClient
 
 
 class EmbeddingFilter:
@@ -100,7 +100,7 @@ class EmbeddingAdapter:
     """
     Embedding operations for atomic facts.
 
-    Provides a fact-specific interface on top of EmbeddingClient.
+    Provides a fact-specific interface on top of EmbeddingStoreClient.
     Uses entity_type "atomic.fact" to namespace embeddings.
 
     Example:
@@ -122,8 +122,8 @@ class EmbeddingAdapter:
         self,
         session_factory: Callable[[], Any],
         context_key: str | None,
-        embeddings: EmbeddingClient,
-        embedder: Embedder | None = None,
+        embeddings: EmbeddingStoreClient,
+        embedder: EmbeddingClient | None = None,
     ) -> None:
         """
         Initialize EmbeddingAdapter.
@@ -131,8 +131,8 @@ class EmbeddingAdapter:
         Args:
             session_factory: Callable that returns a context manager for database sessions.
             context_key: Profile ID (32-char hash) to scope operations to.
-            embeddings: EmbeddingClient for vector operations.
-            embedder: Optional Embedder for generating embeddings.
+            embeddings: EmbeddingStoreClient for vector storage operations.
+            embedder: Optional EmbeddingClient for generating embeddings via HTTP.
         """
         self._session_factory = session_factory
         self._context_key = context_key
