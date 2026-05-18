@@ -355,7 +355,6 @@ See the [`examples/`](examples/) directory for complete working examples:
 |----------------|-------------|
 | `ContextBuilder` | Build system prompts with injected facts |
 | `ContextQuery` | High-level context-aware query interface |
-| `Embedder` | Generate embeddings via OpenAI-compatible API |
 | `RAGArgs` | Configuration for RAG retrieval |
 | `embed_missing_facts` | Batch embed facts without embeddings |
 
