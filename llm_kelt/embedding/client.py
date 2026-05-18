@@ -34,7 +34,7 @@ def _validate_embedding(embedding: list[float] | None) -> None:
             raise ValidationError(f"embedding values must be finite, got {val} at index {i}")
 
 
-class Client:
+class StoreClient:
     """High-level client for embedding storage and search.
 
     Each client uses ONE format and ONE dimension. Want multiple formats?

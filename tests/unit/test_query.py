@@ -3,11 +3,10 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from llm_infer.client import ChatResponse
+from llm_infer.client import ChatResponse, EmbeddingResult
 
 from llm_kelt.conversation import Conversation, Role
 from llm_kelt.core.types import ScoredEntity
-from llm_kelt.inference.embedder import EmbeddingResult
 from llm_kelt.inference.query import ContextQuery, RAGArgs
 from llm_kelt.memory.atomic import Fact
 

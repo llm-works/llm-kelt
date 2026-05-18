@@ -29,14 +29,14 @@ def _get_database(lg: Any, app_config: Any):
 
 def _get_embeddings_client(database):
     """Create embeddings client from database."""
-    from llm_kelt.embedding import Client, Config, QuantizationFormat
+    from llm_kelt.embedding import Config, QuantizationFormat, StoreClient
 
     config = Config(
         context_key="_cli",
         format=QuantizationFormat.F16,
         dimensions=384,
     )
-    return Client(database.session, config)
+    return StoreClient(database.session, config)
 
 
 def _create_embedding_adapter(lg: Any, app_config: Any):

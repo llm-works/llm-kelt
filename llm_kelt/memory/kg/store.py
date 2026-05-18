@@ -16,9 +16,9 @@ from .models import Entity, EntityAlias, EntityRef, EntityRelationship, FactEnti
 
 if TYPE_CHECKING:
     from appinfra.log import Logger
+    from llm_infer.client import EmbeddingClient
 
-    from llm_kelt.embedding import Client as EmbeddingClient
-    from llm_kelt.inference.embedder import Embedder
+    from llm_kelt.embedding import StoreClient as EmbeddingStoreClient
 
     from .embedding import EntityEmbeddingAdapter
 
@@ -738,8 +738,8 @@ class KGStore:
         self,
         lg: Logger,
         session_factory: SessionFactory,
-        embedder: Embedder | None = None,
-        embeddings: EmbeddingClient | None = None,
+        embedder: EmbeddingClient | None = None,
+        embeddings: EmbeddingStoreClient | None = None,
     ) -> None:
 
         self._lg = lg

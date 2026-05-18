@@ -10,8 +10,9 @@ from ..conversation.types import Role
 from .context import ContextBuilder
 
 if TYPE_CHECKING:
+    from llm_infer.client import EmbeddingClient
+
     from ..memory.atomic.embedding import EmbeddingAdapter
-    from .embedder import Embedder
 
 
 @dataclass
@@ -49,7 +50,7 @@ class ContextQuery:
         context_builder: ContextBuilder,
         base_system_prompt: str = "",
         temperature: float = 0.7,
-        embedder: "Embedder | None" = None,
+        embedder: "EmbeddingClient | None" = None,
         embedding_adapter: "EmbeddingAdapter | None" = None,
     ):
         """

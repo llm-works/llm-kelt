@@ -62,9 +62,9 @@ from .core.errors import (
     ValidationError,
 )
 from .core.schema import SchemaState, SchemaStatus
-from .embedding import Client as EmbeddingClient
 from .embedding import Config as EmbeddingConfig
 from .embedding import QuantizationFormat
+from .embedding import StoreClient as EmbeddingStoreClient
 from .factory import ClientFactory
 from .memory import ClientContext
 from .memory.kg import KGStore
@@ -72,7 +72,7 @@ from .memory.kg import KGStore
 __all__ = [
     "Client",
     "ClientFactory",
-    "EmbeddingClient",
+    "EmbeddingStoreClient",
     "EmbeddingConfig",
     "KGStore",
     "QuantizationFormat",

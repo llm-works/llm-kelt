@@ -6,17 +6,16 @@ from typing import TYPE_CHECKING, Any
 
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
-from llm_infer.client import ChatClient
+from llm_infer.client import ChatClient, EmbeddingClient
 
 from .core.content import ContentStore
 from .core.database import Database
 from .core.errors import SchemaVersionError
 from .core.schema import SchemaManager, SchemaState, SchemaStatus
-from .embedding import Client as EmbeddingClient
 from .embedding import Config as EmbeddingConfig
 from .embedding import Factory as EmbeddingFactory
+from .embedding import StoreClient as EmbeddingStoreClient
 from .inference.context import ContextBuilder
-from .inference.embedder import Embedder
 from .inference.query import ContextQuery
 from .memory import atomic
 from .memory.isolation import ClientContext
@@ -84,12 +83,12 @@ class Client:
         lg: Logger,
         database: Database,
         context: ClientContext,
-        embedder: Embedder | None = None,
+        embedder: EmbeddingClient | None = None,
         llm_client: ChatClient | None = None,
         kelt_config: DotDict | None = None,
         training_config: DotDict | None = None,
         ensure_schema: bool = True,
-        embeddings: EmbeddingClient | None = None,
+        embeddings: EmbeddingStoreClient | None = None,
     ) -> None:
         """
         Initialize Client with isolation context.
@@ -98,12 +97,12 @@ class Client:
             database: Database instance
             context: ClientContext for data partitioning (any string format)
             lg: Optional logger instance
-            embedder: Optional embedder for generating embeddings
+            embedder: Optional EmbeddingClient for generating embeddings via HTTP.
             llm_client: Optional LLM client for context-aware queries
             kelt_config: Optional kelt settings (config.kelt section)
             training_config: Optional training settings (config.training section)
             ensure_schema: If True (default), auto-migrate schema on init
-            embeddings: Optional EmbeddingClient. If None, creates default (F16, 384 dims).
+            embeddings: Optional EmbeddingStoreClient. If None, creates default (F16, 384 dims).
         """
         self._db = database
         self._context = context
@@ -368,12 +367,12 @@ class Client:
         return self._llm_client
 
     @property
-    def embedder(self) -> Embedder | None:
+    def embedder(self) -> EmbeddingClient | None:
         """Access underlying embedder (None if not configured)."""
         return self._embedder
 
     @property
-    def embeddings(self) -> EmbeddingClient:
+    def embeddings(self) -> EmbeddingStoreClient:
         """Access embeddings client for custom entity types.
 
         Provides entity-type agnostic vector storage and similarity search.

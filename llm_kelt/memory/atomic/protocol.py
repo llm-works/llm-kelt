@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from appinfra.log import Logger
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
-from llm_kelt.embedding import Client as EmbeddingClient
+from llm_kelt.embedding import StoreClient as EmbeddingStoreClient
 
 from .clients import (
     AssertionsClient,
@@ -23,7 +23,7 @@ from .embedding import EmbeddingAdapter
 from .relationships import RelationshipsClient
 
 if TYPE_CHECKING:
-    from llm_kelt.inference.embedder import Embedder
+    from llm_infer.client import EmbeddingClient
 
 
 class Protocol:
@@ -53,8 +53,8 @@ class Protocol:
         session_factory: Callable[[], Any],
         context_key: str | None,
         *,
-        embedder: Embedder | None = None,
-        embeddings: EmbeddingClient | None = None,
+        embedder: EmbeddingClient | None = None,
+        embeddings: EmbeddingStoreClient | None = None,
     ) -> None:
         """
         Initialize Atomic memory protocol.
