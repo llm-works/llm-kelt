@@ -102,7 +102,7 @@ response = await query.ask(
 )
 
 # Clean up
-await embedder.close_async()
+await embedder.aclose()
 ```
 
 ### Training Data Export

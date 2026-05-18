@@ -295,7 +295,7 @@ async def main():
     await demo_rag_query(kelt, config, lg, embedder)
 
     if embedder:
-        await embedder.close_async()
+        await embedder.aclose()
 
     print(f"\n{H1}{'━' * 50}{RESET}")
     print(f"{OK}✓ Done!{RESET} Next: {CMD}python examples/03_training_export.py{RESET}")
