@@ -7,7 +7,6 @@ from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 from llm_infer.client import ChatClient, EmbeddingClient
 from llm_infer.client import Factory as LLMClientFactory
-from llm_infer.client.backends import RetryConfig
 
 from .client import Client
 from .core.database import Database
@@ -47,13 +46,8 @@ class ClientFactory:
         embed_cfg = getattr(config, "embedding", None)
         if embed_cfg is None:
             return None
-        retry = RetryConfig(base=1.0, factor=2.0, max_delay=30.0, timeout=120.0)
-        return EmbeddingClient(
-            self._lg,
-            base_url=embed_cfg.base_url,
-            model=embed_cfg.model_name,
-            retry=retry,
-        )
+        factory = LLMClientFactory(self._lg)
+        return factory.embeddings_from_config(embed_cfg.to_dict())
 
     def _create_llm_client(self, config: DotDict) -> ChatClient | None:
         """Create LLM client from config if llm section exists."""
@@ -90,8 +84,15 @@ class ClientFactory:
               backends:
                 local: { base_url: "...", model: "..." }
             embedding:
-              model_name: all-MiniLM-L6-v2
+              type: openai  # or "google"
               base_url: http://localhost:8001/v1
+              model: all-MiniLM-L6-v2
+              rate_limit:  # optional
+                per_minute: 60
+              retry:  # optional
+                base: 1.0
+                max_delay: 60
+                timeout: 120
             kelt:
               memory:
                 max_facts: 100

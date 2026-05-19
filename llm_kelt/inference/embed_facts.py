@@ -110,7 +110,7 @@ async def embed_missing_facts(
     Returns:
         EmbedFactsResult with counts of processed and failed facts.
     """
-    model_name = await embedder.discover_async()
+    model_name = embedder.model
     processed = 0
     failed = 0
 

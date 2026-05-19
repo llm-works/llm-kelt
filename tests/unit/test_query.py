@@ -104,6 +104,7 @@ class TestContextQueryRAG:
             return_value=EmbeddingResult(
                 embedding=[0.1, 0.2, 0.3],
                 model="test-model",
+                dimensions=3,
                 prompt_tokens=5,
             )
         )

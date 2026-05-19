@@ -43,7 +43,6 @@ from appinfra.log import LogConfig, Logger, LoggerFactory
 from httpx import ConnectError, ConnectTimeout
 from llm_infer.client import EmbeddingClient
 from llm_infer.client import Factory as LLMClientFactory
-from llm_infer.client.backends import RetryConfig
 
 from llm_kelt import Client, ClientFactory
 from llm_kelt.inference import (
@@ -103,11 +102,12 @@ async def embed_facts(lg: Logger, kelt: Client, config: Config) -> EmbeddingClie
     """Embed facts for semantic search. Returns embedder if successful."""
     print(f"\n{H2}▶ Embedding Facts for Semantic Search{RESET}")
 
-    embedding_config = config.embedding
-    retry = RetryConfig(timeout=120.0)
-    embedder = EmbeddingClient(
-        lg, base_url=embedding_config.base_url, model=embedding_config.model_name, retry=retry
-    )
+    embed_cfg = getattr(config, "embedding", None)
+    if embed_cfg is None:
+        print(f"  {MUTED}[Skipped] No embedding config{RESET}")
+        return None
+    factory = LLMClientFactory(lg)
+    embedder = factory.embeddings_from_config(embed_cfg.to_dict())
 
     try:
         print(f"  {MUTED}Connecting to embedding server...{RESET}")

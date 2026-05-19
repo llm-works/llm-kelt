@@ -13,7 +13,7 @@ class TestEmbedMissingFactsIntegration:
 
     @pytest.fixture
     def mock_embedder(self):
-        """Create a mock Embedder that returns deterministic embeddings."""
+        """Create a mock EmbeddingClient that returns deterministic embeddings."""
         embedder = MagicMock()
 
         def make_embedding(text):
@@ -27,6 +27,7 @@ class TestEmbedMissingFactsIntegration:
                 EmbeddingResult(
                     embedding=make_embedding(t),
                     model="test-model",
+                    dimensions=3,
                     prompt_tokens=len(t),
                 )
                 for t in texts
@@ -36,12 +37,13 @@ class TestEmbedMissingFactsIntegration:
             return EmbeddingResult(
                 embedding=make_embedding(text),
                 model="test-model",
+                dimensions=3,
                 prompt_tokens=len(text),
             )
 
         embedder.embed_batch_async = AsyncMock(side_effect=embed_batch_async)
         embedder.embed_async = AsyncMock(side_effect=embed_async)
-        embedder.discover_async = AsyncMock(return_value="test-model")
+        embedder.model = "test-model"
         return embedder
 
     @pytest.fixture
@@ -110,8 +112,8 @@ class TestEmbedMissingFactsIntegration:
         for fact_id in sample_facts:
             kelt_client.atomic.embeddings.set_embedding(fact_id, [0.1, 0.2, 0.3], "model-a")
 
-        # Update embedder to discover model-b
-        mock_embedder.discover_async = AsyncMock(return_value="model-b")
+        # Update embedder model to model-b
+        mock_embedder.model = "model-b"
 
         # Run embedding - should discover model-b and embed all for it
         result = await embed_missing_facts(logger, mock_embedder, kelt_client.atomic.embeddings)
