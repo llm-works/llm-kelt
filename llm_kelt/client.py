@@ -245,6 +245,7 @@ class Client:
             training_config=self._training_config,
             ensure_schema=False,  # Don't re-run schema checks
             embeddings=self._embeddings,
+            embedding_dimensions=self._embedding_dimensions,
         )
 
     def with_schema(self, schema_name: str) -> ScopedClient:

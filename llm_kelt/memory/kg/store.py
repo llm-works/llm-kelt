@@ -784,8 +784,8 @@ class KGStore:
         """Access entity embedding operations.
 
         Raises:
-            RuntimeError: If embeddings client was not provided at construction.
+            RuntimeError: If embedding_factory was not provided at construction.
         """
         if self._embedding_adapter is None:
-            raise RuntimeError("Embeddings not configured: embeddings client not provided")
+            raise RuntimeError("Embeddings not configured: embedding_factory not provided")
         return self._embedding_adapter

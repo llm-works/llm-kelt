@@ -195,8 +195,11 @@ class EntityEmbeddingAdapter:
         if dims is not None:
             store = self._get_store(dims)
             return store.delete(entity_type=self.ENTITY_TYPE, entity_id=str(entity_id))
+        # Snapshot stores under lock to avoid iteration race
+        with self._stores_lock:
+            stores = list(self._stores.values())
         total = 0
-        for store in self._stores.values():
+        for store in stores:
             total += store.delete(
                 entity_type=self.ENTITY_TYPE,
                 entity_id=str(entity_id),

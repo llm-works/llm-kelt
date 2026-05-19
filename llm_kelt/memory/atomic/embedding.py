@@ -418,8 +418,11 @@ class EmbeddingAdapter:
         if dims is not None:
             store = self._get_store(dims)
             return store.delete(self.ENTITY_TYPE, str(fact_id), session=session)
+        # Snapshot stores under lock to avoid iteration race
+        with self._stores_lock:
+            stores = list(self._stores.values())
         total = 0
-        for store in self._stores.values():
+        for store in stores:
             total += store.delete(self.ENTITY_TYPE, str(fact_id), session=session)
         return total
 
@@ -502,8 +505,11 @@ class EmbeddingAdapter:
         if dims is not None:
             store = self._get_store(dims)
             return store.count(entity_type=self.ENTITY_TYPE, model=model)
+        # Snapshot stores under lock to avoid iteration race
+        with self._stores_lock:
+            stores = list(self._stores.values())
         total = 0
-        for store in self._stores.values():
+        for store in stores:
             total += store.count(entity_type=self.ENTITY_TYPE, model=model)
         return total
 
