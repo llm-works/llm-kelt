@@ -45,6 +45,7 @@ class TestRAGIntegration:
             return EmbeddingResult(
                 embedding=get_embedding(text),
                 model="test-model",
+                dimensions=3,
                 prompt_tokens=len(text),
             )
 

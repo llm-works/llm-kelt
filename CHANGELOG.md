@@ -60,6 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `trim_threshold_tokens` param for token-based trimming (uses tokenizer instead of chars)
 
 ### Changed
+- **Breaking**: Embedding config format changed to use `llm_infer.client.Factory.embeddings_from_config()`.
+Config keys: `model_name` → `model`, added `type` (provider: "openai"/"google"), `rate_limit`,
+`retry`.
 - **Breaking**: Removed `Embedder` class from `llm_kelt.inference`. Use
   `llm_infer.client.EmbeddingClient` instead (provides retry with exponential backoff).
 - **Breaking**: Renamed embedding storage client export: `EmbeddingClient` → `EmbeddingStoreClient`
