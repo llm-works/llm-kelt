@@ -234,7 +234,9 @@ class EmbeddingAdapter:
             model=model,
         )
 
-    def get_embedding(self, fact_id: int, model: str, dimensions: int) -> list[float] | None:
+    def get_embedding(
+        self, fact_id: int, model: str, dimensions: int | None = None
+    ) -> list[float] | None:
         """
         Get embedding for a fact.
 
@@ -242,11 +244,18 @@ class EmbeddingAdapter:
             fact_id: The fact ID.
             model: Embedding model name.
             dimensions: Embedding dimensions (determines which table to query).
+                If None, uses default_dimensions.
 
         Returns:
             Embedding vector if found, None otherwise.
+
+        Raises:
+            ValueError: If dimensions is None and no default_dimensions configured.
         """
-        store = self._get_store(dimensions)
+        dims = dimensions if dimensions is not None else self._default_dimensions
+        if dims is None:
+            raise ValueError("dimensions required when no default_dimensions configured")
+        store = self._get_store(dims)
         return store.get(self.ENTITY_TYPE, str(fact_id), model)
 
     def _build_entity_id_subquery(

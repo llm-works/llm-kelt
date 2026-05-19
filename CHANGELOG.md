@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Dynamic dimension routing for embedding adapters: embeddings automatically route to
+  dimension-specific tables (e.g., `embeddings_256_f16`, `embeddings_384_f16`) based on
+  vector length, enabling multi-model embedding support without schema changes
+- `default_dimensions` parameter for `EmbeddingAdapter` and `EntityEmbeddingAdapter`:
+  optional fallback for `get_embedding()` and `delete_embedding()` when dimensions not specified
+- `embedding_dimensions` parameter for `KGStore` to configure default embedding dimensions
 - Knowledge Graph layer (`llm_kelt.memory.kg`) for entity-centric knowledge management
   - Canonical entities with alias-based deduplication and scoped visibility
   - Entity relationships, fact-entity linkage, and reference tracking

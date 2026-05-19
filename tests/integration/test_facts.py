@@ -286,7 +286,7 @@ class TestAssertionsEmbeddings:
         kelt_client.atomic.embeddings.set_embedding(fact_id, embedding, "test-model")
 
         # Verify by listing assertions without embeddings
-        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model")
+        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model", 3)
         assert all(f.id != fact_id for f in without)
 
     def test_set_embedding_upsert(self, kelt_client, clean_tables):
@@ -318,13 +318,13 @@ class TestAssertionsEmbeddings:
         kelt_client.atomic.embeddings.set_embedding(fact_id, embedding2, "model-b")
 
         # Assertion should not appear in list_without_embeddings for either model
-        without_a = kelt_client.atomic.embeddings.list_without_embeddings("model-a")
-        without_b = kelt_client.atomic.embeddings.list_without_embeddings("model-b")
+        without_a = kelt_client.atomic.embeddings.list_without_embeddings("model-a", 3)
+        without_b = kelt_client.atomic.embeddings.list_without_embeddings("model-b", 3)
         assert all(f.id != fact_id for f in without_a)
         assert all(f.id != fact_id for f in without_b)
 
         # But should appear for a different model
-        without_c = kelt_client.atomic.embeddings.list_without_embeddings("model-c")
+        without_c = kelt_client.atomic.embeddings.list_without_embeddings("model-c", 3)
         assert any(f.id == fact_id for f in without_c)
 
     def test_list_without_embeddings(self, kelt_client, clean_tables):
@@ -335,7 +335,7 @@ class TestAssertionsEmbeddings:
 
         kelt_client.atomic.embeddings.set_embedding(fact1_id, [0.1, 0.2, 0.3], "test-model")
 
-        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model")
+        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model", 3)
 
         fact_ids = [f.id for f in without]
         assert fact1_id not in fact_ids
@@ -348,7 +348,7 @@ class TestAssertionsEmbeddings:
         fact2_id = kelt_client.atomic.assertions.add("Inactive assertion")
         kelt_client.atomic.assertions.deactivate(fact2_id)
 
-        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model")
+        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model", 3)
 
         fact_ids = [f.id for f in without]
         assert fact1_id in fact_ids
@@ -359,7 +359,7 @@ class TestAssertionsEmbeddings:
         for i in range(10):
             kelt_client.atomic.assertions.add(f"Assertion {i}")
 
-        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model", limit=3)
+        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model", 3, limit=3)
         assert len(without) == 3
 
     def test_search_similar(self, kelt_client, clean_tables):
@@ -509,7 +509,7 @@ class TestAssertionsEmbeddings:
 
         # Verify both exist
         assert kelt_client.atomic.assertions.exists(fact_id)
-        assert kelt_client.atomic.embeddings.has_embedding(fact_id, "test-model")
+        assert kelt_client.atomic.embeddings.has_embedding(fact_id, "test-model", 3)
 
         # Delete fact - should automatically clean up embedding
         result = kelt_client.atomic.assertions.delete(fact_id)
@@ -517,7 +517,7 @@ class TestAssertionsEmbeddings:
 
         # Both fact and embedding should be gone
         assert not kelt_client.atomic.assertions.exists(fact_id)
-        assert not kelt_client.atomic.embeddings.has_embedding(fact_id, "test-model")
+        assert not kelt_client.atomic.embeddings.has_embedding(fact_id, "test-model", 3)
 
         # Verify no orphan embeddings left
         results = kelt_client.atomic.embeddings.search_similar(

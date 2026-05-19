@@ -742,6 +742,7 @@ class KGStore:
         embedder: EmbeddingClient | None = None,
         embedding_factory: EmbeddingFactory | None = None,
         embedding_format: QuantizationFormat | None = None,
+        embedding_dimensions: int | None = None,
     ) -> None:
         self._lg = lg
         self._session_factory = session_factory
@@ -753,18 +754,30 @@ class KGStore:
         self.refs = EntityRefStore(lg, session_factory)
         self.relationships = EntityRelationshipStore(lg, session_factory)
         self.fact_entities = FactEntityStore(lg, session_factory)
-
-        # Embedding adapter (only if factory provided)
-        self._embedding_adapter: EntityEmbeddingAdapter | None = None
-        if embedding_factory is not None:
-            from .embedding import EntityEmbeddingAdapter
-
-            self._embedding_adapter = EntityEmbeddingAdapter(
-                session_factory=session_factory,
-                factory=embedding_factory,
-                format=self._embedding_format,
-                embedder=embedder,
+        self._embedding_adapter = (
+            self._create_embedding_adapter(
+                session_factory, embedding_factory, embedder, embedding_dimensions
             )
+            if embedding_factory
+            else None
+        )
+
+    def _create_embedding_adapter(
+        self,
+        session_factory: SessionFactory,
+        factory: EmbeddingFactory,
+        embedder: EmbeddingClient | None,
+        dimensions: int | None,
+    ) -> EntityEmbeddingAdapter:
+        from .embedding import EntityEmbeddingAdapter
+
+        return EntityEmbeddingAdapter(
+            session_factory=session_factory,
+            factory=factory,
+            format=self._embedding_format,
+            embedder=embedder,
+            default_dimensions=dimensions,
+        )
 
     @property
     def embeddings(self) -> EntityEmbeddingAdapter:

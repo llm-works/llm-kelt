@@ -130,12 +130,19 @@ class SchemaManager:
 
     def _get_current_version(self) -> str | None:
         """Get current database schema version, or None if not initialized."""
-        with self._engine.connect() as conn:
-            context = MigrationContext.configure(
-                conn, opts={"version_table_schema": self._schema_name}
-            )
-            revision = context.get_current_revision()
-            return str(revision) if revision is not None else None
+        try:
+            with self._engine.connect() as conn:
+                context = MigrationContext.configure(
+                    conn, opts={"version_table_schema": self._schema_name}
+                )
+                revision = context.get_current_revision()
+                return str(revision) if revision is not None else None
+        except Exception as e:
+            # Handle case where alembic_version table doesn't exist yet
+            # (e.g., fresh schema with no migrations applied)
+            if "UndefinedTable" in type(e).__name__ or "alembic_version" in str(e):
+                return None
+            raise
 
     def _is_version_in_chain(self, version: str) -> bool:
         """Check if a version exists in our migration chain."""

@@ -66,17 +66,19 @@ class TestEmbedMissingFactsIntegration:
     async def test_embed_all_facts(self, logger, kelt_client, mock_embedder, sample_facts):
         """Test embedding all facts that don't have embeddings."""
         # Verify no embeddings exist
-        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model")
+        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model", 3)
         assert len(without) == 5
 
         # Run embedding - pass the embeddings adapter
-        result = await embed_missing_facts(logger, mock_embedder, kelt_client.atomic.embeddings)
+        result = await embed_missing_facts(
+            logger, mock_embedder, kelt_client.atomic.embeddings, dimensions=3
+        )
 
         assert result.processed == 5
         assert result.failed == 0
 
         # Verify all facts now have embeddings
-        without_after = kelt_client.atomic.embeddings.list_without_embeddings("test-model")
+        without_after = kelt_client.atomic.embeddings.list_without_embeddings("test-model", 3)
         assert len(without_after) == 0
 
         # Verify embeddings work for similarity search
@@ -97,7 +99,9 @@ class TestEmbedMissingFactsIntegration:
         kelt_client.atomic.embeddings.set_embedding(sample_facts[1], [0.4, 0.5, 0.6], "test-model")
 
         # Run embedding
-        result = await embed_missing_facts(logger, mock_embedder, kelt_client.atomic.embeddings)
+        result = await embed_missing_facts(
+            logger, mock_embedder, kelt_client.atomic.embeddings, dimensions=3
+        )
 
         # Should only process the 3 without embeddings
         assert result.processed == 3
@@ -116,15 +120,17 @@ class TestEmbedMissingFactsIntegration:
         mock_embedder.model = "model-b"
 
         # Run embedding - should discover model-b and embed all for it
-        result = await embed_missing_facts(logger, mock_embedder, kelt_client.atomic.embeddings)
+        result = await embed_missing_facts(
+            logger, mock_embedder, kelt_client.atomic.embeddings, dimensions=3
+        )
 
         # Should embed all 5 for the new model
         assert result.processed == 5
         assert result.failed == 0
 
         # Both models should have embeddings now
-        without_a = kelt_client.atomic.embeddings.list_without_embeddings("model-a")
-        without_b = kelt_client.atomic.embeddings.list_without_embeddings("model-b")
+        without_a = kelt_client.atomic.embeddings.list_without_embeddings("model-a", 3)
+        without_b = kelt_client.atomic.embeddings.list_without_embeddings("model-b", 3)
         assert len(without_a) == 0
         assert len(without_b) == 0
 
@@ -134,7 +140,7 @@ class TestEmbedMissingFactsIntegration:
     ):
         """Test that batch_size controls how many facts are processed per batch."""
         result = await embed_missing_facts(
-            logger, mock_embedder, kelt_client.atomic.embeddings, batch_size=2
+            logger, mock_embedder, kelt_client.atomic.embeddings, dimensions=3, batch_size=2
         )
 
         assert result.processed == 5
@@ -153,7 +159,9 @@ class TestEmbedMissingFactsIntegration:
         inactive_id = kelt_client.atomic.assertions.add("Inactive fact")
         kelt_client.atomic.assertions.deactivate(inactive_id)
 
-        result = await embed_missing_facts(logger, mock_embedder, kelt_client.atomic.embeddings)
+        result = await embed_missing_facts(
+            logger, mock_embedder, kelt_client.atomic.embeddings, dimensions=3
+        )
 
         # Only active fact should be embedded
         assert result.processed == 1
@@ -170,7 +178,9 @@ class TestEmbedMissingFactsIntegration:
     @pytest.mark.asyncio
     async def test_embed_empty_context(self, logger, kelt_client, mock_embedder, clean_tables):
         """Test embedding when context has no facts."""
-        result = await embed_missing_facts(logger, mock_embedder, kelt_client.atomic.embeddings)
+        result = await embed_missing_facts(
+            logger, mock_embedder, kelt_client.atomic.embeddings, dimensions=3
+        )
 
         assert result.processed == 0
         assert result.failed == 0
@@ -260,10 +270,12 @@ class TestPublicEmbeddingStore:
         assert len(custom_results) == 1
         assert custom_results[0][0] == "1"
 
-        # Search in facts - should only find fact
-        fact_results = store.search([0.5, 0.5, 0.5], "atomic.fact", "test-model")
+        # Search in facts via atomic adapter - should only find fact
+        fact_results = kelt_client.atomic.embeddings.search_similar(
+            query=[0.5, 0.5, 0.5], model="test-model", min_similarity=0.0
+        )
         assert len(fact_results) == 1
-        assert fact_results[0][0] == str(fact_id)
+        assert fact_results[0].entity.id == fact_id
 
 
 class TestCustomTablePrefix:

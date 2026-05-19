@@ -55,6 +55,7 @@ class EntityEmbeddingAdapter:
         factory: EmbeddingFactory,
         format: QuantizationFormat,
         embedder: EmbeddingClient | None = None,
+        default_dimensions: int | None = None,
     ) -> None:
         """Initialize EntityEmbeddingAdapter with dynamic dimension routing.
 
@@ -63,11 +64,13 @@ class EntityEmbeddingAdapter:
             factory: EmbeddingFactory for creating dimension-specific stores.
             format: Quantization format to use (F32, F16, I8, I4).
             embedder: Optional EmbeddingClient for generating embeddings via HTTP.
+            default_dimensions: Default dimensions for operations when not specified.
         """
         self._session_factory = session_factory
         self._factory = factory
         self._format = format
         self._embedder = embedder
+        self._default_dimensions = default_dimensions
         self._stores: dict[int, EmbeddingStoreClient] = {}
         self._stores_lock = threading.Lock()
 
@@ -150,18 +153,27 @@ class EntityEmbeddingAdapter:
             model=model,
         )
 
-    def get_embedding(self, entity_id: int, model: str, dimensions: int) -> list[float] | None:
+    def get_embedding(
+        self, entity_id: int, model: str, dimensions: int | None = None
+    ) -> list[float] | None:
         """Get embedding for an entity.
 
         Args:
             entity_id: The entity ID.
             model: Embedding model name.
             dimensions: Embedding dimensions (determines which table to query).
+                If None, uses default_dimensions.
 
         Returns:
             The embedding vector, or None if not found.
+
+        Raises:
+            ValueError: If dimensions is None and no default_dimensions configured.
         """
-        store = self._get_store(dimensions)
+        dims = dimensions if dimensions is not None else self._default_dimensions
+        if dims is None:
+            raise ValueError("dimensions required when no default_dimensions configured")
+        store = self._get_store(dims)
         return store.get(
             entity_type=self.ENTITY_TYPE,
             entity_id=str(entity_id),
@@ -173,14 +185,15 @@ class EntityEmbeddingAdapter:
 
         Args:
             entity_id: The entity ID.
-            dimensions: Embedding dimensions to delete from. If None, falls back to
-                deleting from cached stores only (may miss if cache is empty).
+            dimensions: Embedding dimensions to delete from. If None, uses
+                default_dimensions. Falls back to cached stores if neither set.
 
         Returns:
             Number of embeddings deleted.
         """
-        if dimensions is not None:
-            store = self._get_store(dimensions)
+        dims = dimensions if dimensions is not None else self._default_dimensions
+        if dims is not None:
+            store = self._get_store(dims)
             return store.delete(entity_type=self.ENTITY_TYPE, entity_id=str(entity_id))
         total = 0
         for store in self._stores.values():
