@@ -55,7 +55,7 @@ class Calibration:
 
     min_val: float
     max_val: float
-    model_name: str
+    model: str
     dimensions: int
     sample_count: int = 0
 

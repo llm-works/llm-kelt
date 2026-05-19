@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Any
 from appinfra.log import Logger
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
-from llm_kelt.embedding import StoreClient as EmbeddingStoreClient
+from llm_kelt.embedding import Factory as EmbeddingFactory
+from llm_kelt.embedding.types import QuantizationFormat
 
 from .clients import (
     AssertionsClient,
@@ -44,7 +45,7 @@ class Protocol:
 
         # Embedding operations
         kelt.atomic.embeddings.embed_fact(fact, "text-embedding-3-small")
-        results = kelt.atomic.embeddings.search_similar(query_embedding, model_name)
+        results = kelt.atomic.embeddings.search_similar(query_embedding, model)
     """
 
     def __init__(
@@ -54,7 +55,9 @@ class Protocol:
         context_key: str | None,
         *,
         embedder: EmbeddingClient | None = None,
-        embeddings: EmbeddingStoreClient | None = None,
+        embedding_factory: EmbeddingFactory | None = None,
+        embedding_format: QuantizationFormat = QuantizationFormat.F16,
+        embedding_dimensions: int | None = None,
     ) -> None:
         """
         Initialize Atomic memory protocol.
@@ -64,13 +67,17 @@ class Protocol:
             session_factory: Database session factory.
             context_key: Context key to scope all operations to (None = no filtering).
             embedder: Optional embedder for generating embeddings.
-            embeddings: Optional embeddings client for vector operations.
+            embedding_factory: Factory for creating dimension-specific embedding stores.
+            embedding_format: Quantization format for embeddings (default: F16).
+            embedding_dimensions: Default output dimensions for embeddings.
         """
         self._lg = lg
         self._session_factory = session_factory
         self._context_key = context_key
         self._embedder = embedder
-        self._embedding_client = embeddings
+        self._embedding_factory = embedding_factory
+        self._embedding_format = embedding_format
+        self._embedding_dimensions = embedding_dimensions
 
         # Lazy-initialized clients
         self._assertions: AssertionsClient | None = None
@@ -82,14 +89,16 @@ class Protocol:
         self._preferences: PreferencesClient | None = None
         self._relationships: RelationshipsClient | None = None
 
-        # Eagerly initialize embedding adapter so clients can use it
+        # Eagerly initialize embedding adapter if factory is provided
         self._embedding_adapter: EmbeddingAdapter | None = None
-        if self._embedding_client is not None:
+        if self._embedding_factory is not None:
             self._embedding_adapter = EmbeddingAdapter(
-                self._session_factory,
-                self._context_key,
-                self._embedding_client,
-                self._embedder,
+                session_factory=self._session_factory,
+                context_key=self._context_key,
+                factory=self._embedding_factory,
+                format=self._embedding_format,
+                embedder=self._embedder,
+                default_dimensions=self._embedding_dimensions,
             )
 
     @property
@@ -165,16 +174,16 @@ class Protocol:
     @property
     def embeddings(self) -> EmbeddingAdapter:
         """Embedding operations for atomic facts."""
-        # Defensive: adapter is eagerly created in __init__ if embedding client is set
-        # This lazy fallback handles edge cases where adapter was reset or not initialized
         if self._embedding_adapter is None:
-            if self._embedding_client is None:
-                raise RuntimeError("No embedding client configured")
+            if self._embedding_factory is None:
+                raise RuntimeError("No embedding factory configured")
             self._embedding_adapter = EmbeddingAdapter(
-                self._session_factory,
-                self._context_key,
-                self._embedding_client,
-                self._embedder,
+                session_factory=self._session_factory,
+                context_key=self._context_key,
+                factory=self._embedding_factory,
+                format=self._embedding_format,
+                embedder=self._embedder,
+                default_dimensions=self._embedding_dimensions,
             )
         return self._embedding_adapter
 

@@ -90,7 +90,7 @@ class StoreClient:
         entity_type: str,
         entity_id: str,
         embedding: list[float],
-        model_name: str,
+        model: str,
         calibration: Calibration | None = None,
         session: Any | None = None,
     ) -> None:
@@ -100,7 +100,7 @@ class StoreClient:
             entity_type: Type prefix (e.g., "atomic.fact", "kg.entity").
             entity_id: Entity identifier.
             embedding: Float32 embedding vector.
-            model_name: Embedding model name.
+            model: Embedding model name.
             calibration: Optional calibration for quantized formats (I8/I4).
             session: Optional session for transaction participation.
 
@@ -109,15 +109,13 @@ class StoreClient:
         """
         _validate_embedding(embedding)
         self._ensure_table()
-        self._store.store(
-            entity_type, entity_id, embedding, model_name, calibration, session=session
-        )
+        self._store.store(entity_type, entity_id, embedding, model, calibration, session=session)
 
     def search(
         self,
         query: list[float],
         entity_type: str,
-        model_name: str,
+        model: str,
         top_k: int = 10,
         min_similarity: float = 0.0,
         entity_id_subquery: Any | None = None,
@@ -127,7 +125,7 @@ class StoreClient:
         Args:
             query: Query embedding vector (float32).
             entity_type: Type prefix to search within.
-            model_name: Embedding model to search.
+            model: Embedding model to search.
             top_k: Maximum results to return.
             min_similarity: Minimum similarity threshold.
             entity_id_subquery: Optional subquery for pre-filtering.
@@ -139,7 +137,7 @@ class StoreClient:
         results = self._store.search(
             query=query,
             entity_type=entity_type,
-            model_name=model_name,
+            model=model,
             top_k=top_k,
             min_similarity=min_similarity,
             entity_id_subquery=entity_id_subquery,
@@ -150,20 +148,20 @@ class StoreClient:
         self,
         entity_type: str,
         entity_id: str,
-        model_name: str,
+        model: str,
     ) -> list[float] | None:
         """Get embedding for an entity (dequantized to float32).
 
         Args:
             entity_type: Type prefix.
             entity_id: Entity identifier.
-            model_name: Embedding model name.
+            model: Embedding model name.
 
         Returns:
             Float32 embedding vector if found, None otherwise.
         """
         self._ensure_table()
-        return self._store.get(entity_type, entity_id, model_name)
+        return self._store.get(entity_type, entity_id, model)
 
     def delete(
         self,
@@ -188,43 +186,43 @@ class StoreClient:
         self,
         entity_type: str,
         entity_id: str,
-        model_name: str,
+        model: str,
     ) -> bool:
         """Check if embedding exists.
 
         Args:
             entity_type: Type prefix.
             entity_id: Entity identifier.
-            model_name: Embedding model name.
+            model: Embedding model name.
 
         Returns:
             True if embedding exists.
         """
         self._ensure_table()
-        return self._store.exists(entity_type, entity_id, model_name)
+        return self._store.exists(entity_type, entity_id, model)
 
     def count(
         self,
         entity_type: str | None = None,
-        model_name: str | None = None,
+        model: str | None = None,
     ) -> int:
         """Count embeddings.
 
         Args:
             entity_type: Optional type filter.
-            model_name: Optional model filter.
+            model: Optional model filter.
 
         Returns:
             Total count of matching embeddings.
         """
         self._ensure_table()
-        return self._store.count(entity_type, model_name)
+        return self._store.count(entity_type, model)
 
     def list_missing(
         self,
         entity_type: str,
         entity_ids: list[str],
-        model_name: str,
+        model: str,
     ) -> list[str]:
         """Find entity IDs that don't have embeddings.
 
@@ -234,7 +232,7 @@ class StoreClient:
         Args:
             entity_type: Type prefix.
             entity_ids: List of entity IDs to check.
-            model_name: Embedding model name.
+            model: Embedding model name.
 
         Returns:
             List of entity IDs missing embeddings.
@@ -243,7 +241,7 @@ class StoreClient:
             return []
 
         self._ensure_table()
-        existing = self._store.list_existing(entity_type, entity_ids, model_name)
+        existing = self._store.list_existing(entity_type, entity_ids, model)
         return [eid for eid in entity_ids if eid not in existing]
 
     def ensure_table(self) -> None:

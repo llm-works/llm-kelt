@@ -55,13 +55,13 @@ class Int8Store(StoreBase):
         record.embedding_bytes, record.scale, record.offset = qemb.data, qemb.scale, qemb.offset
 
     def _upsert(
-        self, sess: Any, entity_type: str, entity_id: str, model_name: str, qemb: QuantizedEmbedding
+        self, sess: Any, entity_type: str, entity_id: str, model: str, qemb: QuantizedEmbedding
     ) -> None:
         """Insert or update quantized embedding with race condition handling."""
         stmt = select(self._model).where(
             self._model.entity_type == entity_type,
             self._model.entity_id == entity_id,
-            self._model.model_name == model_name,
+            self._model.model_name == model,
         )
         if existing := sess.scalar(stmt):
             self._update_record(existing, qemb)
@@ -69,7 +69,7 @@ class Int8Store(StoreBase):
         record = self._model(
             entity_type=entity_type,
             entity_id=entity_id,
-            model_name=model_name,
+            model_name=model,
             embedding_bytes=qemb.data,
             scale=qemb.scale,
             offset=qemb.offset,
@@ -88,7 +88,7 @@ class Int8Store(StoreBase):
         entity_type: str,
         entity_id: str,
         embedding: list[float],
-        model_name: str,
+        model: str,
         calibration: Calibration | None = None,
         session: Any | None = None,
     ) -> None:
@@ -99,7 +99,7 @@ class Int8Store(StoreBase):
             )
         quantized = quantize_int8(embedding, calibration)
         with ensure_session(session, self._session_factory) as sess:
-            self._upsert(sess, entity_type, entity_id, model_name, quantized)
+            self._upsert(sess, entity_type, entity_id, model, quantized)
 
     def _row_to_quantized(self, row: Any) -> QuantizedEmbedding:
         """Convert database row to QuantizedEmbedding."""
@@ -124,7 +124,7 @@ class Int8Store(StoreBase):
         self,
         query: list[float],
         entity_type: str,
-        model_name: str,
+        model: str,
         top_k: int,
         min_similarity: float = 0.0,
         entity_id_subquery: Any | None = None,
@@ -137,7 +137,7 @@ class Int8Store(StoreBase):
         with self._session_factory() as session:
             stmt = select(self._model).where(
                 self._model.entity_type == entity_type,
-                self._model.model_name == model_name,
+                self._model.model_name == model,
             )
 
             if entity_id_subquery is not None:
@@ -160,14 +160,14 @@ class Int8Store(StoreBase):
         self,
         entity_type: str,
         entity_id: str,
-        model_name: str,
+        model: str,
     ) -> list[float] | None:
         """Get embedding for an entity (dequantized to float32)."""
         with self._session_factory() as session:
             stmt = select(self._model).where(
                 self._model.entity_type == entity_type,
                 self._model.entity_id == entity_id,
-                self._model.model_name == model_name,
+                self._model.model_name == model,
             )
             row = session.scalar(stmt)
             if row is None:
@@ -180,14 +180,14 @@ class Int8Store(StoreBase):
         self,
         entity_type: str,
         entity_id: str,
-        model_name: str,
+        model: str,
     ) -> QuantizedEmbedding | None:
         """Get raw quantized embedding without dequantization."""
         with self._session_factory() as session:
             stmt = select(self._model).where(
                 self._model.entity_type == entity_type,
                 self._model.entity_id == entity_id,
-                self._model.model_name == model_name,
+                self._model.model_name == model,
             )
             row = session.scalar(stmt)
             if row is None:

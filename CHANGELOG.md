@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Dynamic dimension routing for embedding adapters: embeddings automatically route to
+  dimension-specific tables (e.g., `embeddings_256_f16`, `embeddings_384_f16`) based on
+  vector length, enabling multi-model embedding support without schema changes
+- `default_dimensions` parameter for `EmbeddingAdapter` and `EntityEmbeddingAdapter`:
+  optional fallback for `get_embedding()` and `delete_embedding()` when dimensions not specified
+- `embedding_dimensions` parameter for `KGStore` to configure default embedding dimensions
 - Knowledge Graph layer (`llm_kelt.memory.kg`) for entity-centric knowledge management
   - Canonical entities with alias-based deduplication and scoped visibility
   - Entity relationships, fact-entity linkage, and reference tracking
@@ -83,6 +89,10 @@ Config keys: `model_name` → `model`, added `type` (provider: "openai"/"google"
   (re-exported from `llm_kelt.inference` for backward compatibility)
 - `ContextQuery` now uses the new `Conversation` class with `messages_as_dicts()` for
   clean LLM API payloads
+- `EmbeddingAdapter` now uses factory-based dynamic dimension routing: embeddings of different
+  dimensions automatically route to the correct storage table (e.g., `embeddings_256_f16` vs
+  `embeddings_384_f16`)
+- `embed_missing_facts()` now requires `dimensions` parameter to specify output dimensions
 
 ### Fixed
 - Reduced flakiness in `tests/e2e/test_facts.py` by switching LLM calls to

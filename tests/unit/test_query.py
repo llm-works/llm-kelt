@@ -19,7 +19,7 @@ class TestRAGArgs:
         args = RAGArgs()
         assert args.top_k == 10
         assert args.min_similarity == 0.3
-        assert args.model_name is None
+        assert args.model is None
         assert args.categories is None
 
     def test_custom_values(self):
@@ -27,12 +27,12 @@ class TestRAGArgs:
         args = RAGArgs(
             top_k=5,
             min_similarity=0.5,
-            model_name="custom-model",
+            model="custom-model",
             categories=["preferences", "rules"],
         )
         assert args.top_k == 5
         assert args.min_similarity == 0.5
-        assert args.model_name == "custom-model"
+        assert args.model == "custom-model"
         assert args.categories == ["preferences", "rules"]
 
 
@@ -164,7 +164,7 @@ class TestContextQueryRAG:
 
         mock_embedding_adapter.search_similar.assert_called_once_with(
             query=[0.1, 0.2, 0.3],
-            model_name="test-model",
+            model="test-model",
             top_k=5,
             min_similarity=0.4,
             categories=None,
@@ -246,10 +246,10 @@ class TestContextQueryRAG:
         assert call_kwargs["min_similarity"] == 0.7
 
     @pytest.mark.asyncio
-    async def test_ask_with_rag_custom_model_name(
+    async def test_ask_with_rag_custom_model(
         self, mock_client, mock_context_builder, mock_embedding_adapter, mock_embedder
     ):
-        """Test that RAGArgs.model_name overrides embedder model."""
+        """Test that RAGArgs.model overrides embedder model."""
         mock_embedding_adapter.search_similar.return_value = []
 
         query = ContextQuery(
@@ -259,16 +259,16 @@ class TestContextQueryRAG:
             embedding_adapter=mock_embedding_adapter,
         )
 
-        await query.ask("Test", rag=RAGArgs(model_name="custom-embedding-model"))
+        await query.ask("Test", rag=RAGArgs(model="custom-embedding-model"))
 
         call_kwargs = mock_embedding_adapter.search_similar.call_args.kwargs
-        assert call_kwargs["model_name"] == "custom-embedding-model"
+        assert call_kwargs["model"] == "custom-embedding-model"
 
     @pytest.mark.asyncio
     async def test_ask_with_rag_uses_embedder_model_by_default(
         self, mock_client, mock_context_builder, mock_embedding_adapter, mock_embedder, sample_fact
     ):
-        """Test that RAG uses embedder's model when model_name is None."""
+        """Test that RAG uses embedder's model when model is None."""
         mock_embedding_adapter.search_similar.return_value = []
 
         query = ContextQuery(
@@ -281,7 +281,7 @@ class TestContextQueryRAG:
         await query.ask("Test", rag=RAGArgs())
 
         call_kwargs = mock_embedding_adapter.search_similar.call_args.kwargs
-        assert call_kwargs["model_name"] == "test-model"
+        assert call_kwargs["model"] == "test-model"
 
     @pytest.mark.asyncio
     async def test_ask_with_rag_and_conversation(

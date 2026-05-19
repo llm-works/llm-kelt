@@ -630,21 +630,17 @@ class TestEntityEmbeddings:
     @pytest.fixture
     def kg_with_embeddings(self, logger, database):
         """Create KGStore with embedding support (no embedder for manual tests)."""
-        from llm_kelt.embedding import Config, Factory, QuantizationFormat
+        from llm_kelt.embedding import Factory, QuantizationFormat
         from llm_kelt.memory.kg import KGStore
 
-        config = Config(
-            context_key="_test",
-            format=QuantizationFormat.F16,
-            dimensions=self.TEST_DIMS,
-        )
         factory = Factory()
-        embeddings = factory.create(database.session, config)
         return KGStore(
             logger,
             database.session,
             embedder=None,
-            embeddings=embeddings,
+            embedding_factory=factory,
+            embedding_format=QuantizationFormat.F16,
+            embedding_dimensions=TestEntityEmbeddings.TEST_DIMS,
         )
 
     def test_set_and_get_embedding(self, kg_with_embeddings):
@@ -659,12 +655,12 @@ class TestEntityEmbeddings:
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=entity.id,
             embedding=embedding,
-            model_name="test-model",
+            model="test-model",
         )
 
         retrieved = kg_with_embeddings.embeddings.get_embedding(
             entity_id=entity.id,
-            model_name="test-model",
+            model="test-model",
         )
         assert retrieved is not None
         assert len(retrieved) == self.TEST_DIMS
@@ -682,7 +678,7 @@ class TestEntityEmbeddings:
 
         result = kg_with_embeddings.embeddings.get_embedding(
             entity_id=entity.id,
-            model_name="test-model",
+            model="test-model",
         )
         assert result is None
 
@@ -697,7 +693,7 @@ class TestEntityEmbeddings:
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=entity.id,
             embedding=self.make_embedding(0.1),
-            model_name="test-model",
+            model="test-model",
         )
 
         deleted_count = kg_with_embeddings.embeddings.delete_embedding(entity.id)
@@ -706,7 +702,7 @@ class TestEntityEmbeddings:
         # Verify it's gone
         result = kg_with_embeddings.embeddings.get_embedding(
             entity_id=entity.id,
-            model_name="test-model",
+            model="test-model",
         )
         assert result is None
 
@@ -740,24 +736,24 @@ class TestEntityEmbeddings:
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=tesla.id,
             embedding=tesla_emb,
-            model_name="test-model",
+            model="test-model",
         )
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=apple.id,
             embedding=apple_emb,
-            model_name="test-model",
+            model="test-model",
         )
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=spacex.id,
             embedding=spacex_emb,
-            model_name="test-model",
+            model="test-model",
         )
 
         # Search for entities similar to Tesla's embedding
         results = kg_with_embeddings.embeddings.search_similar(
             query_embedding=tesla_emb,
             scope_key="global",
-            model_name="test-model",
+            model="test-model",
             limit=3,
         )
 
@@ -795,14 +791,14 @@ class TestEntityEmbeddings:
             kg_with_embeddings.embeddings.set_embedding(
                 entity_id=entity.id,
                 embedding=test_emb,
-                model_name="test-model",
+                model="test-model",
             )
 
         # Search from org:acme scope - should see global and org:acme, not org:other
         results = kg_with_embeddings.embeddings.search_similar(
             query_embedding=test_emb,
             scope_key="org:acme",
-            model_name="test-model",
+            model="test-model",
             limit=10,
         )
 
@@ -831,7 +827,7 @@ class TestEntityEmbeddings:
         """Accessing embeddings without embeddings client raises error."""
         from llm_kelt.memory.kg import KGStore
 
-        # Create KGStore without embeddings client
-        kg = KGStore(logger, database.session, embedder=None, embeddings=None)
+        # Create KGStore without embedding_factory
+        kg = KGStore(logger, database.session, embedder=None, embedding_factory=None)
         with pytest.raises(RuntimeError, match="Embeddings not configured"):
             _ = kg.embeddings

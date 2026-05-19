@@ -60,7 +60,9 @@ class TestEmbedMissingFacts:
         """Test when no facts need embedding."""
         mock_facts_client.list_without_embeddings.return_value = []
 
-        result = await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
+        result = await embed_missing_facts(
+            mock_logger, mock_embedder, mock_facts_client, dimensions=2
+        )
 
         assert result.processed == 0
         assert result.failed == 0
@@ -82,7 +84,9 @@ class TestEmbedMissingFacts:
             total_prompt_tokens=15,
         )
 
-        result = await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
+        result = await embed_missing_facts(
+            mock_logger, mock_embedder, mock_facts_client, dimensions=2
+        )
 
         assert result.processed == 3
         assert result.failed == 0
@@ -118,7 +122,7 @@ class TestEmbedMissingFacts:
         ]
 
         result = await embed_missing_facts(
-            mock_logger, mock_embedder, mock_facts_client, batch_size=2
+            mock_logger, mock_embedder, mock_facts_client, dimensions=1, batch_size=2
         )
 
         assert result.processed == 3
@@ -138,7 +142,9 @@ class TestEmbedMissingFacts:
             embedding=[0.1], model="m", dimensions=1, prompt_tokens=1
         )
 
-        result = await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
+        result = await embed_missing_facts(
+            mock_logger, mock_embedder, mock_facts_client, dimensions=1
+        )
 
         assert result.processed == 3
         assert result.failed == 0
@@ -159,7 +165,9 @@ class TestEmbedMissingFacts:
             EmbeddingResult(embedding=[0.3], model="m", dimensions=1, prompt_tokens=1),
         ]
 
-        result = await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
+        result = await embed_missing_facts(
+            mock_logger, mock_embedder, mock_facts_client, dimensions=1
+        )
 
         assert result.processed == 2
         assert result.failed == 1
@@ -182,7 +190,9 @@ class TestEmbedMissingFacts:
         # Second set_embedding fails
         mock_facts_client.set_embedding.side_effect = [None, Exception("DB error"), None]
 
-        result = await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
+        result = await embed_missing_facts(
+            mock_logger, mock_embedder, mock_facts_client, dimensions=1
+        )
 
         assert result.processed == 2
         assert result.failed == 1
@@ -206,9 +216,9 @@ class TestEmbedMissingFacts:
             total_prompt_tokens=1,
         )
 
-        await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
+        await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client, dimensions=3)
 
-        mock_facts_client.list_without_embeddings.assert_called_with("custom-model", limit=50)
+        mock_facts_client.list_without_embeddings.assert_called_with("custom-model", 3, limit=50)
         mock_facts_client.set_embedding.assert_called_once_with(1, [0.1, 0.2, 0.3], "custom-model")
 
     @pytest.mark.asyncio
@@ -218,9 +228,11 @@ class TestEmbedMissingFacts:
         """Test that custom batch_size is used."""
         mock_facts_client.list_without_embeddings.return_value = []
 
-        await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client, batch_size=25)
+        await embed_missing_facts(
+            mock_logger, mock_embedder, mock_facts_client, dimensions=2, batch_size=25
+        )
 
-        mock_facts_client.list_without_embeddings.assert_called_once_with("test-model", limit=25)
+        mock_facts_client.list_without_embeddings.assert_called_once_with("test-model", 2, limit=25)
 
     @pytest.mark.asyncio
     async def test_embed_breaks_on_no_progress(
@@ -240,7 +252,9 @@ class TestEmbedMissingFacts:
         )
         mock_facts_client.set_embedding.side_effect = Exception("DB unavailable")
 
-        result = await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
+        result = await embed_missing_facts(
+            mock_logger, mock_embedder, mock_facts_client, dimensions=1
+        )
 
         # Should have attempted once and stopped
         assert result.processed == 0

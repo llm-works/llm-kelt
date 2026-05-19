@@ -12,13 +12,14 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as SASession
 
+from llm_kelt.embedding import Factory as EmbeddingFactory
+from llm_kelt.embedding.types import QuantizationFormat
+
 from .models import Entity, EntityAlias, EntityRef, EntityRelationship, FactEntity
 
 if TYPE_CHECKING:
     from appinfra.log import Logger
     from llm_infer.client import EmbeddingClient
-
-    from llm_kelt.embedding import StoreClient as EmbeddingStoreClient
 
     from .embedding import EntityEmbeddingAdapter
 
@@ -739,33 +740,52 @@ class KGStore:
         lg: Logger,
         session_factory: SessionFactory,
         embedder: EmbeddingClient | None = None,
-        embeddings: EmbeddingStoreClient | None = None,
+        embedding_factory: EmbeddingFactory | None = None,
+        embedding_format: QuantizationFormat | None = None,
+        embedding_dimensions: int | None = None,
     ) -> None:
-
         self._lg = lg
         self._session_factory = session_factory
         self._embedder = embedder
-        self._embeddings_client = embeddings
+        self._embedding_factory = embedding_factory
+        self._embedding_format = embedding_format or QuantizationFormat.F16
 
         self.entities = EntityStore(lg, session_factory)
         self.refs = EntityRefStore(lg, session_factory)
         self.relationships = EntityRelationshipStore(lg, session_factory)
         self.fact_entities = FactEntityStore(lg, session_factory)
+        self._embedding_adapter = (
+            self._create_embedding_adapter(
+                session_factory, embedding_factory, embedder, embedding_dimensions
+            )
+            if embedding_factory
+            else None
+        )
 
-        # Embedding adapter (only if embeddings client provided)
-        self._embedding_adapter: EntityEmbeddingAdapter | None = None
-        if embeddings is not None:
-            from .embedding import EntityEmbeddingAdapter
+    def _create_embedding_adapter(
+        self,
+        session_factory: SessionFactory,
+        factory: EmbeddingFactory,
+        embedder: EmbeddingClient | None,
+        dimensions: int | None,
+    ) -> EntityEmbeddingAdapter:
+        from .embedding import EntityEmbeddingAdapter
 
-            self._embedding_adapter = EntityEmbeddingAdapter(session_factory, embeddings, embedder)
+        return EntityEmbeddingAdapter(
+            session_factory=session_factory,
+            factory=factory,
+            format=self._embedding_format,
+            embedder=embedder,
+            default_dimensions=dimensions,
+        )
 
     @property
     def embeddings(self) -> EntityEmbeddingAdapter:
         """Access entity embedding operations.
 
         Raises:
-            RuntimeError: If embeddings client was not provided at construction.
+            RuntimeError: If embedding_factory was not provided at construction.
         """
         if self._embedding_adapter is None:
-            raise RuntimeError("Embeddings not configured: embeddings client not provided")
+            raise RuntimeError("Embeddings not configured: embedding_factory not provided")
         return self._embedding_adapter

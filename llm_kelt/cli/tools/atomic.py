@@ -27,28 +27,18 @@ def _get_database(lg: Any, app_config: Any):
     return Database(lg, pg)
 
 
-def _get_embeddings_client(database):
-    """Create embeddings client from database."""
-    from llm_kelt.embedding import Config, QuantizationFormat, StoreClient
-
-    config = Config(
-        context_key="_cli",
-        format=QuantizationFormat.F16,
-        dimensions=384,
-    )
-    return StoreClient(config, database.session)
-
-
 def _create_embedding_adapter(lg: Any, app_config: Any):
     """Create embedding adapter for vacuum operations."""
+    from llm_kelt.embedding import Factory as EmbeddingFactory
+    from llm_kelt.embedding import QuantizationFormat
     from llm_kelt.memory.atomic import EmbeddingAdapter
 
     database = _get_database(lg, app_config)
-    embeddings = _get_embeddings_client(database)
     return EmbeddingAdapter(
         session_factory=database.session,
         context_key=None,  # Vacuum all contexts
-        embeddings=embeddings,
+        factory=EmbeddingFactory(),
+        format=QuantizationFormat.F16,
         embedder=None,
     )
 
