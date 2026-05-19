@@ -140,7 +140,7 @@ class SchemaManager:
         except Exception as e:
             # Handle case where alembic_version table doesn't exist yet
             # (e.g., fresh schema with no migrations applied)
-            if "UndefinedTable" in type(e).__name__ or "alembic_version" in str(e):
+            if "UndefinedTable" in type(e).__name__:
                 return None
             raise
 
