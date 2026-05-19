@@ -89,6 +89,7 @@ class Client:
         training_config: DotDict | None = None,
         ensure_schema: bool = True,
         embeddings: EmbeddingStoreClient | None = None,
+        embedding_dimensions: int | None = None,
     ) -> None:
         """
         Initialize Client with isolation context.
@@ -103,6 +104,7 @@ class Client:
             training_config: Optional training settings (config.training section)
             ensure_schema: If True (default), auto-migrate schema on init
             embeddings: Optional EmbeddingStoreClient. If None, creates default (F16, 384 dims).
+            embedding_dimensions: Optional output dimensions for embeddings. None uses model default.
         """
         self._db = database
         self._context = context
@@ -113,38 +115,46 @@ class Client:
         self._training_config = training_config
         self._ensure_schema = ensure_schema
         self._embeddings = embeddings
+        self._embedding_dimensions = embedding_dimensions
 
         self._ensure_schema_config(ensure=ensure_schema)
         self._verify_schema(ensure=ensure_schema)
         self._setup_stores()
         self._setup_query_interface()
 
-    def _setup_stores(self) -> None:
-        """Initialize storage components."""
-        if self._embeddings is None:
-            from .embedding import QuantizationFormat
+    def _setup_embedding_factory(self) -> None:
+        """Initialize embedding factory for dynamic dimension routing."""
+        from .embedding import QuantizationFormat
 
+        self._embedding_factory = EmbeddingFactory()
+        self._embedding_format = QuantizationFormat.F16
+        if self._embeddings is None:
             config = EmbeddingConfig(
                 context_key=self._context.context_key or "_default",
-                format=QuantizationFormat.F16,
+                format=self._embedding_format,
                 dimensions=384,
             )
-            factory = EmbeddingFactory()
-            self._embeddings = factory.create(self._db.session, config)
+            self._embeddings = self._embedding_factory.create(self._db.session, config)
 
+    def _setup_stores(self) -> None:
+        """Initialize storage components."""
+        self._setup_embedding_factory()
         self._content = ContentStore(self._db.session, self._context.context_key)
         self._atomic = atomic.Protocol(
             self._lg,
             self._db.session,
             self._context.context_key,
             embedder=self._embedder,
-            embeddings=self._embeddings,
+            embedding_factory=self._embedding_factory,
+            embedding_format=self._embedding_format,
+            embedding_dimensions=self._embedding_dimensions,
         )
         self._kg = KGStore(
             self._lg,
             self._db.session,
             embedder=self._embedder,
-            embeddings=self._embeddings,
+            embedding_factory=self._embedding_factory,
+            embedding_format=self._embedding_format,
         )
         self._context_builder = ContextBuilder(self._atomic.assertions)
         self._train: TrainFactory | None = None
@@ -391,14 +401,14 @@ class Client:
                 entity_type="myapp.query",
                 entity_id="q123",
                 embedding=[0.1, 0.2, ...],
-                model_name="text-embedding-3-small",
+                model="text-embedding-3-small",
             )
 
             # Search for similar entities
             results = kelt.embeddings.search(
                 query=[0.1, 0.2, ...],
                 entity_type="myapp.query",
-                model_name="text-embedding-3-small",
+                model="text-embedding-3-small",
                 top_k=5,
             )
 

@@ -59,13 +59,13 @@ class Float32Store(StoreBase):
         self._table_ensured = True
 
     def _upsert(
-        self, sess: Any, entity_type: str, entity_id: str, model_name: str, embedding: list[float]
+        self, sess: Any, entity_type: str, entity_id: str, model: str, embedding: list[float]
     ) -> None:
         """Insert or update embedding with race condition handling."""
         stmt = select(self._model).where(
             self._model.entity_type == entity_type,
             self._model.entity_id == entity_id,
-            self._model.model_name == model_name,
+            self._model.model_name == model,
         )
         existing = sess.scalar(stmt)
         if existing:
@@ -73,7 +73,7 @@ class Float32Store(StoreBase):
             return
 
         record = self._model(
-            entity_type=entity_type, entity_id=entity_id, model_name=model_name, embedding=embedding
+            entity_type=entity_type, entity_id=entity_id, model_name=model, embedding=embedding
         )
         try:
             with sess.begin_nested():
@@ -89,7 +89,7 @@ class Float32Store(StoreBase):
         entity_type: str,
         entity_id: str,
         embedding: list[float],
-        model_name: str,
+        model: str,
         calibration: Calibration | None = None,
         session: Any | None = None,
     ) -> None:
@@ -99,13 +99,13 @@ class Float32Store(StoreBase):
                 f"Embedding dimension mismatch: expected {self._dimensions}, got {len(embedding)}"
             )
         with ensure_session(session, self._session_factory) as sess:
-            self._upsert(sess, entity_type, entity_id, model_name, embedding)
+            self._upsert(sess, entity_type, entity_id, model, embedding)
 
     def search(
         self,
         query: list[float],
         entity_type: str,
-        model_name: str,
+        model: str,
         top_k: int,
         min_similarity: float = 0.0,
         entity_id_subquery: Any | None = None,
@@ -118,7 +118,7 @@ class Float32Store(StoreBase):
                 select(self._model.entity_id, similarity)
                 .where(
                     self._model.entity_type == entity_type,
-                    self._model.model_name == model_name,
+                    self._model.model_name == model,
                     self._model.embedding.cosine_distance(query) <= (1 - min_similarity),
                 )
                 .order_by(self._model.embedding.cosine_distance(query))
@@ -135,14 +135,14 @@ class Float32Store(StoreBase):
         self,
         entity_type: str,
         entity_id: str,
-        model_name: str,
+        model: str,
     ) -> list[float] | None:
         """Get embedding for an entity."""
         with self._session_factory() as session:
             stmt = select(self._model.embedding).where(
                 self._model.entity_type == entity_type,
                 self._model.entity_id == entity_id,
-                self._model.model_name == model_name,
+                self._model.model_name == model,
             )
             result = session.scalar(stmt)
             return list(result) if result is not None else None

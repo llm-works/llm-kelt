@@ -82,7 +82,7 @@ class TestEmbedMissingFactsIntegration:
         # Verify embeddings work for similarity search
         search_results = kelt_client.atomic.embeddings.search_similar(
             query=[0.2, 0.3, 0.4],
-            model_name="test-model",
+            model="test-model",
             min_similarity=0.0,
         )
         assert len(search_results) == 5
@@ -161,7 +161,7 @@ class TestEmbedMissingFactsIntegration:
         # Verify via search
         search_results = kelt_client.atomic.embeddings.search_similar(
             query=[0.1, 0.2, 0.3],
-            model_name="test-model",
+            model="test-model",
             min_similarity=0.0,
         )
         assert len(search_results) == 1
@@ -197,7 +197,7 @@ class TestPublicEmbeddingStore:
             entity_type="myapp.query",
             entity_id="q123",
             embedding=[0.1, 0.2, 0.3],
-            model_name="test-model",
+            model="test-model",
         )
 
         # Verify it exists
@@ -220,7 +220,7 @@ class TestPublicEmbeddingStore:
         results = store.search(
             query=[1.0, 0.0, 0.0],
             entity_type="myapp.query",
-            model_name="test-model",
+            model="test-model",
             top_k=2,
         )
 

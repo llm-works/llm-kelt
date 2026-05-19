@@ -1,4 +1,4 @@
-"""Entity embedding adapter - uses embedding.StoreClient for entity vectors."""
+"""Entity embedding adapter - uses embedding.Factory for dynamic dimension routing."""
 
 from __future__ import annotations
 
@@ -8,28 +8,36 @@ from typing import TYPE_CHECKING, Any
 from appinfra.db.utils import detach_all
 from sqlalchemy import select
 
+from llm_kelt.embedding import Config as EmbeddingConfig
+from llm_kelt.embedding import Factory as EmbeddingFactory
+from llm_kelt.embedding import StoreClient as EmbeddingStoreClient
+from llm_kelt.embedding.types import QuantizationFormat
+
 from .models import Entity
 from .store import build_scope_filter
 
 if TYPE_CHECKING:
     from llm_infer.client import EmbeddingClient
 
-    from llm_kelt.embedding import StoreClient as EmbeddingStoreClient
-
 
 class EntityEmbeddingAdapter:
-    """Embedding operations for KG entities.
+    """Embedding operations for KG entities with dynamic dimension routing.
 
-    Provides entity-specific interface on top of EmbeddingClient.
+    Routes embeddings to the correct table based on their dimensions.
     Uses entity_type "kg.entity" to namespace embeddings.
 
     Entities are embedded by concatenating canonical_name + description.
 
     Example:
-        adapter = EntityEmbeddingAdapter(session_factory, embeddings, embedder)
+        adapter = EntityEmbeddingAdapter(
+            session_factory=session_factory,
+            factory=EmbeddingFactory(),
+            format=QuantizationFormat.F16,
+            embedder=embedder,
+        )
 
-        # Embed an entity
-        adapter.embed_entity(entity, "text-embedding-3-small")
+        # Embed an entity (auto-routes to correct dimension table)
+        adapter.embed_entity(entity)
 
         # Search for similar entities
         results = adapter.search_similar(query_embedding, "global", "text-embedding-3-small")
@@ -43,19 +51,34 @@ class EntityEmbeddingAdapter:
     def __init__(
         self,
         session_factory: Callable[[], Any],
-        embeddings: EmbeddingStoreClient,
+        factory: EmbeddingFactory,
+        format: QuantizationFormat,
         embedder: EmbeddingClient | None = None,
     ) -> None:
-        """Initialize EntityEmbeddingAdapter.
+        """Initialize EntityEmbeddingAdapter with dynamic dimension routing.
 
         Args:
             session_factory: Callable that returns a context manager for database sessions.
-            embeddings: EmbeddingStoreClient for vector storage operations.
+            factory: EmbeddingFactory for creating dimension-specific stores.
+            format: Quantization format to use (F32, F16, I8, I4).
             embedder: Optional EmbeddingClient for generating embeddings via HTTP.
         """
         self._session_factory = session_factory
-        self._embeddings = embeddings
+        self._factory = factory
+        self._format = format
         self._embedder = embedder
+        self._stores: dict[int, EmbeddingStoreClient] = {}
+
+    def _get_store(self, dimensions: int) -> EmbeddingStoreClient:
+        """Get or create a store for the given dimensions."""
+        if dimensions not in self._stores:
+            config = EmbeddingConfig(
+                context_key="_kg",
+                format=self._format,
+                dimensions=dimensions,
+            )
+            self._stores[dimensions] = self._factory.create(self._session_factory, config)
+        return self._stores[dimensions]
 
     def _entity_text(self, entity: Entity) -> str:
         """Build text representation of entity for embedding."""
@@ -65,13 +88,15 @@ class EntityEmbeddingAdapter:
         return " ".join(parts)
 
     def embed_entity(
-        self, entity: Entity, model_name: str | None = None, session: Any | None = None
+        self, entity: Entity, model: str | None = None, session: Any | None = None
     ) -> None:
         """Generate and store embedding for an entity.
 
+        Routes to the correct dimension table based on embedding output.
+
         Args:
             entity: The entity to embed.
-            model_name: Embedding model name. If None, uses embedder's default model.
+            model: Embedding model name. If None, uses embedder's default model.
             session: Optional session to use.
 
         Raises:
@@ -80,19 +105,20 @@ class EntityEmbeddingAdapter:
         if not self._embedder:
             raise RuntimeError("No embedder configured")
 
-        model = model_name or self._embedder.model
-        if model_name is not None and model_name != self._embedder.model:
+        resolved_model = model or self._embedder.model
+        if model is not None and model != self._embedder.model:
             raise ValueError(
-                f"embedder model {self._embedder.model!r} does not match requested {model_name!r}"
+                f"embedder model {self._embedder.model!r} does not match requested {model!r}"
             )
 
         text = self._entity_text(entity)
         result = self._embedder.embed(text)
-        self._embeddings.store(
+        store = self._get_store(len(result.embedding))
+        store.store(
             entity_type=self.ENTITY_TYPE,
             entity_id=str(entity.id),
             embedding=result.embedding,
-            model_name=model,
+            model=resolved_model,
             session=session,
         )
 
@@ -100,40 +126,47 @@ class EntityEmbeddingAdapter:
         self,
         entity_id: int,
         embedding: list[float],
-        model_name: str,
+        model: str,
     ) -> None:
         """Store a pre-computed embedding for an entity.
+
+        Routes to the correct table based on embedding dimensions.
 
         Args:
             entity_id: The entity ID.
             embedding: Pre-computed embedding vector.
-            model_name: Embedding model name.
+            model: Embedding model name.
         """
-        self._embeddings.store(
+        store = self._get_store(len(embedding))
+        store.store(
             entity_type=self.ENTITY_TYPE,
             entity_id=str(entity_id),
             embedding=embedding,
-            model_name=model_name,
+            model=model,
         )
 
-    def get_embedding(self, entity_id: int, model_name: str) -> list[float] | None:
+    def get_embedding(self, entity_id: int, model: str, dimensions: int) -> list[float] | None:
         """Get embedding for an entity.
 
         Args:
             entity_id: The entity ID.
-            model_name: Embedding model name.
+            model: Embedding model name.
+            dimensions: Embedding dimensions (determines which table to query).
 
         Returns:
             The embedding vector, or None if not found.
         """
-        return self._embeddings.get(
+        store = self._get_store(dimensions)
+        return store.get(
             entity_type=self.ENTITY_TYPE,
             entity_id=str(entity_id),
-            model_name=model_name,
+            model=model,
         )
 
     def delete_embedding(self, entity_id: int) -> int:
         """Delete all embeddings for an entity.
+
+        Deletes from all dimension tables to ensure cleanup.
 
         Args:
             entity_id: The entity ID.
@@ -141,26 +174,31 @@ class EntityEmbeddingAdapter:
         Returns:
             Number of embeddings deleted.
         """
-        return self._embeddings.delete(
-            entity_type=self.ENTITY_TYPE,
-            entity_id=str(entity_id),
-        )
+        total = 0
+        for store in self._stores.values():
+            total += store.delete(
+                entity_type=self.ENTITY_TYPE,
+                entity_id=str(entity_id),
+            )
+        return total
 
     def search_similar(
         self,
         query_embedding: list[float],
         scope_key: str,
-        model_name: str,
+        model: str,
         *,
         entity_type: str | None = None,
         limit: int = 10,
     ) -> list[tuple[Entity, float]]:
         """Search for similar entities within a scope.
 
+        Routes to the correct dimension table based on query vector length.
+
         Args:
             query_embedding: Query vector.
             scope_key: Scope for hierarchical filtering (includes ancestors up to global).
-            model_name: Embedding model name.
+            model: Embedding model name.
             entity_type: Optional entity type filter.
             limit: Maximum results.
 
@@ -171,10 +209,11 @@ class EntityEmbeddingAdapter:
             Over-fetches 3x to account for scope filtering. May return fewer than
             `limit` results if most embeddings are in scopes outside the query scope.
         """
-        raw_results = self._embeddings.search(
+        store = self._get_store(len(query_embedding))
+        raw_results = store.search(
             query=query_embedding,
             entity_type=self.ENTITY_TYPE,
-            model_name=model_name,
+            model=model,
             top_k=limit * 3,  # Over-fetch to account for scope filtering
         )
 

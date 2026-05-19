@@ -55,7 +55,7 @@ class TestQuantizeInt8:
     def test_with_calibration(self) -> None:
         """Quantize with external calibration range."""
         embedding = [0.2, 0.4, 0.6]
-        calibration = Calibration(min_val=0.0, max_val=1.0, model_name="test", dimensions=3)
+        calibration = Calibration(min_val=0.0, max_val=1.0, model="test", dimensions=3)
         quantized = quantize_int8(embedding, calibration)
         recovered = dequantize_int8(quantized)
 

@@ -112,7 +112,11 @@ async def embed_facts(lg: Logger, kelt: Client, config: Config) -> EmbeddingClie
     try:
         print(f"  {MUTED}Connecting to embedding server...{RESET}")
         result = await embed_missing_facts(
-            lg=lg, embedder=embedder, embedding_adapter=kelt.atomic.embeddings, batch_size=50
+            lg=lg,
+            embedder=embedder,
+            embedding_adapter=kelt.atomic.embeddings,
+            dimensions=384,
+            batch_size=50,
         )
         print(f"  {OK}✓ Embedded {result.processed} facts{RESET}")
         if result.failed:
@@ -159,7 +163,7 @@ async def demo_similarity_search(kelt: Client, embedder: EmbeddingClient):
 
     query_result = await embedder.embed_async(query)
     similar_facts = kelt.atomic.embeddings.search_similar(
-        query=query_result.embedding, model_name=embedder.model, top_k=5, min_similarity=0.3
+        query=query_result.embedding, model=embedder.model, top_k=5, min_similarity=0.3
     )
 
     print(f"  {OK}Top matches:{RESET}")
@@ -173,7 +177,7 @@ async def demo_similarity_search(kelt: Client, embedder: EmbeddingClient):
 
     similar_security = kelt.atomic.embeddings.search_similar(
         query=query_result.embedding,
-        model_name=embedder.model,
+        model=embedder.model,
         top_k=5,
         min_similarity=0.3,
         categories=["security"],
@@ -212,7 +216,7 @@ async def demo_rag_vs_static(kelt: Client, config: Config, embedder: EmbeddingCl
     if embedder:
         query_result = await embedder.embed_async(question)
         similar = kelt.atomic.embeddings.search_similar(
-            query=query_result.embedding, model_name=embedder.model, top_k=3, min_similarity=0.3
+            query=query_result.embedding, model=embedder.model, top_k=3, min_similarity=0.3
         )
         print(f"  {OK}Selected facts:{RESET}")
         for sf in similar:

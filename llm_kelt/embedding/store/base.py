@@ -33,7 +33,7 @@ class EmbeddingStoreProtocol(Protocol):
         entity_type: str,
         entity_id: str,
         embedding: list[float],
-        model_name: str,
+        model: str,
         calibration: Calibration | None = None,
         session: Session | None = None,
     ) -> None:
@@ -43,7 +43,7 @@ class EmbeddingStoreProtocol(Protocol):
             entity_type: Type prefix (e.g., "atomic.fact").
             entity_id: Entity identifier.
             embedding: Float32 embedding vector.
-            model_name: Embedding model name.
+            model: Embedding model name.
             calibration: Optional calibration data for quantized formats.
             session: Optional session for transaction participation.
         """
@@ -53,7 +53,7 @@ class EmbeddingStoreProtocol(Protocol):
         self,
         query: list[float],
         entity_type: str,
-        model_name: str,
+        model: str,
         top_k: int,
         min_similarity: float = 0.0,
         entity_id_subquery: Any | None = None,
@@ -63,7 +63,7 @@ class EmbeddingStoreProtocol(Protocol):
         Args:
             query: Query embedding vector (float32).
             entity_type: Type prefix to search within.
-            model_name: Embedding model to search.
+            model: Embedding model to search.
             top_k: Maximum results to return.
             min_similarity: Minimum similarity threshold.
             entity_id_subquery: Optional subquery for pre-filtering.
@@ -77,14 +77,14 @@ class EmbeddingStoreProtocol(Protocol):
         self,
         entity_type: str,
         entity_id: str,
-        model_name: str,
+        model: str,
     ) -> list[float] | None:
         """Get embedding for an entity (dequantized to float32).
 
         Args:
             entity_type: Type prefix.
             entity_id: Entity identifier.
-            model_name: Embedding model name.
+            model: Embedding model name.
 
         Returns:
             Float32 embedding vector if found, None otherwise.
@@ -113,14 +113,14 @@ class EmbeddingStoreProtocol(Protocol):
         self,
         entity_type: str,
         entity_id: str,
-        model_name: str,
+        model: str,
     ) -> bool:
         """Check if embedding exists for an entity.
 
         Args:
             entity_type: Type prefix.
             entity_id: Entity identifier.
-            model_name: Embedding model name.
+            model: Embedding model name.
 
         Returns:
             True if embedding exists.
@@ -130,13 +130,13 @@ class EmbeddingStoreProtocol(Protocol):
     def count(
         self,
         entity_type: str | None = None,
-        model_name: str | None = None,
+        model: str | None = None,
     ) -> int:
         """Count embeddings.
 
         Args:
             entity_type: Optional type filter.
-            model_name: Optional model filter.
+            model: Optional model filter.
 
         Returns:
             Total count of matching embeddings.
@@ -147,14 +147,14 @@ class EmbeddingStoreProtocol(Protocol):
         self,
         entity_type: str,
         entity_ids: list[str],
-        model_name: str,
+        model: str,
     ) -> set[str]:
         """Find which entity IDs have embeddings (single query).
 
         Args:
             entity_type: Type prefix.
             entity_ids: List of entity IDs to check.
-            model_name: Embedding model name.
+            model: Embedding model name.
 
         Returns:
             Set of entity IDs that have embeddings.
@@ -216,7 +216,7 @@ class StoreBase:
         self,
         entity_type: str,
         entity_id: str,
-        model_name: str,
+        model: str,
     ) -> bool:
         """Check if embedding exists."""
         from sqlalchemy import func, select
@@ -228,7 +228,7 @@ class StoreBase:
                 .where(
                     self._model.entity_type == entity_type,
                     self._model.entity_id == entity_id,
-                    self._model.model_name == model_name,
+                    self._model.model_name == model,
                 )
             )
             return (session.scalar(stmt) or 0) > 0
@@ -236,7 +236,7 @@ class StoreBase:
     def count(
         self,
         entity_type: str | None = None,
-        model_name: str | None = None,
+        model: str | None = None,
     ) -> int:
         """Count embeddings with optional filters."""
         from sqlalchemy import func, select
@@ -245,15 +245,15 @@ class StoreBase:
             stmt = select(func.count()).select_from(self._model)
             if entity_type:
                 stmt = stmt.where(self._model.entity_type == entity_type)
-            if model_name:
-                stmt = stmt.where(self._model.model_name == model_name)
+            if model:
+                stmt = stmt.where(self._model.model_name == model)
             return session.scalar(stmt) or 0
 
     def list_existing(
         self,
         entity_type: str,
         entity_ids: list[str],
-        model_name: str,
+        model: str,
     ) -> set[str]:
         """Find which entity IDs have embeddings (single query)."""
         from sqlalchemy import select
@@ -265,7 +265,7 @@ class StoreBase:
             stmt = select(self._model.entity_id).where(
                 self._model.entity_type == entity_type,
                 self._model.entity_id.in_(entity_ids),
-                self._model.model_name == model_name,
+                self._model.model_name == model,
             )
             return set(session.scalars(stmt).all())
 

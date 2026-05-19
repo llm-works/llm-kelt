@@ -302,7 +302,7 @@ class TestAssertionsEmbeddings:
         # Verify via search_similar - should find the assertion with new embedding
         results = kelt_client.atomic.embeddings.search_similar(
             query=[0.4, 0.5, 0.6],
-            model_name="test-model",
+            model="test-model",
             min_similarity=0.9,
         )
         assert len(results) == 1
@@ -376,7 +376,7 @@ class TestAssertionsEmbeddings:
         # Search for something similar to fact1
         results = kelt_client.atomic.embeddings.search_similar(
             query=[0.85, 0.15, 0.0],
-            model_name="test",
+            model="test",
             top_k=10,
             min_similarity=0.5,
         )
@@ -403,7 +403,7 @@ class TestAssertionsEmbeddings:
         # High threshold - should only match very similar
         results = kelt_client.atomic.embeddings.search_similar(
             query=[1.0, 0.0, 0.0],
-            model_name="test",
+            model="test",
             min_similarity=0.95,
         )
 
@@ -419,7 +419,7 @@ class TestAssertionsEmbeddings:
 
         results = kelt_client.atomic.embeddings.search_similar(
             query=[0.5, 0.5, 0.0],
-            model_name="test",
+            model="test",
             top_k=3,
             min_similarity=0.0,
         )
@@ -438,7 +438,7 @@ class TestAssertionsEmbeddings:
         # Default: active assertions only
         results = kelt_client.atomic.embeddings.search_similar(
             query=[1.0, 0.0, 0.0],
-            model_name="test",
+            model="test",
             min_similarity=0.0,
         )
 
@@ -454,7 +454,7 @@ class TestAssertionsEmbeddings:
         # Search with completely different embedding and high threshold
         results = kelt_client.atomic.embeddings.search_similar(
             query=[0.0, 0.0, 1.0],
-            model_name="test",
+            model="test",
             min_similarity=0.99,
         )
 
@@ -467,7 +467,7 @@ class TestAssertionsEmbeddings:
 
         results = kelt_client.atomic.embeddings.search_similar(
             query=[1.0, 0.0, 0.0],
-            model_name="model-b",  # Different model
+            model="model-b",  # Different model
             min_similarity=0.0,
         )
 
@@ -481,7 +481,7 @@ class TestAssertionsEmbeddings:
         # Verify embedding exists
         results = kelt_client.atomic.embeddings.search_similar(
             query=[0.1, 0.2, 0.3],
-            model_name="test",
+            model="test",
             min_similarity=0.9,
         )
         assert len(results) == 1
@@ -493,7 +493,7 @@ class TestAssertionsEmbeddings:
         # Embedding should be gone
         results_after = kelt_client.atomic.embeddings.search_similar(
             query=[0.1, 0.2, 0.3],
-            model_name="test",
+            model="test",
             min_similarity=0.0,
         )
         assert len(results_after) == 0
@@ -522,7 +522,7 @@ class TestAssertionsEmbeddings:
         # Verify no orphan embeddings left
         results = kelt_client.atomic.embeddings.search_similar(
             query=[0.5, 0.5, 0.5],
-            model_name="test-model",
+            model="test-model",
             min_similarity=0.9,
         )
         assert len(results) == 0
@@ -542,7 +542,7 @@ class TestAssertionsEmbeddings:
         # Search without categories - should get all
         results_all = kelt_client.atomic.embeddings.search_similar(
             query=[0.9, 0.1, 0.0],
-            model_name="test",
+            model="test",
             min_similarity=0.5,
         )
         assert len(results_all) == 3
@@ -550,7 +550,7 @@ class TestAssertionsEmbeddings:
         # Search with single category filter
         results_prefs = kelt_client.atomic.embeddings.search_similar(
             query=[0.9, 0.1, 0.0],
-            model_name="test",
+            model="test",
             min_similarity=0.5,
             categories=["preferences"],
         )
@@ -560,7 +560,7 @@ class TestAssertionsEmbeddings:
         # Search with multiple categories
         results_multi = kelt_client.atomic.embeddings.search_similar(
             query=[0.9, 0.1, 0.0],
-            model_name="test",
+            model="test",
             min_similarity=0.5,
             categories=["preferences", "rules"],
         )
@@ -573,7 +573,7 @@ class TestAssertionsEmbeddings:
         # Search with non-existent category
         results_empty = kelt_client.atomic.embeddings.search_similar(
             query=[0.9, 0.1, 0.0],
-            model_name="test",
+            model="test",
             min_similarity=0.5,
             categories=["nonexistent"],
         )
@@ -613,7 +613,7 @@ class TestAssertionsEmbeddings:
         # Search with filter for minority category
         results = kelt_client.atomic.embeddings.search_similar(
             query=[1.0, 0.0, 0.0],
-            model_name="test",
+            model="test",
             top_k=5,  # Without pre-filter, top-5 would all be majority
             min_similarity=0.0,
             filter=EmbeddingFilter().categories("minority"),

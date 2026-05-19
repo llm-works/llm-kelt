@@ -659,12 +659,12 @@ class TestEntityEmbeddings:
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=entity.id,
             embedding=embedding,
-            model_name="test-model",
+            model="test-model",
         )
 
         retrieved = kg_with_embeddings.embeddings.get_embedding(
             entity_id=entity.id,
-            model_name="test-model",
+            model="test-model",
         )
         assert retrieved is not None
         assert len(retrieved) == self.TEST_DIMS
@@ -682,7 +682,7 @@ class TestEntityEmbeddings:
 
         result = kg_with_embeddings.embeddings.get_embedding(
             entity_id=entity.id,
-            model_name="test-model",
+            model="test-model",
         )
         assert result is None
 
@@ -697,7 +697,7 @@ class TestEntityEmbeddings:
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=entity.id,
             embedding=self.make_embedding(0.1),
-            model_name="test-model",
+            model="test-model",
         )
 
         deleted_count = kg_with_embeddings.embeddings.delete_embedding(entity.id)
@@ -706,7 +706,7 @@ class TestEntityEmbeddings:
         # Verify it's gone
         result = kg_with_embeddings.embeddings.get_embedding(
             entity_id=entity.id,
-            model_name="test-model",
+            model="test-model",
         )
         assert result is None
 
@@ -740,24 +740,24 @@ class TestEntityEmbeddings:
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=tesla.id,
             embedding=tesla_emb,
-            model_name="test-model",
+            model="test-model",
         )
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=apple.id,
             embedding=apple_emb,
-            model_name="test-model",
+            model="test-model",
         )
         kg_with_embeddings.embeddings.set_embedding(
             entity_id=spacex.id,
             embedding=spacex_emb,
-            model_name="test-model",
+            model="test-model",
         )
 
         # Search for entities similar to Tesla's embedding
         results = kg_with_embeddings.embeddings.search_similar(
             query_embedding=tesla_emb,
             scope_key="global",
-            model_name="test-model",
+            model="test-model",
             limit=3,
         )
 
@@ -795,14 +795,14 @@ class TestEntityEmbeddings:
             kg_with_embeddings.embeddings.set_embedding(
                 entity_id=entity.id,
                 embedding=test_emb,
-                model_name="test-model",
+                model="test-model",
             )
 
         # Search from org:acme scope - should see global and org:acme, not org:other
         results = kg_with_embeddings.embeddings.search_similar(
             query_embedding=test_emb,
             scope_key="org:acme",
-            model_name="test-model",
+            model="test-model",
             limit=10,
         )
 

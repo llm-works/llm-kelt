@@ -21,7 +21,7 @@ class RAGArgs:
 
     top_k: int = 10
     min_similarity: float = 0.3
-    model_name: str | None = None  # Defaults to embedder's model
+    model: str | None = None  # Defaults to embedder's model
     categories: list[str] | None = None  # Filter results to these categories
 
 
@@ -159,13 +159,13 @@ class ContextQuery:
         # Embed the question
         result = await self._embedder.embed_async(question)
 
-        # Determine model name for search
-        model_name = rag.model_name if rag.model_name else self._embedder.model
+        # Determine model for search
+        model = rag.model if rag.model else self._embedder.model
 
         # Search for similar facts (category filtering done in SQL for efficiency)
         scored_facts = self._embedding_adapter.search_similar(
             query=result.embedding,
-            model_name=model_name,
+            model=model,
             top_k=rag.top_k,
             min_similarity=rag.min_similarity,
             categories=rag.categories,

@@ -12,7 +12,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from llm_kelt.core.types import ScoredEntity
+from llm_kelt.embedding import Config as EmbeddingConfig
+from llm_kelt.embedding import Factory as EmbeddingFactory
 from llm_kelt.embedding import StoreClient as EmbeddingStoreClient
+from llm_kelt.embedding.types import QuantizationFormat
 from llm_kelt.memory.isolation import build_context_filter
 
 from .models import Fact
@@ -98,16 +101,22 @@ class EmbeddingFilter:
 
 class EmbeddingAdapter:
     """
-    Embedding operations for atomic facts.
+    Embedding operations for atomic facts with dynamic dimension routing.
 
-    Provides a fact-specific interface on top of EmbeddingStoreClient.
+    Routes embeddings to the correct table based on their dimensions.
     Uses entity_type "atomic.fact" to namespace embeddings.
 
     Example:
-        adapter = EmbeddingAdapter(session_factory, context_key, embeddings, embedder)
+        adapter = EmbeddingAdapter(
+            session_factory=session_factory,
+            context_key=context_key,
+            factory=EmbeddingFactory(),
+            format=QuantizationFormat.F16,
+            embedder=embedder,
+        )
 
-        # Embed a fact
-        adapter.embed_fact(fact, "text-embedding-3-small")
+        # Embed a fact (auto-routes to correct dimension table)
+        adapter.embed_fact(fact, dimensions=256)
 
         # Search for similar facts
         results = adapter.search_similar(query_embedding, "text-embedding-3-small")
@@ -122,32 +131,55 @@ class EmbeddingAdapter:
         self,
         session_factory: Callable[[], Any],
         context_key: str | None,
-        embeddings: EmbeddingStoreClient,
+        factory: EmbeddingFactory,
+        format: QuantizationFormat,
         embedder: EmbeddingClient | None = None,
+        default_dimensions: int | None = None,
     ) -> None:
         """
-        Initialize EmbeddingAdapter.
+        Initialize EmbeddingAdapter with dynamic dimension routing.
 
         Args:
             session_factory: Callable that returns a context manager for database sessions.
             context_key: Profile ID (32-char hash) to scope operations to.
-            embeddings: EmbeddingStoreClient for vector storage operations.
+            factory: EmbeddingFactory for creating dimension-specific stores.
+            format: Quantization format to use (F32, F16, I8, I4).
             embedder: Optional EmbeddingClient for generating embeddings via HTTP.
+            default_dimensions: Default dimensions for embed_fact when not specified.
         """
         self._session_factory = session_factory
         self._context_key = context_key
-        self._embeddings = embeddings
+        self._factory = factory
+        self._format = format
         self._embedder = embedder
+        self._default_dimensions = default_dimensions
+        self._stores: dict[int, EmbeddingStoreClient] = {}
+
+    def _get_store(self, dimensions: int) -> EmbeddingStoreClient:
+        """Get or create a store for the given dimensions."""
+        if dimensions not in self._stores:
+            config = EmbeddingConfig(
+                context_key=self._context_key or "_default",
+                format=self._format,
+                dimensions=dimensions,
+            )
+            self._stores[dimensions] = self._factory.create(self._session_factory, config)
+        return self._stores[dimensions]
 
     def embed_fact(
-        self, fact: Fact, model_name: str | None = None, session: Any | None = None
+        self,
+        fact: Fact,
+        model: str | None = None,
+        dimensions: int | None = None,
+        session: Any | None = None,
     ) -> None:
         """
         Generate and store embedding for a fact.
 
         Args:
             fact: The fact to embed (uses fact.content).
-            model_name: Embedding model name. If None, uses embedder's default model.
+            model: Embedding model name. If None, uses embedder's default model.
+            dimensions: Output dimensions. If None, uses adapter default or embedder config.
             session: Optional session to use. If None, creates new session and commits.
                      If provided, uses existing session without committing (caller controls).
 
@@ -157,17 +189,19 @@ class EmbeddingAdapter:
         if not self._embedder:
             raise RuntimeError("No embedder configured")
 
-        model = model_name or self._embedder.model
-        if model_name is not None and model_name != self._embedder.model:
+        resolved_model = model or self._embedder.model
+        if model is not None and model != self._embedder.model:
             raise ValueError(
-                f"embedder model {self._embedder.model!r} does not match requested {model_name!r}"
+                f"embedder model {self._embedder.model!r} does not match requested {model!r}"
             )
-        result = self._embedder.embed(fact.content)
-        self._embeddings.store(
+        dims = dimensions if dimensions is not None else self._default_dimensions
+        result = self._embedder.embed(fact.content, dimensions=dims)
+        store = self._get_store(len(result.embedding))
+        store.store(
             entity_type=self.ENTITY_TYPE,
             entity_id=str(fact.id),
             embedding=result.embedding,
-            model_name=model,
+            model=resolved_model,
             session=session,
         )
 
@@ -175,35 +209,40 @@ class EmbeddingAdapter:
         self,
         fact_id: int,
         embedding: list[float],
-        model_name: str,
+        model: str,
     ) -> None:
         """
         Store a pre-computed embedding for a fact.
 
+        Routes to the correct table based on embedding dimensions.
+
         Args:
             fact_id: The fact ID.
             embedding: Pre-computed embedding vector.
-            model_name: Embedding model name.
+            model: Embedding model name.
         """
-        self._embeddings.store(
+        store = self._get_store(len(embedding))
+        store.store(
             entity_type=self.ENTITY_TYPE,
             entity_id=str(fact_id),
             embedding=embedding,
-            model_name=model_name,
+            model=model,
         )
 
-    def get_embedding(self, fact_id: int, model_name: str) -> list[float] | None:
+    def get_embedding(self, fact_id: int, model: str, dimensions: int) -> list[float] | None:
         """
         Get embedding for a fact.
 
         Args:
             fact_id: The fact ID.
-            model_name: Embedding model name.
+            model: Embedding model name.
+            dimensions: Embedding dimensions (determines which table to query).
 
         Returns:
             Embedding vector if found, None otherwise.
         """
-        return self._embeddings.get(self.ENTITY_TYPE, str(fact_id), model_name)
+        store = self._get_store(dimensions)
+        return store.get(self.ENTITY_TYPE, str(fact_id), model)
 
     def _build_entity_id_subquery(
         self,
@@ -278,19 +317,22 @@ class EmbeddingAdapter:
     def _search_and_score(
         self,
         query: list[float],
-        model_name: str,
+        model: str,
         fetch_k: int,
         min_similarity: float,
         effective_filter: EmbeddingFilter | None,
     ) -> list[ScoredEntity[Fact]]:
         """Search embedding store with pre-filtered vector search."""
+        # Route to correct store based on query dimension
+        store = self._get_store(len(query))
+
         # Build subquery for pre-filtering (context + active + user filter)
         entity_id_subquery = self._build_entity_id_subquery(effective_filter)
 
-        results = self._embeddings.search(
+        results = store.search(
             query=query,
             entity_type=self.ENTITY_TYPE,
-            model_name=model_name,
+            model=model,
             top_k=fetch_k,
             min_similarity=min_similarity,
             entity_id_subquery=entity_id_subquery,
@@ -309,7 +351,7 @@ class EmbeddingAdapter:
     def search_similar(
         self,
         query: list[float],
-        model_name: str,
+        model: str,
         *,
         top_k: int = 10,
         min_similarity: float = 0.0,
@@ -319,9 +361,11 @@ class EmbeddingAdapter:
     ) -> list[ScoredEntity[Fact]]:
         """Search for facts similar to a query embedding.
 
+        Routes to the correct dimension table based on query vector length.
+
         Args:
             query: Query embedding vector.
-            model_name: Embedding model name.
+            model: Embedding model name.
             top_k: Maximum number of results to return.
             min_similarity: Minimum similarity threshold.
             filter: EmbeddingFilter for flexible filtering (recommended).
@@ -338,13 +382,13 @@ class EmbeddingAdapter:
             raise ValueError(f"top_k must be at least 1, got {top_k}")
 
         effective_filter = self._build_filter(filter, fact_type, categories)
-        return self._search_and_score(query, model_name, top_k, min_similarity, effective_filter)
+        return self._search_and_score(query, model, top_k, min_similarity, effective_filter)
 
     def delete_embedding(self, fact_id: int, *, session: Session | None = None) -> int:
         """
         Delete embeddings when a fact is deleted.
 
-        Should be called when a fact is hard-deleted to prevent orphan embeddings.
+        Deletes from all dimension tables to ensure cleanup.
 
         Args:
             fact_id: The fact ID.
@@ -354,41 +398,49 @@ class EmbeddingAdapter:
         Returns:
             Number of embeddings deleted.
         """
-        return self._embeddings.delete(self.ENTITY_TYPE, str(fact_id), session=session)
+        total = 0
+        for store in self._stores.values():
+            total += store.delete(self.ENTITY_TYPE, str(fact_id), session=session)
+        return total
 
-    def has_embedding(self, fact_id: int, model_name: str) -> bool:
+    def has_embedding(self, fact_id: int, model: str, dimensions: int) -> bool:
         """
-        Check if a fact has an embedding for a specific model.
+        Check if a fact has an embedding for a specific model and dimensions.
 
         Args:
             fact_id: The fact ID.
-            model_name: Embedding model name.
+            model: Embedding model name.
+            dimensions: Embedding dimensions (determines which table to query).
 
         Returns:
             True if embedding exists.
         """
-        return self._embeddings.exists(self.ENTITY_TYPE, str(fact_id), model_name)
+        store = self._get_store(dimensions)
+        return store.exists(self.ENTITY_TYPE, str(fact_id), model)
 
     def list_without_embeddings(
         self,
-        model_name: str,
+        model: str,
+        dimensions: int,
         *,
         fact_type: str | None = None,
         limit: int = 100,
     ) -> list[Fact]:
         """
-        Find facts that need embeddings for a specific model.
+        Find facts that need embeddings for a specific model and dimensions.
 
         Useful for batch embedding generation.
 
         Args:
-            model_name: Embedding model name.
+            model: Embedding model name.
+            dimensions: Embedding dimensions (determines which table to check).
             fact_type: Optional fact type filter.
             limit: Maximum facts to return.
 
         Returns:
             List of facts without embeddings for the model.
         """
+        store = self._get_store(dimensions)
         with self._session_factory() as session:
             # Get candidate facts
             stmt = select(Fact).where(
@@ -409,22 +461,31 @@ class EmbeddingAdapter:
 
             # Filter to those without embeddings
             fact_ids = [str(f.id) for f in facts]
-            missing_ids = set(self._embeddings.list_missing(self.ENTITY_TYPE, fact_ids, model_name))
+            missing_ids = set(store.list_missing(self.ENTITY_TYPE, fact_ids, model))
 
             result = [f for f in facts if str(f.id) in missing_ids][:limit]
             return cast(list[Fact], detach_all(result, session))
 
-    def count(self, model_name: str | None = None) -> int:
+    def count(self, model: str | None = None, dimensions: int | None = None) -> int:
         """
         Count embeddings for atomic facts.
 
         Args:
-            model_name: Optional model filter.
+            model: Optional model filter.
+            dimensions: Optional dimensions filter. If None, sums across all known tables.
 
         Returns:
             Total count.
         """
-        return self._embeddings.count(entity_type=self.ENTITY_TYPE, model_name=model_name)
+        if dimensions is not None:
+            store = self._get_store(dimensions)
+            return store.count(entity_type=self.ENTITY_TYPE, model=model)
+
+        # Sum across all known dimension tables
+        total = 0
+        for store in self._stores.values():
+            total += store.count(entity_type=self.ENTITY_TYPE, model=model)
+        return total
 
     def delete_orphans(self, dry_run: bool = False) -> int:
         """Delete embeddings for facts that no longer exist.
