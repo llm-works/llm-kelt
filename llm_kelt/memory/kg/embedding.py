@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -68,17 +69,21 @@ class EntityEmbeddingAdapter:
         self._format = format
         self._embedder = embedder
         self._stores: dict[int, EmbeddingStoreClient] = {}
+        self._stores_lock = threading.Lock()
 
     def _get_store(self, dimensions: int) -> EmbeddingStoreClient:
-        """Get or create a store for the given dimensions."""
-        if dimensions not in self._stores:
-            config = EmbeddingConfig(
-                context_key="_kg",
-                format=self._format,
-                dimensions=dimensions,
-            )
-            self._stores[dimensions] = self._factory.create(self._session_factory, config)
-        return self._stores[dimensions]
+        """Get or create a store for the given dimensions (thread-safe)."""
+        if dimensions in self._stores:
+            return self._stores[dimensions]
+        with self._stores_lock:
+            if dimensions not in self._stores:
+                config = EmbeddingConfig(
+                    context_key="_kg",
+                    format=self._format,
+                    dimensions=dimensions,
+                )
+                self._stores[dimensions] = self._factory.create(self._session_factory, config)
+            return self._stores[dimensions]
 
     def _entity_text(self, entity: Entity) -> str:
         """Build text representation of entity for embedding."""
@@ -163,17 +168,20 @@ class EntityEmbeddingAdapter:
             model=model,
         )
 
-    def delete_embedding(self, entity_id: int) -> int:
-        """Delete all embeddings for an entity.
-
-        Deletes from all dimension tables to ensure cleanup.
+    def delete_embedding(self, entity_id: int, *, dimensions: int | None = None) -> int:
+        """Delete embeddings for an entity.
 
         Args:
             entity_id: The entity ID.
+            dimensions: Embedding dimensions to delete from. If None, falls back to
+                deleting from cached stores only (may miss if cache is empty).
 
         Returns:
             Number of embeddings deleted.
         """
+        if dimensions is not None:
+            store = self._get_store(dimensions)
+            return store.delete(entity_type=self.ENTITY_TYPE, entity_id=str(entity_id))
         total = 0
         for store in self._stores.values():
             total += store.delete(

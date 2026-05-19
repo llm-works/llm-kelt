@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
@@ -154,17 +155,21 @@ class EmbeddingAdapter:
         self._embedder = embedder
         self._default_dimensions = default_dimensions
         self._stores: dict[int, EmbeddingStoreClient] = {}
+        self._stores_lock = threading.Lock()
 
     def _get_store(self, dimensions: int) -> EmbeddingStoreClient:
-        """Get or create a store for the given dimensions."""
-        if dimensions not in self._stores:
-            config = EmbeddingConfig(
-                context_key=self._context_key or "_default",
-                format=self._format,
-                dimensions=dimensions,
-            )
-            self._stores[dimensions] = self._factory.create(self._session_factory, config)
-        return self._stores[dimensions]
+        """Get or create a store for the given dimensions (thread-safe)."""
+        if dimensions in self._stores:
+            return self._stores[dimensions]
+        with self._stores_lock:
+            if dimensions not in self._stores:
+                config = EmbeddingConfig(
+                    context_key=self._context_key or "_default",
+                    format=self._format,
+                    dimensions=dimensions,
+                )
+                self._stores[dimensions] = self._factory.create(self._session_factory, config)
+            return self._stores[dimensions]
 
     def embed_fact(
         self,
@@ -384,20 +389,26 @@ class EmbeddingAdapter:
         effective_filter = self._build_filter(filter, fact_type, categories)
         return self._search_and_score(query, model, top_k, min_similarity, effective_filter)
 
-    def delete_embedding(self, fact_id: int, *, session: Session | None = None) -> int:
+    def delete_embedding(
+        self, fact_id: int, *, dimensions: int | None = None, session: Session | None = None
+    ) -> int:
         """
         Delete embeddings when a fact is deleted.
 
-        Deletes from all dimension tables to ensure cleanup.
-
         Args:
             fact_id: The fact ID.
+            dimensions: Embedding dimensions to delete from. If None, uses default_dimensions.
+                If both are None, falls back to deleting from cached stores only.
             session: Optional session for transaction participation. If provided,
                 the deletion participates in the caller's transaction.
 
         Returns:
             Number of embeddings deleted.
         """
+        dims = dimensions if dimensions is not None else self._default_dimensions
+        if dims is not None:
+            store = self._get_store(dims)
+            return store.delete(self.ENTITY_TYPE, str(fact_id), session=session)
         total = 0
         for store in self._stores.values():
             total += store.delete(self.ENTITY_TYPE, str(fact_id), session=session)
@@ -472,16 +483,16 @@ class EmbeddingAdapter:
 
         Args:
             model: Optional model filter.
-            dimensions: Optional dimensions filter. If None, sums across all known tables.
+            dimensions: Embedding dimensions. If None, uses default_dimensions.
+                If both are None, sums across cached stores only.
 
         Returns:
             Total count.
         """
-        if dimensions is not None:
-            store = self._get_store(dimensions)
+        dims = dimensions if dimensions is not None else self._default_dimensions
+        if dims is not None:
+            store = self._get_store(dims)
             return store.count(entity_type=self.ENTITY_TYPE, model=model)
-
-        # Sum across all known dimension tables
         total = 0
         for store in self._stores.values():
             total += store.count(entity_type=self.ENTITY_TYPE, model=model)
