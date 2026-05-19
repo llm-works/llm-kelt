@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from appinfra.log import Logger
-from llm_infer.client import EmbeddingClient, EmbeddingResult
+from llm_infer.client import EmbeddingClient
 
 from ..memory.atomic.embedding import EmbeddingAdapter
 from ..memory.atomic.models import Fact
@@ -24,16 +24,16 @@ class EmbedFactsResult:
 def _store_embeddings(
     lg: Logger,
     facts: "Sequence[Fact]",
-    results: list[EmbeddingResult],
+    embeddings: list[list[float]],
     embedding_adapter: EmbeddingAdapter,
     model_name: str,
 ) -> tuple[int, int]:
     """Store embeddings for facts, returning (processed, failed) counts."""
     processed = 0
     failed = 0
-    for fact, result in zip(facts, results, strict=True):
+    for fact, embedding in zip(facts, embeddings, strict=True):
         try:
-            embedding_adapter.set_embedding(fact.id, result.embedding, model_name)
+            embedding_adapter.set_embedding(fact.id, embedding, model_name)
             processed += 1
         except Exception as e:
             lg.error(
@@ -77,8 +77,8 @@ async def _process_batch(
 ) -> tuple[int, int]:
     """Process a single batch of facts, with fallback to individual embedding."""
     try:
-        results = await embedder.embed_batch_async([f.content for f in facts])
-        return _store_embeddings(lg, facts, results, embedding_adapter, model_name)
+        batch_result = await embedder.embed_batch_async([f.content for f in facts])
+        return _store_embeddings(lg, facts, batch_result.embeddings, embedding_adapter, model_name)
     except Exception as e:
         lg.warning(
             "batch embedding failed, falling back to individual",
@@ -99,7 +99,7 @@ async def embed_missing_facts(
     Finds facts missing embeddings and generates them in batches.
     Continues processing even if individual embeddings fail.
 
-    The model name is discovered from the embedding server automatically.
+    Uses the model name from the embedder.
 
     Args:
         lg: Logger instance.

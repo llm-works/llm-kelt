@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from llm_infer.client import EmbeddingResult
+from llm_infer.client.backends.embedding import BatchEmbeddingResult
 
 from llm_kelt.inference.embed_facts import embed_missing_facts
 
@@ -23,15 +24,14 @@ class TestEmbedMissingFactsIntegration:
             return [val, val + 0.1, val + 0.2]
 
         async def embed_batch_async(texts):
-            return [
-                EmbeddingResult(
-                    embedding=make_embedding(t),
-                    model="test-model",
-                    dimensions=3,
-                    prompt_tokens=len(t),
-                )
-                for t in texts
-            ]
+            embeddings = [make_embedding(t) for t in texts]
+            return BatchEmbeddingResult(
+                embeddings=embeddings,
+                model="test-model",
+                dimensions=3,
+                size=len(texts),
+                total_prompt_tokens=sum(len(t) for t in texts),
+            )
 
         async def embed_async(text):
             return EmbeddingResult(

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from llm_infer.client import EmbeddingResult
+from llm_infer.client.backends.embedding import BatchEmbeddingResult
 
 from llm_kelt.inference.embed_facts import EmbedFactsResult, embed_missing_facts
 
@@ -73,17 +74,13 @@ class TestEmbedMissingFacts:
         # First call returns facts, second call returns empty (done)
         mock_facts_client.list_without_embeddings.side_effect = [sample_facts, []]
 
-        mock_embedder.embed_batch_async.return_value = [
-            EmbeddingResult(
-                embedding=[0.1, 0.2], model="test-model", dimensions=2, prompt_tokens=5
-            ),
-            EmbeddingResult(
-                embedding=[0.3, 0.4], model="test-model", dimensions=2, prompt_tokens=5
-            ),
-            EmbeddingResult(
-                embedding=[0.5, 0.6], model="test-model", dimensions=2, prompt_tokens=5
-            ),
-        ]
+        mock_embedder.embed_batch_async.return_value = BatchEmbeddingResult(
+            embeddings=[[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
+            model="test-model",
+            dimensions=2,
+            size=3,
+            total_prompt_tokens=15,
+        )
 
         result = await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
 
@@ -104,13 +101,20 @@ class TestEmbedMissingFacts:
         mock_facts_client.list_without_embeddings.side_effect = [batch1, batch2, []]
 
         mock_embedder.embed_batch_async.side_effect = [
-            [
-                EmbeddingResult(embedding=[0.1], model="m", dimensions=1, prompt_tokens=1),
-                EmbeddingResult(embedding=[0.2], model="m", dimensions=1, prompt_tokens=1),
-            ],
-            [
-                EmbeddingResult(embedding=[0.3], model="m", dimensions=1, prompt_tokens=1),
-            ],
+            BatchEmbeddingResult(
+                embeddings=[[0.1], [0.2]],
+                model="m",
+                dimensions=1,
+                size=2,
+                total_prompt_tokens=2,
+            ),
+            BatchEmbeddingResult(
+                embeddings=[[0.3]],
+                model="m",
+                dimensions=1,
+                size=1,
+                total_prompt_tokens=1,
+            ),
         ]
 
         result = await embed_missing_facts(
@@ -167,11 +171,13 @@ class TestEmbedMissingFacts:
         """Test that set_embedding failures are counted."""
         mock_facts_client.list_without_embeddings.side_effect = [sample_facts, []]
 
-        mock_embedder.embed_batch_async.return_value = [
-            EmbeddingResult(embedding=[0.1], model="m", dimensions=1, prompt_tokens=1),
-            EmbeddingResult(embedding=[0.2], model="m", dimensions=1, prompt_tokens=1),
-            EmbeddingResult(embedding=[0.3], model="m", dimensions=1, prompt_tokens=1),
-        ]
+        mock_embedder.embed_batch_async.return_value = BatchEmbeddingResult(
+            embeddings=[[0.1], [0.2], [0.3]],
+            model="m",
+            dimensions=1,
+            size=3,
+            total_prompt_tokens=3,
+        )
 
         # Second set_embedding fails
         mock_facts_client.set_embedding.side_effect = [None, Exception("DB error"), None]
@@ -192,9 +198,13 @@ class TestEmbedMissingFacts:
             sample_facts[:1],
             [],
         ]
-        mock_embedder.embed_batch_async.return_value = [
-            EmbeddingResult(embedding=[0.1, 0.2, 0.3], model="m", dimensions=3, prompt_tokens=1),
-        ]
+        mock_embedder.embed_batch_async.return_value = BatchEmbeddingResult(
+            embeddings=[[0.1, 0.2, 0.3]],
+            model="m",
+            dimensions=3,
+            size=1,
+            total_prompt_tokens=1,
+        )
 
         await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
 
@@ -221,11 +231,13 @@ class TestEmbedMissingFacts:
         mock_facts_client.list_without_embeddings.return_value = sample_facts
 
         # Batch succeeds but all storage fails
-        mock_embedder.embed_batch_async.return_value = [
-            EmbeddingResult(embedding=[0.1], model="m", dimensions=1, prompt_tokens=1),
-            EmbeddingResult(embedding=[0.2], model="m", dimensions=1, prompt_tokens=1),
-            EmbeddingResult(embedding=[0.3], model="m", dimensions=1, prompt_tokens=1),
-        ]
+        mock_embedder.embed_batch_async.return_value = BatchEmbeddingResult(
+            embeddings=[[0.1], [0.2], [0.3]],
+            model="m",
+            dimensions=1,
+            size=3,
+            total_prompt_tokens=3,
+        )
         mock_facts_client.set_embedding.side_effect = Exception("DB unavailable")
 
         result = await embed_missing_facts(mock_logger, mock_embedder, mock_facts_client)
