@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `FactEntityStore.link(if_not_exists=True)` for idempotent fact-entity linking using PostgreSQL
+  upsert; avoids session corruption from `IntegrityError` on duplicate keys
 - Dynamic dimension routing for embedding adapters: embeddings automatically route to
   dimension-specific tables (e.g., `embeddings_256_f16`, `embeddings_384_f16`) based on
   vector length, enabling multi-model embedding support without schema changes

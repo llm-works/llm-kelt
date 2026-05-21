@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as SASession
 
@@ -621,10 +622,19 @@ class FactEntityStore:
         role: str = "subject",
         confidence: float = 1.0,
         extra: dict[str, Any] | None = None,
+        if_not_exists: bool = False,
         sa_session: SASession | None = None,
-    ) -> FactEntity:
-        """Link a fact to an entity."""
+    ) -> FactEntity | None:
+        """Link a fact to an entity.
+
+        Args:
+            if_not_exists: When True, uses PostgreSQL upsert to avoid session corruption
+                from IntegrityError on duplicate keys. Returns None if link already exists.
+        """
         with self._scope(sa_session) as s:
+            if if_not_exists:
+                return self._link_upsert(s, fact_id, entity_id, scope_key, role, confidence, extra)
+
             fe = FactEntity(
                 fact_id=fact_id,
                 entity_id=entity_id,
@@ -636,6 +646,38 @@ class FactEntityStore:
             s.add(fe)
             s.flush()
             return cast(FactEntity, detach(fe, s))
+
+    def _link_upsert(
+        self,
+        s: SASession,
+        fact_id: int,
+        entity_id: int,
+        scope_key: str,
+        role: str,
+        confidence: float,
+        extra: dict[str, Any] | None,
+    ) -> FactEntity | None:
+        """Insert link if not exists using PostgreSQL upsert. Returns None if already exists."""
+        stmt = (
+            pg_insert(FactEntity)
+            .values(
+                fact_id=fact_id,
+                entity_id=entity_id,
+                scope_key=scope_key,
+                role=role,
+                confidence=confidence,
+                extra=extra or {},
+            )
+            .on_conflict_do_nothing(index_elements=["fact_id", "entity_id"])
+        )
+        result = s.execute(stmt)
+        s.flush()
+
+        if result.rowcount == 0:  # type: ignore[attr-defined]
+            return None
+
+        fe = s.get(FactEntity, (fact_id, entity_id))
+        return cast(FactEntity, detach(fe, s)) if fe else None
 
     def get_entities_for_fact(
         self,
