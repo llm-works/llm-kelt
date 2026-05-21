@@ -532,7 +532,7 @@ class TestFactEntityLinkage:
         )
         assert link2 is None
 
-    def test_link_if_not_exists_does_not_corrupt_session(self, kelt_client):
+    def test_link_if_not_exists_does_not_corrupt_session(self, kelt_client, database):
         """link(if_not_exists=True) allows session to continue after duplicate."""
         fact_id = kelt_client.atomic.assertions.add(
             content="Tesla robotics announcement",
@@ -542,33 +542,37 @@ class TestFactEntityLinkage:
             scope_key="global", name="Tesla", entity_type="company"
         )
 
-        # Create initial link
-        kelt_client.kg.fact_entities.link(
-            fact_id=fact_id,
-            entity_id=tesla_id,
-            scope_key="global",
-        )
+        with database.session() as s:
+            # Create initial link
+            kelt_client.kg.fact_entities.link(
+                fact_id=fact_id,
+                entity_id=tesla_id,
+                scope_key="global",
+                sa_session=s,
+            )
 
-        # Attempt duplicate with if_not_exists=True (should not corrupt session)
-        result = kelt_client.kg.fact_entities.link(
-            fact_id=fact_id,
-            entity_id=tesla_id,
-            scope_key="global",
-            if_not_exists=True,
-        )
-        assert result is None
+            # Attempt duplicate with if_not_exists=True (should not corrupt session)
+            result = kelt_client.kg.fact_entities.link(
+                fact_id=fact_id,
+                entity_id=tesla_id,
+                scope_key="global",
+                if_not_exists=True,
+                sa_session=s,
+            )
+            assert result is None
 
-        # Session should still work - create another fact and link it
-        fact_id2 = kelt_client.atomic.assertions.add(
-            content="Another Tesla fact",
-            category="news",
-        )
-        link = kelt_client.kg.fact_entities.link(
-            fact_id=fact_id2,
-            entity_id=tesla_id,
-            scope_key="global",
-        )
-        assert link is not None
+            # Same session should still work
+            fact_id2 = kelt_client.atomic.assertions.add(
+                content="Another Tesla fact",
+                category="news",
+            )
+            link = kelt_client.kg.fact_entities.link(
+                fact_id=fact_id2,
+                entity_id=tesla_id,
+                scope_key="global",
+                sa_session=s,
+            )
+            assert link is not None
 
     def test_get_entities_for_facts_batch(self, kelt_client):
         """Get entities for multiple facts in one query."""
