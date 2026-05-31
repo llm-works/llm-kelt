@@ -275,11 +275,6 @@ class TieredCompactor(_TieredMixin, Compactor):
         tokenizer: Tokenizer | None,
     ) -> str:
         """Generate summary with guard validation and retry logic."""
-        if not self._guards:
-            summary = self._call_llm(to_compact)
-            _check_summary_shrinks(preserved, summary, before_tokens, tokenizer)
-            return summary
-
         guard_attempts: dict[int, int] = {i: 0 for i in range(len(self._guards))}
         feedback: str | None = None
         attempt = 0
@@ -291,7 +286,7 @@ class TieredCompactor(_TieredMixin, Compactor):
             )
             feedback = check_guards(self._guards, ctx, guard_attempts)
             if feedback is None:
-                _check_summary_shrinks_ctx(ctx)
+                _check_summary_shrinks(ctx)
                 return summary
             attempt += 1
 
@@ -382,11 +377,6 @@ class AsyncTieredCompactor(_TieredMixin, AsyncCompactor):
         tokenizer: Tokenizer | None,
     ) -> str:
         """Generate summary with guard validation and retry logic."""
-        if not self._guards:
-            summary = await self._call_llm(to_compact)
-            _check_summary_shrinks(preserved, summary, before_tokens, tokenizer)
-            return summary
-
         guard_attempts: dict[int, int] = {i: 0 for i in range(len(self._guards))}
         feedback: str | None = None
         attempt = 0
@@ -398,7 +388,7 @@ class AsyncTieredCompactor(_TieredMixin, AsyncCompactor):
             )
             feedback = check_guards(self._guards, ctx, guard_attempts)
             if feedback is None:
-                _check_summary_shrinks_ctx(ctx)
+                _check_summary_shrinks(ctx)
                 return summary
             attempt += 1
 
@@ -420,7 +410,7 @@ class AsyncTieredCompactor(_TieredMixin, AsyncCompactor):
 # --- Shared helpers ---
 
 
-def _check_summary_shrinks_ctx(ctx: CompactionContext) -> None:
+def _check_summary_shrinks(ctx: CompactionContext) -> None:
     """Reject a summary that fails to shrink the conversation."""
     if ctx.after_tokens >= ctx.before_tokens:
         raise _SummaryRejectedError(
@@ -428,26 +418,6 @@ def _check_summary_shrinks_ctx(ctx: CompactionContext) -> None:
             before_tokens=ctx.before_tokens,
             after_tokens=ctx.after_tokens,
             summary_tokens=ctx.summary_tokens,
-        )
-
-
-def _check_summary_shrinks(
-    preserved: list[Message],
-    summary: str,
-    before_tokens: int,
-    tokenizer: Tokenizer | None,
-) -> None:
-    """Guard-free variant: build after_messages locally to compute after_tokens."""
-    after_messages = build_compacted_messages(preserved, summary)
-    after_tokens = sum(
-        estimate_message_tokens(m.role, m.content, m.tool_calls, tokenizer=tokenizer)
-        for m in after_messages
-    )
-    if after_tokens >= before_tokens:
-        raise _SummaryRejectedError(
-            "summary did not shrink the conversation",
-            before_tokens=before_tokens,
-            after_tokens=after_tokens,
         )
 
 

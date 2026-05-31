@@ -259,22 +259,13 @@ def _has_module(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
-# Test files whose collection should be ignored entirely when an optional
-# dependency is missing. The contained tests use ``pytest.importorskip``
-# inline; running them surfaces per-test SKIPPED lines that clutter the
-# failure dump when an upstream step (e.g. coverage) reports the dump.
-# Skipping at collection means pytest never sees the file → no noise.
-_OPTIONAL_DEP_IGNORES: dict[str, list[str]] = {
-    "trl": ["unit/test_dpo_reference_modes.py"],
-    "peft": ["unit/test_dpo_reference_modes.py"],
-}
-
+# Ignore test files whose optional deps are missing. The contained tests use
+# inline ``pytest.importorskip``; running them surfaces per-test SKIPPED lines
+# that clutter the failure dump when an upstream step (e.g. coverage) reports
+# the log tail. Skipping at collection means pytest never sees the file.
 collect_ignore: list[str] = []
-for _mod, _paths in _OPTIONAL_DEP_IGNORES.items():
-    if not _has_module(_mod):
-        for _p in _paths:
-            if _p not in collect_ignore:
-                collect_ignore.append(_p)
+if not _has_module("trl") or not _has_module("peft"):
+    collect_ignore.append("unit/test_dpo_reference_modes.py")
 
 
 def _db_url_address(url: str) -> tuple[str, int] | None:
@@ -314,17 +305,15 @@ def _resolve_pg_endpoint() -> tuple[str, int] | None:
 
 
 @pytest.fixture(scope="session")
-def pg_test_config(config, request):
+def pg_test_config(config):
     """Provide database config to appinfra's schema isolation fixtures.
 
     Checks for DATABASE_URL environment variable first (used in CI),
-    otherwise falls back to config file. Skips with the shared sentinel
-    reason when the server is unreachable.
+    otherwise falls back to config file. When the Postgres probe fails at
+    session start, pytest_collection_modifyitems has already deselected
+    every test that pulls this fixture in, so the unreachable-PG case
+    never reaches us here.
     """
-    status = request.session.config.stash.get(_PG_STATUS_KEY, None)
-    if status is not None and not status["available"]:
-        pytest.skip(_PG_SKIP_REASON)
-
     database_url = os.environ.get("DATABASE_URL")
     if database_url:
         return {
