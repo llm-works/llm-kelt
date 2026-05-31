@@ -2,6 +2,7 @@
 
 import os
 import socket
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -70,6 +71,22 @@ def pytest_cmdline_main(config):
             print(f"\n*** E2E detected: forcing sequential (was -n {original}) ***\n")
 
 
+def pytest_configure(config):
+    """Probe Postgres once per session and stash the result."""
+    endpoint = _resolve_pg_endpoint()
+    if endpoint is None:
+        return
+    host, port = endpoint
+    available = _is_server_available(host, port)
+    config.stash[_PG_STATUS_KEY] = {"host": host, "port": port, "available": available}
+    if not available:
+        print(
+            f"PG probe: {host}:{port} unreachable; PG-dependent tests will skip "
+            f"with reason '{_PG_SKIP_REASON}'",
+            file=sys.stderr,
+        )
+
+
 # Find project root and config paths
 PROJECT_ROOT = Path(__file__).parent.parent
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "etc" / "llm-kelt.yaml"
@@ -123,16 +140,42 @@ def _get_llm_server_address() -> tuple[str, int] | None:
 
 
 def pytest_collection_modifyitems(config, items):
-    """Auto-apply markers based on test directory."""
+    """Auto-apply markers based on test directory, then deselect PG-dependent
+    tests when Postgres is unreachable.
+
+    Deselection (vs pytest.skip) keeps the failure-step output clean: skipped
+    tests appear in pytest's `-rs` summary as `SKIPPED [1] ...` lines, which
+    check.sh dumps when a step fails. Deselected tests just aren't in the run,
+    so a downstream failure (e.g. coverage threshold) shows the actual cause,
+    not 200+ lines of PG noise.
+    """
     for item in items:
         test_path = Path(item.fspath)
-        # Determine marker from directory name
         if "unit" in test_path.parts:
             item.add_marker(pytest.mark.unit)
         elif "integration" in test_path.parts:
             item.add_marker(pytest.mark.integration)
         elif "e2e" in test_path.parts:
             item.add_marker(pytest.mark.e2e)
+
+    status = config.stash.get(_PG_STATUS_KEY, None)
+    if status is None or status["available"]:
+        return
+    keep: list = []
+    dropped: list = []
+    for item in items:
+        if _PG_FIXTURE_GATE in item.fixturenames:
+            dropped.append(item)
+        else:
+            keep.append(item)
+    if dropped:
+        config.hook.pytest_deselected(items=dropped)
+        items[:] = keep
+        print(
+            f"PG probe: {status['host']}:{status['port']} unreachable; "
+            f"deselected {len(dropped)} PG-dependent tests",
+            file=sys.stderr,
+        )
 
 
 # Cache server availability check (only check once per session)
@@ -200,25 +243,87 @@ def lg(logger):
     return logger
 
 
+# Bottleneck fixture every PG-dependent test transitively pulls in (via
+# `database`, `kelt_client`, `pg_with_tables`, …). Used by
+# pytest_collection_modifyitems to identify those tests and deselect them
+# en masse when the Postgres probe fails at session start.
+_PG_FIXTURE_GATE = "pg_test_config"
+_PG_SKIP_REASON = "pg-unavailable"
+_PG_STATUS_KEY: pytest.StashKey[dict] = pytest.StashKey()
+
+
+def _has_module(name: str) -> bool:
+    """True if ``name`` can be imported in the current environment."""
+    import importlib.util
+
+    return importlib.util.find_spec(name) is not None
+
+
+# Ignore test files whose optional deps are missing. The contained tests use
+# inline ``pytest.importorskip``; running them surfaces per-test SKIPPED lines
+# that clutter the failure dump when an upstream step (e.g. coverage) reports
+# the log tail. Skipping at collection means pytest never sees the file.
+collect_ignore: list[str] = []
+if not _has_module("trl") or not _has_module("peft"):
+    collect_ignore.append("unit/test_dpo_reference_modes.py")
+
+
+def _db_url_address(url: str) -> tuple[str, int] | None:
+    parsed = urlparse(url)
+    if not parsed.hostname:
+        return None
+    return parsed.hostname, parsed.port or 5432
+
+
+def _resolve_pg_endpoint() -> tuple[str, int] | None:
+    """Pick the host:port the test suite will try to connect to.
+
+    Order: DATABASE_URL → dbs.unittest in config → INFRA_PGSERVER_HOST/PORT
+    env overrides → None. Mirrors the override paths used downstream in
+    pg_test_config and what appinfra-style probes accept.
+    """
+    database_url = os.environ.get("DATABASE_URL")
+    if database_url:
+        return _db_url_address(database_url)
+    config_path = _get_config_path()
+    if config_path.exists():
+        try:
+            cfg = Config(str(config_path))
+            url = cfg.get("dbs.unittest.url")
+            if url:
+                return _db_url_address(str(url))
+        except Exception:  # noqa: BLE001 — config parse failure falls through to env
+            pass
+    host = os.environ.get("INFRA_PGSERVER_HOST")
+    port_str = os.environ.get("INFRA_PGSERVER_PORT")
+    if host and port_str:
+        try:
+            return host, int(port_str)
+        except ValueError:
+            return None
+    return None
+
+
 @pytest.fixture(scope="session")
 def pg_test_config(config):
     """Provide database config to appinfra's schema isolation fixtures.
 
     Checks for DATABASE_URL environment variable first (used in CI),
-    otherwise falls back to config file.
+    otherwise falls back to config file. When the Postgres probe fails at
+    session start, pytest_collection_modifyitems has already deselected
+    every test that pulls this fixture in, so the unreachable-PG case
+    never reaches us here.
     """
     database_url = os.environ.get("DATABASE_URL")
     if database_url:
-        # Return dict for CI (appinfra's pg_migrate_factory expects dict-like config)
         return {
             "url": database_url,
             "create_db": True,
             "readonly": False,
             "pool_pre_ping": True,
-            "extensions": ["vector"],  # pgvector for embeddings
+            "extensions": ["vector"],
         }
 
-    # Fall back to config file
     db_cfg = config.dbs.get("unittest")
     if db_cfg is None:
         pytest.skip("Database config 'dbs.unittest' not found in etc/infra.yaml")

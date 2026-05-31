@@ -2,7 +2,7 @@
 # Used by llm-infer's ModelResolver to find local models
 
 locations:
-  - !include "../.env.yaml#paths.models.huggingface"
+  - !include? "../.env.yaml#paths.models.huggingface"
 
 # Model selection defaults
 selection:

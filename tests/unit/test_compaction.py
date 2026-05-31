@@ -303,3 +303,255 @@ class TestAsyncTieredCompactor:
         messages = conv.messages
         summary_msg = [m for m in messages if "summary" in (m.content or "").lower()]
         assert len(summary_msg) > 0
+
+
+# --- Bug-regression tests ------------------------------------------------
+
+
+def _no_orphan_tool_call_ids(messages: list[Message]) -> bool:
+    """True if every tool_call_id has a matching prior assistant.tool_calls entry."""
+    seen: set[str] = set()
+    for msg in messages:
+        if msg.tool_calls:
+            for tc in msg.tool_calls:
+                seen.add(tc.id)
+        if msg.role == Role.TOOL and msg.tool_call_id not in seen:
+            return False
+    return True
+
+
+class TestSplitForCompactionPairing:
+    """Bug 1: split must never orphan tool_call_ids."""
+
+    def test_cut_between_assistant_and_tool_walks_back(self, lg):
+        config = Config(min_recent_messages=3)
+        conv = Conversation(lg, config=config)
+        conv.add("first user msg")
+        conv.add(
+            "calling tool",
+            Role.ASSISTANT,
+            tool_calls=[ToolCall(id="tc_x", name="web_fetch", arguments={})],
+        )
+        conv.add("tool result", Role.TOOL, tool_call_id="tc_x")
+        conv.add("follow-up", Role.USER)
+        conv.add("done", Role.ASSISTANT)
+
+        to_compact, preserved = conv.split_for_compaction()
+
+        assert _no_orphan_tool_call_ids(preserved), preserved
+        assert len(to_compact) == 1
+        assert to_compact[0].content == "first user msg"
+        roles = [m.role for m in preserved]
+        assert Role.ASSISTANT in roles
+        assert Role.TOOL in roles
+
+    def test_cut_through_multi_tool_group_walks_past_all_tools(self, lg):
+        config = Config(min_recent_messages=3)
+        conv = Conversation(lg, config=config)
+        conv.add("user1")
+        conv.add(
+            "parallel tools",
+            Role.ASSISTANT,
+            tool_calls=[
+                ToolCall(id="tc_a", name="web_search", arguments={}),
+                ToolCall(id="tc_b", name="web_search", arguments={}),
+                ToolCall(id="tc_c", name="web_search", arguments={}),
+            ],
+        )
+        conv.add("a", Role.TOOL, tool_call_id="tc_a")
+        conv.add("b", Role.TOOL, tool_call_id="tc_b")
+        conv.add("c", Role.TOOL, tool_call_id="tc_c")
+        conv.add("final", Role.USER)
+        conv.add("answer", Role.ASSISTANT)
+
+        to_compact, preserved = conv.split_for_compaction()
+
+        assert _no_orphan_tool_call_ids(preserved)
+        assert to_compact == [conv.messages[0]]
+        assert sum(1 for m in preserved if m.role == Role.TOOL) == 3
+
+    def test_cut_outside_tool_group_unchanged(self, lg):
+        config = Config(min_recent_messages=2)
+        conv = Conversation(lg, config=config)
+        conv.add("user1")
+        conv.add(
+            "tools",
+            Role.ASSISTANT,
+            tool_calls=[ToolCall(id="t1", name="web_search", arguments={})],
+        )
+        conv.add("res", Role.TOOL, tool_call_id="t1")
+        conv.add("user2")
+        conv.add("answer", Role.ASSISTANT)
+
+        to_compact, preserved = conv.split_for_compaction()
+
+        assert _no_orphan_tool_call_ids(preserved)
+        assert len(to_compact) == 3
+        assert sum(1 for m in to_compact if m.role == Role.TOOL) == 1
+        assert sum(1 for m in to_compact if m.tool_calls) == 1
+
+    def test_walkback_consumes_whole_pool_returns_no_compact(self, lg):
+        config = Config(min_recent_messages=1)
+        conv = Conversation(lg, config=config)
+        conv.add("sys", Role.SYSTEM)
+        conv.add(
+            "tools",
+            Role.ASSISTANT,
+            tool_calls=[ToolCall(id="t1", name="web_fetch", arguments={})],
+        )
+        conv.add("tool result content", Role.TOOL, tool_call_id="t1")
+
+        to_compact, preserved = conv.split_for_compaction()
+
+        assert to_compact == []
+        assert _no_orphan_tool_call_ids(preserved)
+
+    def test_end_to_end_compaction_never_orphans(self, lg):
+        config = Config(max_tokens=500, compact_threshold=0.5, min_recent_messages=3)
+        conv = Conversation(lg, config=config)
+        for i in range(5):
+            conv.add(f"please do thing {i}")
+            conv.add(
+                f"calling tool {i}",
+                Role.ASSISTANT,
+                tool_calls=[ToolCall(id=f"tc_{i}", name="web_fetch", arguments={})],
+            )
+            conv.add(f"tool output {i}", Role.TOOL, tool_call_id=f"tc_{i}")
+
+        client = MagicMock()
+        resp = MagicMock()
+        resp.content = "summary text"
+        resp.finish_reason = "stop"
+        client.chat.return_value = resp
+
+        compactor = TieredCompactor(client, trim_threshold=10)
+        compactor.compact(conv)
+
+        assert _no_orphan_tool_call_ids(conv.messages), [
+            (m.role, m.tool_call_id, [tc.id for tc in (m.tool_calls or [])]) for m in conv.messages
+        ]
+
+
+class TestTruncatedSummaryRejected:
+    """Bug 2: finish_reason=length must trigger fallback, never apply."""
+
+    def _make_truncated_client(self, partial: str = "this summary was cut o"):
+        client = MagicMock()
+        response = MagicMock()
+        response.content = partial
+        response.finish_reason = "length"
+        client.chat.return_value = response
+        return client
+
+    def test_truncated_summary_triggers_fallback(self, lg):
+        config = Config(max_tokens=400, compact_threshold=0.5, min_recent_messages=2)
+        conv = Conversation(lg, config=config)
+        for i in range(10):
+            conv.add(f"user message number {i}")
+            conv.add(f"assistant response {i}", Role.ASSISTANT)
+
+        client = self._make_truncated_client()
+        compactor = TieredCompactor(client)
+        compactor.compact(conv)
+
+        for m in conv.messages:
+            assert "this summary was cut o" not in (m.content or "")
+        assert not any("Previous conversation summary" in (m.content or "") for m in conv.messages)
+        assert conv.message_count == config.min_recent_messages
+
+    def test_normal_summary_unaffected(self, lg):
+        config = Config(max_tokens=400, compact_threshold=0.5, min_recent_messages=2)
+        conv = Conversation(lg, config=config)
+        for i in range(10):
+            conv.add(f"user message number {i}")
+            conv.add(f"assistant response {i}", Role.ASSISTANT)
+
+        client = MagicMock()
+        resp = MagicMock()
+        resp.content = "ok summary"
+        resp.finish_reason = "stop"
+        client.chat.return_value = resp
+        compactor = TieredCompactor(client)
+        compactor.compact(conv)
+
+        assert any("Previous conversation summary" in (m.content or "") for m in conv.messages)
+
+    @pytest.mark.asyncio
+    async def test_async_truncated_summary_triggers_fallback(self, lg):
+        config = Config(max_tokens=400, compact_threshold=0.5, min_recent_messages=2)
+        conv = Conversation(lg, config=config)
+        for i in range(10):
+            conv.add(f"user message number {i}")
+            conv.add(f"assistant response {i}", Role.ASSISTANT)
+
+        client = MagicMock()
+        resp = MagicMock()
+        resp.content = "this summary was cut o"
+        resp.finish_reason = "length"
+
+        async def mock_chat_async(*args, **kwargs):
+            return resp
+
+        client.chat_async = mock_chat_async
+
+        compactor = AsyncTieredCompactor(client)
+        await compactor.compact(conv)
+
+        for m in conv.messages:
+            assert "this summary was cut o" not in (m.content or "")
+        assert not any("Previous conversation summary" in (m.content or "") for m in conv.messages)
+        assert conv.message_count == config.min_recent_messages
+
+
+class TestSummaryRegressionRejected:
+    """Bug 3: a summary that grows the conversation must be rejected."""
+
+    def test_summary_larger_than_input_triggers_fallback(self, lg):
+        config = Config(max_tokens=400, compact_threshold=0.5, min_recent_messages=2)
+        conv = Conversation(lg, config=config)
+        for i in range(10):
+            conv.add(f"u{i}")
+            conv.add(f"a{i}", Role.ASSISTANT)
+
+        before_tokens = conv.token_count
+        bloated_summary = "x " * (before_tokens * 4)
+
+        client = MagicMock()
+        resp = MagicMock()
+        resp.content = bloated_summary
+        resp.finish_reason = "stop"
+        client.chat.return_value = resp
+
+        compactor = TieredCompactor(client)
+        compactor.compact(conv)
+
+        assert not any(bloated_summary in (m.content or "") for m in conv.messages)
+        assert conv.token_count < before_tokens, (
+            f"compaction failed to shrink: before={before_tokens} after={conv.token_count}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_async_summary_regression_triggers_fallback(self, lg):
+        config = Config(max_tokens=400, compact_threshold=0.5, min_recent_messages=2)
+        conv = Conversation(lg, config=config)
+        for i in range(10):
+            conv.add(f"u{i}")
+            conv.add(f"a{i}", Role.ASSISTANT)
+
+        before_tokens = conv.token_count
+        bloated = "x " * (before_tokens * 4)
+
+        client = MagicMock()
+        resp = MagicMock()
+        resp.content = bloated
+        resp.finish_reason = "stop"
+
+        async def mock_chat_async(*args, **kwargs):
+            return resp
+
+        client.chat_async = mock_chat_async
+
+        compactor = AsyncTieredCompactor(client)
+        await compactor.compact(conv)
+
+        assert conv.token_count < before_tokens

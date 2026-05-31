@@ -21,10 +21,12 @@ proxy:
   context_key: "default"
   model_name: "llm-kelt-proxy"
 
-# Adapter settings (for training integration with llm-infer)
+# Adapter settings (for training integration with llm-infer).
+# .env.yaml is per-developer and gitignored — include optionally so the
+# config loads on fresh checkouts before .env.yaml.example is copied over.
 adapters:
   lora:
-    base_path: !include "../.env.yaml#paths.adapters"
+    base_path: !include? "../.env.yaml#paths.adapters"
 
 # Kelt-specific settings (runtime behavior)
 kelt:

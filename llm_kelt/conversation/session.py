@@ -24,6 +24,19 @@ from .compaction.base import AsyncCompactor, Compactor
 from .tokens import Tokenizer, estimate_message_tokens
 
 
+def _adjust_cut_to_tool_group_boundary(pool: list[Message], cut: int) -> int:
+    """Walk a compaction cut index backward off any tool-result boundary.
+
+    A tool message at ``pool[cut]`` would land at the start of to_preserve
+    while its parent assistant (with matching tool_calls) stayed in
+    to_compact — orphaning the tool_call_id. Walking back pulls the tool
+    results and their parent into to_preserve together.
+    """
+    while cut > 0 and pool[cut].role == Role.TOOL:
+        cut -= 1
+    return cut
+
+
 class Config(FieldDict):
     """Configuration for conversation management.
 
@@ -378,16 +391,17 @@ class Conversation(AsyncConversationLike):
     def split_for_compaction(self) -> tuple[list[Message], list[Message]]:
         """Split messages into compactable and preserved portions.
 
-        Preserved messages include:
-        - All system messages (if preserve_system is True)
-        - Last min_recent_messages messages
+        Preserves system messages (if ``preserve_system``) and at least
+        ``min_recent_messages`` recent messages. The cut is walked backward
+        to never bisect an assistant/tool group, since the chat protocol
+        requires every tool_call_id to have a matching assistant.tool_calls
+        in the same request. This may preserve more than ``min_recent_messages``.
 
         Returns:
             Tuple of (messages_to_compact, messages_to_preserve).
         """
-        preserve_count = self.config.min_recent_messages
+        preserve_count = max(0, self.config.min_recent_messages)
 
-        # When preserving system separately, exclude from the split pool.
         if self.config.preserve_system:
             system_msgs = [m for m in self._messages if m.role == Role.SYSTEM]
             pool = [m for m in self._messages if m.role != Role.SYSTEM]
@@ -398,15 +412,13 @@ class Conversation(AsyncConversationLike):
         if len(pool) <= preserve_count:
             return [], list(self._messages)
 
-        # Guard against preserve_count=0: pool[:-0] returns [] in Python (not pool).
         if preserve_count == 0:
-            to_compact = pool
-            to_preserve = list(system_msgs)
-        else:
-            to_compact = pool[:-preserve_count]
-            to_preserve = system_msgs + pool[-preserve_count:]
+            return list(pool), list(system_msgs)
 
-        return to_compact, to_preserve
+        cut = _adjust_cut_to_tool_group_boundary(pool, len(pool) - preserve_count)
+        if cut == 0:
+            return [], list(self._messages)
+        return pool[:cut], system_msgs + pool[cut:]
 
     def __len__(self) -> int:
         """Number of messages."""

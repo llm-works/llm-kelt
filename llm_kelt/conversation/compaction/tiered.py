@@ -13,7 +13,7 @@ to retain verbatim.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..tokens import Tokenizer, estimate_message_tokens, estimate_tokens
 from ..types import Message, Role
@@ -25,6 +25,23 @@ if TYPE_CHECKING:
     from llm_infer.client import ChatClient
 
     from ..session import Conversation
+
+
+class _SummaryRejectedError(Exception):
+    """Phase-2 summary is unusable; compact() falls back to sliding-window."""
+
+    def __init__(self, reason: str, **extra: Any) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.extra = extra
+
+
+def _is_truncated_response(response: Any) -> bool:
+    """True if the LLM hit max_tokens before completing the summary."""
+    # finish_reason is FinishReason StrEnum, raw provider string, or None.
+    fr = response.finish_reason
+    return fr is not None and str(fr) == "length"
+
 
 # Tools whose output is safe to aggressively trim (bulk data, not decisions)
 DEFAULT_TRIMMABLE_TOOLS: frozenset[str] = frozenset(
@@ -240,9 +257,15 @@ class TieredCompactor(_TieredMixin, Compactor):
         if not prepared:
             return
         to_compact, preserved, before_messages, before_tokens, tokenizer = prepared
-        summary = self._summarize_with_guards(
-            to_compact, preserved, before_messages, before_tokens, tokenizer
-        )
+        # _SummaryRejectedError (truncation, shrink-fail): fallback to sliding-window.
+        # CompactionGuardError (guard retries exhausted): propagate — caller must handle.
+        try:
+            summary = self._summarize_with_guards(
+                to_compact, preserved, before_messages, before_tokens, tokenizer
+            )
+        except _SummaryRejectedError as e:
+            _fallback_to_sliding_window(conversation, preserved, e)
+            return
         self._finalize_summary(conversation, preserved, summary)
 
     def _summarize_with_guards(
@@ -254,13 +277,11 @@ class TieredCompactor(_TieredMixin, Compactor):
         tokenizer: Tokenizer | None,
     ) -> str:
         """Generate summary with guard validation and retry logic."""
-        if not self._guards:
-            return self._call_llm(to_compact)
-
         guard_attempts: dict[int, int] = {i: 0 for i in range(len(self._guards))}
         feedback: str | None = None
         attempt = 0
 
+        # Empty guards: check_guards returns None immediately, loop exits first iteration.
         while True:
             summary = self._call_llm(to_compact, feedback, attempt)
             ctx = self._build_guard_context(
@@ -268,15 +289,26 @@ class TieredCompactor(_TieredMixin, Compactor):
             )
             feedback = check_guards(self._guards, ctx, guard_attempts)
             if feedback is None:
+                _check_summary_shrinks(ctx)
                 return summary
             attempt += 1
 
     def _call_llm(
         self, messages: list[Message], feedback: str | None = None, attempt: int = 0
     ) -> str:
-        """Call the LLM to generate a summary."""
+        """Call the LLM to generate a summary.
+
+        Raises ``_SummaryRejectedError`` on truncated responses
+        (finish_reason=length); the partial text is very likely malformed.
+        """
         llm_messages, kwargs = self._build_summary_request(messages, feedback, attempt)
         response = self._client.chat(messages=llm_messages, **kwargs)
+        if _is_truncated_response(response):
+            raise _SummaryRejectedError(
+                "summary call hit max_tokens",
+                finish_reason=str(response.finish_reason),
+                attempt=attempt,
+            )
         return response.content or "[Summary unavailable]"
 
 
@@ -330,9 +362,15 @@ class AsyncTieredCompactor(_TieredMixin, AsyncCompactor):
         if not prepared:
             return
         to_compact, preserved, before_messages, before_tokens, tokenizer = prepared
-        summary = await self._summarize_with_guards(
-            to_compact, preserved, before_messages, before_tokens, tokenizer
-        )
+        # _SummaryRejectedError (truncation, shrink-fail): fallback to sliding-window.
+        # CompactionGuardError (guard retries exhausted): propagate — caller must handle.
+        try:
+            summary = await self._summarize_with_guards(
+                to_compact, preserved, before_messages, before_tokens, tokenizer
+            )
+        except _SummaryRejectedError as e:
+            _fallback_to_sliding_window(conversation, preserved, e)
+            return
         self._finalize_summary(conversation, preserved, summary)
 
     async def _summarize_with_guards(
@@ -344,13 +382,11 @@ class AsyncTieredCompactor(_TieredMixin, AsyncCompactor):
         tokenizer: Tokenizer | None,
     ) -> str:
         """Generate summary with guard validation and retry logic."""
-        if not self._guards:
-            return await self._call_llm(to_compact)
-
         guard_attempts: dict[int, int] = {i: 0 for i in range(len(self._guards))}
         feedback: str | None = None
         attempt = 0
 
+        # Empty guards: check_guards returns None immediately, loop exits first iteration.
         while True:
             summary = await self._call_llm(to_compact, feedback, attempt)
             ctx = self._build_guard_context(
@@ -358,19 +394,48 @@ class AsyncTieredCompactor(_TieredMixin, AsyncCompactor):
             )
             feedback = check_guards(self._guards, ctx, guard_attempts)
             if feedback is None:
+                _check_summary_shrinks(ctx)
                 return summary
             attempt += 1
 
     async def _call_llm(
         self, messages: list[Message], feedback: str | None = None, attempt: int = 0
     ) -> str:
-        """Call the LLM to generate a summary."""
+        """Async variant; raises ``_SummaryRejectedError`` on truncation."""
         llm_messages, kwargs = self._build_summary_request(messages, feedback, attempt)
         response = await self._client.chat_async(messages=llm_messages, **kwargs)
+        if _is_truncated_response(response):
+            raise _SummaryRejectedError(
+                "summary call hit max_tokens",
+                finish_reason=str(response.finish_reason),
+                attempt=attempt,
+            )
         return response.content or "[Summary unavailable]"
 
 
 # --- Shared helpers ---
+
+
+def _check_summary_shrinks(ctx: CompactionContext) -> None:
+    """Reject a summary that fails to shrink the conversation."""
+    if ctx.after_tokens >= ctx.before_tokens:
+        raise _SummaryRejectedError(
+            "summary did not shrink the conversation",
+            before_tokens=ctx.before_tokens,
+            after_tokens=ctx.after_tokens,
+            summary_tokens=ctx.summary_tokens,
+        )
+
+
+def _fallback_to_sliding_window(
+    conversation: Conversation, preserved: list[Message], cause: _SummaryRejectedError
+) -> None:
+    """Drop the compactable messages without a summary, log via conversation."""
+    conversation._lg.warning(  # noqa: SLF001 — conversation owns the only logger here
+        "tiered compaction: summary rejected, falling back to sliding-window drop",
+        extra={"reason": cause.reason, **cause.extra},
+    )
+    conversation.replace_messages(preserved)
 
 
 def _trim_tool_results(
