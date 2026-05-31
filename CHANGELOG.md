@@ -95,6 +95,8 @@ Config keys: `model_name` → `model`, added `type` (provider: "openai"/"google"
   dimensions automatically route to the correct storage table (e.g., `embeddings_256_f16` vs
   `embeddings_384_f16`)
 - `embed_missing_facts()` now requires `dimensions` parameter to specify output dimensions
+- `pgserver.image` upgraded to `docker.io/pgvector/pgvector:pg18`; fully qualified
+  registry lets Podman resolve it without `unqualified-search-registries` config
 
 ### Fixed
 - `Conversation.split_for_compaction()` no longer cuts between an `assistant.tool_calls`
@@ -105,6 +107,10 @@ Config keys: `model_name` → `model`, added `type` (provider: "openai"/"google"
   (`after_tokens >= before_tokens`), falling back to a sliding-window drop
 - `.env.yaml` include in `etc/llm-kelt.yaml` and `etc/models.yaml` is now
   optional (`!include?`) so configs load on fresh checkouts
+- PG-dependent tests are deselected at collection time when Postgres is
+  unreachable (matches appinfra's probe-and-drop pattern; replaces psycopg2 connection errors)
+- Optional-dep tests using `pytest.importorskip("trl" | "peft")` are now
+  ignored at conftest level via `collect_ignore` when those packages are absent
 - Reduced flakiness in `tests/e2e/test_facts.py` by switching LLM calls to
   `temperature=0.0` and broadening the Python keyword assertion to accept any
   Python-ecosystem term (matches the existing pattern in the sibling category test).
