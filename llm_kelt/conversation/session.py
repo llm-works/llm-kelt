@@ -400,7 +400,7 @@ class Conversation(AsyncConversationLike):
         Returns:
             Tuple of (messages_to_compact, messages_to_preserve).
         """
-        preserve_count = self.config.min_recent_messages
+        preserve_count = max(0, self.config.min_recent_messages)
 
         if self.config.preserve_system:
             system_msgs = [m for m in self._messages if m.role == Role.SYSTEM]

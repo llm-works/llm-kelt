@@ -476,6 +476,32 @@ class TestTruncatedSummaryRejected:
 
         assert any("Previous conversation summary" in (m.content or "") for m in conv.messages)
 
+    @pytest.mark.asyncio
+    async def test_async_truncated_summary_triggers_fallback(self, lg):
+        config = Config(max_tokens=400, compact_threshold=0.5, min_recent_messages=2)
+        conv = Conversation(lg, config=config)
+        for i in range(10):
+            conv.add(f"user message number {i}")
+            conv.add(f"assistant response {i}", Role.ASSISTANT)
+
+        client = MagicMock()
+        resp = MagicMock()
+        resp.content = "this summary was cut o"
+        resp.finish_reason = "length"
+
+        async def mock_chat_async(*args, **kwargs):
+            return resp
+
+        client.chat_async = mock_chat_async
+
+        compactor = AsyncTieredCompactor(client)
+        await compactor.compact(conv)
+
+        for m in conv.messages:
+            assert "this summary was cut o" not in (m.content or "")
+        assert not any("Previous conversation summary" in (m.content or "") for m in conv.messages)
+        assert conv.message_count == config.min_recent_messages
+
 
 class TestSummaryRegressionRejected:
     """Bug 3: a summary that grows the conversation must be rejected."""
