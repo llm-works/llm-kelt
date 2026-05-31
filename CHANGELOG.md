@@ -97,6 +97,14 @@ Config keys: `model_name` → `model`, added `type` (provider: "openai"/"google"
 - `embed_missing_facts()` now requires `dimensions` parameter to specify output dimensions
 
 ### Fixed
+- `Conversation.split_for_compaction()` no longer cuts between an `assistant.tool_calls`
+  and its tool result messages (avoids provider 400s on unmatched `tool_call_id`s)
+- `TieredCompactor` rejects truncated summary responses (`finish_reason="length"`)
+  and falls back to a sliding-window drop instead of applying the partial text
+- `TieredCompactor` rejects summaries that fail to shrink the conversation
+  (`after_tokens >= before_tokens`), falling back to a sliding-window drop
+- `.env.yaml` include in `etc/llm-kelt.yaml` and `etc/models.yaml` is now
+  optional (`!include?`) so configs load on fresh checkouts
 - Reduced flakiness in `tests/e2e/test_facts.py` by switching LLM calls to
   `temperature=0.0` and broadening the Python keyword assertion to accept any
   Python-ecosystem term (matches the existing pattern in the sibling category test).
