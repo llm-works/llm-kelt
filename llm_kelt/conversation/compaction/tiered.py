@@ -257,6 +257,8 @@ class TieredCompactor(_TieredMixin, Compactor):
         if not prepared:
             return
         to_compact, preserved, before_messages, before_tokens, tokenizer = prepared
+        # _SummaryRejectedError (truncation, shrink-fail): fallback to sliding-window.
+        # CompactionGuardError (guard retries exhausted): propagate — caller must handle.
         try:
             summary = self._summarize_with_guards(
                 to_compact, preserved, before_messages, before_tokens, tokenizer
@@ -279,6 +281,7 @@ class TieredCompactor(_TieredMixin, Compactor):
         feedback: str | None = None
         attempt = 0
 
+        # Empty guards: check_guards returns None immediately, loop exits first iteration.
         while True:
             summary = self._call_llm(to_compact, feedback, attempt)
             ctx = self._build_guard_context(
@@ -359,6 +362,8 @@ class AsyncTieredCompactor(_TieredMixin, AsyncCompactor):
         if not prepared:
             return
         to_compact, preserved, before_messages, before_tokens, tokenizer = prepared
+        # _SummaryRejectedError (truncation, shrink-fail): fallback to sliding-window.
+        # CompactionGuardError (guard retries exhausted): propagate — caller must handle.
         try:
             summary = await self._summarize_with_guards(
                 to_compact, preserved, before_messages, before_tokens, tokenizer
@@ -381,6 +386,7 @@ class AsyncTieredCompactor(_TieredMixin, AsyncCompactor):
         feedback: str | None = None
         attempt = 0
 
+        # Empty guards: check_guards returns None immediately, loop exits first iteration.
         while True:
             summary = await self._call_llm(to_compact, feedback, attempt)
             ctx = self._build_guard_context(
