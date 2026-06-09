@@ -1,15 +1,18 @@
 """High-level context-aware query interface."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from llm_infer.client import ChatClient
 
+from ..conversation.session import Conversation
+from ..conversation.types import Role
 from .context import ContextBuilder
 
 if TYPE_CHECKING:
+    from llm_infer.client import EmbeddingClient
+
     from ..memory.atomic.embedding import EmbeddingAdapter
-    from .embedder import Embedder
 
 
 @dataclass
@@ -18,31 +21,8 @@ class RAGArgs:
 
     top_k: int = 10
     min_similarity: float = 0.3
-    model_name: str | None = None  # Defaults to embedder's model
+    model: str | None = None  # Defaults to embedder's model
     categories: list[str] | None = None  # Filter results to these categories
-
-
-@dataclass
-class Conversation:
-    """
-    A conversation with message history.
-
-    Tracks messages for multi-turn conversations.
-    """
-
-    messages: list[dict[str, str]] = field(default_factory=list)
-
-    def add_user(self, content: str) -> None:
-        """Add a user message."""
-        self.messages.append({"role": "user", "content": content})
-
-    def add_assistant(self, content: str) -> None:
-        """Add an assistant message."""
-        self.messages.append({"role": "assistant", "content": content})
-
-    def clear(self) -> None:
-        """Clear conversation history."""
-        self.messages.clear()
 
 
 class ContextQuery:
@@ -58,8 +38,8 @@ class ContextQuery:
         # Single question
         response = await query.ask("What's a good approach to X?")
 
-        # With conversation history
-        conv = Conversation()
+        # With conversation history (lg is a Logger instance)
+        conv = Conversation(lg)
         response = await query.ask("Hello!", conversation=conv)
         response = await query.ask("Tell me more", conversation=conv)
     """
@@ -70,7 +50,7 @@ class ContextQuery:
         context_builder: ContextBuilder,
         base_system_prompt: str = "",
         temperature: float = 0.7,
-        embedder: "Embedder | None" = None,
+        embedder: "EmbeddingClient | None" = None,
         embedding_adapter: "EmbeddingAdapter | None" = None,
     ):
         """
@@ -126,8 +106,8 @@ class ContextQuery:
             # Single question
             response = await query.ask("Explain gradient descent")
 
-            # Multi-turn conversation
-            conv = Conversation()
+            # Multi-turn conversation (lg is a Logger instance)
+            conv = Conversation(lg)
             r1 = await query.ask("What is ML?", conversation=conv)
             r2 = await query.ask("Tell me more about neural networks", conversation=conv)
 
@@ -159,8 +139,8 @@ class ContextQuery:
         )
 
         # Update conversation if provided
-        if conversation:
-            conversation.add_assistant(response.content)
+        if conversation is not None:
+            conversation.add(response.content, Role.ASSISTANT)
 
         return response.content
 
@@ -179,13 +159,13 @@ class ContextQuery:
         # Embed the question
         result = await self._embedder.embed_async(question)
 
-        # Determine model name for search
-        model_name = rag.model_name if rag.model_name else self._embedder.model
+        # Determine model for search
+        model = rag.model if rag.model else self._embedder.model
 
         # Search for similar facts (category filtering done in SQL for efficiency)
         scored_facts = self._embedding_adapter.search_similar(
             query=result.embedding,
-            model_name=model_name,
+            model=model,
             top_k=rag.top_k,
             min_similarity=rag.min_similarity,
             categories=rag.categories,
@@ -201,11 +181,11 @@ class ContextQuery:
         self,
         question: str,
         conversation: Conversation | None,
-    ) -> list[dict[str, str]]:
+    ) -> list:
         """Build message list, updating conversation if provided."""
-        if conversation:
-            conversation.add_user(question)
-            return conversation.messages
+        if conversation is not None:
+            conversation.add(question)
+            return conversation.messages_as_dicts()
         return [{"role": "user", "content": question}]
 
     async def ask_without_facts(

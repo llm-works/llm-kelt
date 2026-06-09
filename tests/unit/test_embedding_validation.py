@@ -2,8 +2,8 @@
 
 import pytest
 
-from llm_kelt.core.embedding import _validate_embedding
 from llm_kelt.core.errors import ValidationError
+from llm_kelt.embedding.client import _validate_embedding
 
 
 class TestValidateEmbedding:

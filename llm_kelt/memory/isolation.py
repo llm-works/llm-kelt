@@ -4,6 +4,24 @@ from dataclasses import dataclass
 from typing import Any
 
 
+def glob_to_like(context_key: str) -> tuple[str, bool]:
+    """
+    Convert a glob-style context key to a SQL LIKE pattern.
+
+    Returns:
+        (pattern, is_glob) — the LIKE pattern string and whether glob
+        wildcards were present. The escape character is always backslash.
+    """
+    if "*" not in context_key and "?" not in context_key:
+        return (context_key, False)
+
+    # Escape the LIKE escape character first, then SQL wildcards, then translate glob
+    pattern = context_key.replace("\\", "\\\\")
+    pattern = pattern.replace("%", r"\%").replace("_", r"\_")
+    pattern = pattern.replace("*", "%").replace("?", "_")
+    return (pattern, True)
+
+
 def build_context_filter(context_key: str | None, column: Any) -> Any:
     """
     Build SQLAlchemy filter for context_key with glob pattern support.
@@ -27,15 +45,10 @@ def build_context_filter(context_key: str | None, column: Any) -> Any:
     if context_key is None:
         return None
 
-    # Glob-style pattern matching: * (zero or more), ? (exactly one)
-    if "*" in context_key or "?" in context_key:
-        # Escape SQL wildcards first, then translate glob to SQL LIKE
-        pattern = context_key.replace("%", r"\%").replace("_", r"\_")
-        pattern = pattern.replace("*", "%").replace("?", "_")
+    pattern, is_glob = glob_to_like(context_key)
+    if is_glob:
         return column.like(pattern, escape="\\")
-    else:
-        # Exact match - no wildcards
-        return column == context_key
+    return column == context_key
 
 
 @dataclass

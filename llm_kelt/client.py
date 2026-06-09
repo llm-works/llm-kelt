@@ -6,18 +6,20 @@ from typing import TYPE_CHECKING, Any
 
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
-from llm_infer.client import ChatClient
+from llm_infer.client import ChatClient, EmbeddingClient
 
 from .core.content import ContentStore
 from .core.database import Database
-from .core.embedding import EmbeddingStore
 from .core.errors import SchemaVersionError
 from .core.schema import SchemaManager, SchemaState, SchemaStatus
+from .embedding import Config as EmbeddingConfig
+from .embedding import Factory as EmbeddingFactory
+from .embedding import StoreClient as EmbeddingStoreClient
 from .inference.context import ContextBuilder
-from .inference.embedder import Embedder
 from .inference.query import ContextQuery
 from .memory import atomic
 from .memory.isolation import ClientContext
+from .memory.kg import KGStore
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -81,11 +83,13 @@ class Client:
         lg: Logger,
         database: Database,
         context: ClientContext,
-        embedder: Embedder | None = None,
+        embedder: EmbeddingClient | None = None,
         llm_client: ChatClient | None = None,
         kelt_config: DotDict | None = None,
         training_config: DotDict | None = None,
         ensure_schema: bool = True,
+        embeddings: EmbeddingStoreClient | None = None,
+        embedding_dimensions: int | None = None,
     ) -> None:
         """
         Initialize Client with isolation context.
@@ -94,11 +98,13 @@ class Client:
             database: Database instance
             context: ClientContext for data partitioning (any string format)
             lg: Optional logger instance
-            embedder: Optional embedder for generating embeddings
+            embedder: Optional EmbeddingClient for generating embeddings via HTTP.
             llm_client: Optional LLM client for context-aware queries
             kelt_config: Optional kelt settings (config.kelt section)
             training_config: Optional training settings (config.training section)
             ensure_schema: If True (default), auto-migrate schema on init
+            embeddings: Optional EmbeddingStoreClient. If None, creates default (F16, 384 dims).
+            embedding_dimensions: Optional output dimensions for embeddings. None uses model default.
         """
         self._db = database
         self._context = context
@@ -108,22 +114,47 @@ class Client:
         self._kelt_config = kelt_config
         self._training_config = training_config
         self._ensure_schema = ensure_schema
+        self._embeddings = embeddings
+        self._embedding_dimensions = embedding_dimensions
 
         self._ensure_schema_config(ensure=ensure_schema)
         self._verify_schema(ensure=ensure_schema)
         self._setup_stores()
         self._setup_query_interface()
 
+    def _setup_embedding_factory(self) -> None:
+        """Initialize embedding factory for dynamic dimension routing."""
+        from .embedding import QuantizationFormat
+
+        self._embedding_factory = EmbeddingFactory()
+        self._embedding_format = QuantizationFormat.F16
+        if self._embeddings is None:
+            config = EmbeddingConfig(
+                context_key=self._context.context_key or "_default",
+                format=self._embedding_format,
+                dimensions=384,
+            )
+            self._embeddings = self._embedding_factory.create(self._db.session, config)
+
     def _setup_stores(self) -> None:
         """Initialize storage components."""
-        self._embedding_store = EmbeddingStore(self._db.session)
+        self._setup_embedding_factory()
         self._content = ContentStore(self._db.session, self._context.context_key)
         self._atomic = atomic.Protocol(
             self._lg,
             self._db.session,
             self._context.context_key,
             embedder=self._embedder,
-            embedding_store=self._embedding_store,
+            embedding_factory=self._embedding_factory,
+            embedding_format=self._embedding_format,
+            embedding_dimensions=self._embedding_dimensions,
+        )
+        self._kg = KGStore(
+            self._lg,
+            self._db.session,
+            embedder=self._embedder,
+            embedding_factory=self._embedding_factory,
+            embedding_format=self._embedding_format,
         )
         self._context_builder = ContextBuilder(self._atomic.assertions)
         self._train: TrainFactory | None = None
@@ -213,6 +244,8 @@ class Client:
             kelt_config=self._kelt_config,
             training_config=self._training_config,
             ensure_schema=False,  # Don't re-run schema checks
+            embeddings=self._embeddings,
+            embedding_dimensions=self._embedding_dimensions,
         )
 
     def with_schema(self, schema_name: str) -> ScopedClient:
@@ -255,6 +288,32 @@ class Client:
     def atomic(self) -> Protocol:
         """Access atomic memory protocol."""
         return self._atomic
+
+    @property
+    def kg(self) -> KGStore:
+        """Access knowledge graph storage.
+
+        Provides entity-centric knowledge management with scoped subgraphs:
+        - Canonical entities with identity-based deduplication
+        - Entity resolution via aliases
+        - Fact-entity linkage
+        - Entity relationships
+
+        Example:
+            # Create entity in global scope
+            entity_id, _ = kelt.kg.entities.find_or_create(
+                scope_key="global",
+                name="Tesla",
+                entity_type="company",
+            )
+
+            # Add alias
+            kelt.kg.entities.add_alias(entity_id, "TSLA", scope_key="global")
+
+            # Link fact to entity
+            kelt.kg.fact_entities.link(fact_id=123, entity_id=entity_id, scope_key="global")
+        """
+        return self._kg
 
     @property
     def content(self) -> ContentStore:
@@ -319,9 +378,46 @@ class Client:
         return self._llm_client
 
     @property
-    def embedder(self) -> Embedder | None:
+    def embedder(self) -> EmbeddingClient | None:
         """Access underlying embedder (None if not configured)."""
         return self._embedder
+
+    @property
+    def embeddings(self) -> EmbeddingStoreClient:
+        """Access embeddings client for custom entity types.
+
+        Provides entity-type agnostic vector storage and similarity search.
+        Use this for storing embeddings of non-fact entities (e.g., queries,
+        documents, custom domain objects).
+
+        Note:
+            Unlike atomic facts, custom entity embeddings are not scoped by
+            ``context_key``. If you need isolation between contexts, encode
+            the context in ``entity_type`` (e.g., ``"myapp.alice.query"``) or
+            ``entity_id``.
+
+        Example:
+            # Store embedding for a custom entity type
+            kelt.embeddings.store(
+                entity_type="myapp.query",
+                entity_id="q123",
+                embedding=[0.1, 0.2, ...],
+                model="text-embedding-3-small",
+            )
+
+            # Search for similar entities
+            results = kelt.embeddings.search(
+                query=[0.1, 0.2, ...],
+                entity_type="myapp.query",
+                model="text-embedding-3-small",
+                top_k=5,
+            )
+
+            # Delete when entity is removed
+            kelt.embeddings.delete("myapp.query", "q123")
+        """
+        assert self._embeddings is not None  # Always set in _setup_stores
+        return self._embeddings
 
     @property
     def kelt_config(self) -> DotDict | None:
@@ -392,14 +488,11 @@ class Client:
             ensure: If True, create database and run migrations automatically.
                     If False, only verify — raise SchemaVersionError if not current.
         """
-        schema_name = self._context.schema_name or self._db.schema
         if ensure:
-            self._db.ensure_database()
-            self._db.ensure_pg_schema()  # Create PostgreSQL schema if configured
-            manager = SchemaManager(self._lg, self._db.engine, schema_name=schema_name)
-            manager.ensure_schema()
+            self._db.ensure_schema(self._context.schema_name)
             return
 
+        schema_name = self._context.schema_name or self._db.schema
         manager = SchemaManager(self._lg, self._db.engine, schema_name=schema_name)
         status = manager.get_status()
         if status.state != SchemaState.CURRENT:

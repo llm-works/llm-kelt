@@ -50,6 +50,7 @@ Usage:
     result = kelt.train.dpo.train(manifest)
 """
 
+from .bootstrap import ensure_schema
 from .client import Client
 from .core.errors import (
     ConfigError,
@@ -60,12 +61,21 @@ from .core.errors import (
     SchemaVersionError,
     ValidationError,
 )
+from .core.schema import SchemaState, SchemaStatus
+from .embedding import Config as EmbeddingConfig
+from .embedding import QuantizationFormat
+from .embedding import StoreClient as EmbeddingStoreClient
 from .factory import ClientFactory
 from .memory import ClientContext
+from .memory.kg import KGStore
 
 __all__ = [
     "Client",
     "ClientFactory",
+    "EmbeddingStoreClient",
+    "EmbeddingConfig",
+    "KGStore",
+    "QuantizationFormat",
     "KeltError",
     "ValidationError",
     "NotFoundError",
@@ -74,4 +84,7 @@ __all__ = [
     "ConflictError",
     "SchemaVersionError",
     "ClientContext",
+    "ensure_schema",
+    "SchemaStatus",
+    "SchemaState",
 ]

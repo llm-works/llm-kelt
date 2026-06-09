@@ -23,21 +23,28 @@ from .clients import (
 )
 from .embedding import EmbeddingAdapter, EmbeddingFilter
 from .models import (
+    DeleteResult,
     DirectiveDetails,
     Fact,
+    FactRelationship,
     FeedbackDetails,
     InteractionDetails,
     PredictionDetails,
     PreferenceDetails,
+    RelType,
     SolutionDetails,
 )
 from .protocol import Protocol
+from .relationships import RelationshipsClient
 
 __all__ = [
     # Protocol
     "Protocol",
     # Models
+    "DeleteResult",
     "Fact",
+    "FactRelationship",
+    "RelType",
     "SolutionDetails",
     "PredictionDetails",
     "FeedbackDetails",
@@ -46,6 +53,7 @@ __all__ = [
     "PreferenceDetails",
     # Clients
     "AssertionsClient",
+    "RelationshipsClient",
     "SolutionsClient",
     "PredictionsClient",
     "FeedbackClient",

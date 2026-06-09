@@ -108,6 +108,33 @@ class AssertionsClient(FactClient[None]):
                 return None
             return cast(Fact, detach(fact, session))
 
+    def get_many(self, fact_ids: list[int]) -> list[Fact]:
+        """
+        Batch retrieve facts by ID.
+
+        Args:
+            fact_ids: List of fact IDs to retrieve.
+
+        Returns:
+            List of facts found. Missing IDs are silently skipped.
+            Order is not guaranteed to match input order.
+        """
+        if not fact_ids:
+            return []
+
+        with self._session_factory() as session:
+            stmt = select(Fact).where(
+                Fact.id.in_(fact_ids),
+                Fact.type == self.fact_type,
+            )
+
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
+            facts = list(session.scalars(stmt).all())
+            return cast(list[Fact], detach_all(facts, session))
+
     def update(
         self,
         fact_id: int,

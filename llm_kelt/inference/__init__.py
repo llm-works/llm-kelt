@@ -3,7 +3,7 @@
 This module provides:
 - ContextBuilder: Builds system prompts with injected facts
 - ContextQuery: High-level interface for context-aware queries
-- Embedder: Client for generating embeddings
+- EmbeddingClient: Client for generating embeddings (from llm_infer.client)
 
 For LLM client functionality, use llm_infer.client directly:
     from llm_infer.client import LLMClient
@@ -29,18 +29,20 @@ Usage:
     response = await client.chat_async(messages, system=system)
 """
 
+from llm_infer.client import EmbeddingClient, EmbeddingResult
+
+from ..conversation.session import Conversation
 from .context import ContextBuilder
 from .embed_facts import EmbedFactsResult, embed_missing_facts
-from .embedder import Embedder, EmbeddingResult
-from .query import ContextQuery, Conversation, RAGArgs
+from .query import ContextQuery, RAGArgs
 
 __all__ = [
     "ContextBuilder",
     "ContextQuery",
     "Conversation",
-    "Embedder",
+    "EmbeddingClient",
+    "EmbeddingResult",
     "RAGArgs",
     "embed_missing_facts",
-    "EmbeddingResult",
     "EmbedFactsResult",
 ]

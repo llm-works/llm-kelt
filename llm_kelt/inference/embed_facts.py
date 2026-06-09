@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from appinfra.log import Logger
+from llm_infer.client import EmbeddingClient
 
 from ..memory.atomic.embedding import EmbeddingAdapter
 from ..memory.atomic.models import Fact
-from .embedder import Embedder, EmbeddingResult
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -24,16 +24,16 @@ class EmbedFactsResult:
 def _store_embeddings(
     lg: Logger,
     facts: "Sequence[Fact]",
-    results: list[EmbeddingResult],
+    embeddings: list[list[float]],
     embedding_adapter: EmbeddingAdapter,
-    model_name: str,
+    model: str,
 ) -> tuple[int, int]:
     """Store embeddings for facts, returning (processed, failed) counts."""
     processed = 0
     failed = 0
-    for fact, result in zip(facts, results, strict=True):
+    for fact, embedding in zip(facts, embeddings, strict=True):
         try:
-            embedding_adapter.set_embedding(fact.id, result.embedding, model_name)
+            embedding_adapter.set_embedding(fact.id, embedding, model)
             processed += 1
         except Exception as e:
             lg.error(
@@ -47,9 +47,9 @@ def _store_embeddings(
 async def _embed_individually(
     lg: Logger,
     facts: "Sequence[Fact]",
-    embedder: Embedder,
+    embedder: EmbeddingClient,
     embedding_adapter: EmbeddingAdapter,
-    model_name: str,
+    model: str,
 ) -> tuple[int, int]:
     """Embed facts one at a time as fallback, returning (processed, failed) counts."""
     processed = 0
@@ -57,7 +57,7 @@ async def _embed_individually(
     for fact in facts:
         try:
             result = await embedder.embed_async(fact.content)
-            embedding_adapter.set_embedding(fact.id, result.embedding, model_name)
+            embedding_adapter.set_embedding(fact.id, result.embedding, model)
             processed += 1
         except Exception as e:
             lg.error(
@@ -71,26 +71,27 @@ async def _embed_individually(
 async def _process_batch(
     lg: Logger,
     facts: "Sequence[Fact]",
-    embedder: Embedder,
+    embedder: EmbeddingClient,
     embedding_adapter: EmbeddingAdapter,
-    model_name: str,
+    model: str,
 ) -> tuple[int, int]:
     """Process a single batch of facts, with fallback to individual embedding."""
     try:
-        results = await embedder.embed_batch_async([f.content for f in facts])
-        return _store_embeddings(lg, facts, results, embedding_adapter, model_name)
+        batch_result = await embedder.embed_batch_async([f.content for f in facts])
+        return _store_embeddings(lg, facts, batch_result.embeddings, embedding_adapter, model)
     except Exception as e:
         lg.warning(
             "batch embedding failed, falling back to individual",
             extra={"batch_size": len(facts), "exception": e},
         )
-        return await _embed_individually(lg, facts, embedder, embedding_adapter, model_name)
+        return await _embed_individually(lg, facts, embedder, embedding_adapter, model)
 
 
 async def embed_missing_facts(
     lg: Logger,
-    embedder: Embedder,
+    embedder: EmbeddingClient,
     embedding_adapter: EmbeddingAdapter,
+    dimensions: int,
     batch_size: int = 50,
 ) -> EmbedFactsResult:
     """
@@ -99,27 +100,28 @@ async def embed_missing_facts(
     Finds facts missing embeddings and generates them in batches.
     Continues processing even if individual embeddings fail.
 
-    The model name is discovered from the embedding server automatically.
+    Uses the model name from the embedder.
 
     Args:
         lg: Logger instance.
-        embedder: Embedder client for generating embeddings.
+        embedder: EmbeddingClient client for generating embeddings.
         embedding_adapter: EmbeddingAdapter for storing embeddings.
+        dimensions: Output dimensions for embeddings (determines storage table).
         batch_size: Number of facts to embed per batch.
 
     Returns:
         EmbedFactsResult with counts of processed and failed facts.
     """
-    model_name = await embedder.discover_async()
+    model = embedder.model
     processed = 0
     failed = 0
 
     while True:
-        facts = embedding_adapter.list_without_embeddings(model_name, limit=batch_size)
+        facts = embedding_adapter.list_without_embeddings(model, dimensions, limit=batch_size)
         if not facts:
             break
 
-        p, f = await _process_batch(lg, facts, embedder, embedding_adapter, model_name)
+        p, f = await _process_batch(lg, facts, embedder, embedding_adapter, model)
         processed += p
         failed += f
 

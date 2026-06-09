@@ -7,6 +7,129 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-08
+
+### Added
+- `FactEntityStore.link(if_not_exists=True)` for idempotent fact-entity linking using PostgreSQL
+  upsert; avoids session corruption from `IntegrityError` on duplicate keys
+- Dynamic dimension routing for embedding adapters: embeddings automatically route to
+  dimension-specific tables (e.g., `embeddings_256_f16`, `embeddings_384_f16`) based on
+  vector length, enabling multi-model embedding support without schema changes
+- `default_dimensions` parameter for `EmbeddingAdapter` and `EntityEmbeddingAdapter`:
+  optional fallback for `get_embedding()` and `delete_embedding()` when dimensions not specified
+- `embedding_dimensions` parameter for `KGStore` to configure default embedding dimensions
+- Knowledge Graph layer (`llm_kelt.memory.kg`) for entity-centric knowledge management
+  - Canonical entities with alias-based deduplication and scoped visibility
+  - Entity relationships, fact-entity linkage, and reference tracking
+  - Batch queries: `get_by_names()`, `get_relationships_for_entities()`, `get_entities_for_facts()`
+- Fact relationships layer (`llm_kelt.memory.atomic.relationships`): `RelationshipsClient`
+  + `RelType` enum (`contradicts`, `supports`, `supersedes`, `derived_from`, `related_to`)
+  for typed graph edges between atomic facts. Recursive CTE traversal with PG14+ cycle
+  detection; symmetric types normalize ID ordering; per-context edges via `context_key`.
+- `AssertionsClient.get_many(fact_ids)` for batch fact retrieval by ID
+  (eliminates N+1 query patterns)
+- `Conversation.to_dict()` / `Conversation.from_dict()` for serializing conversation state
+  (enables mid-loop pause/resume by persisting messages and token count)
+- Hard context limit enforcement: `max_tokens` is now a guaranteed cap, not just a compaction trigger
+- `ContextOverflowError` raised BEFORE adding a message that would exceed `max_tokens`
+- `Config.tokenizer` option for accurate token counting (accepts `Callable[[str], int]`)
+- `CompactionGuard` protocol for validating compaction quality with retry/escalation
+- Pre-built compaction guards: `token_reduction()`, `preserve_keywords()`, `max_summary_tokens()`
+- `CompactionGuardError` raised when guards fail after all retries exhausted
+- `AsyncCompactor` base class for I/O-bound compaction strategies (e.g., LLM summarization)
+- `Conversation.append_async()` for non-blocking compaction in async contexts
+- Warns at construction when `AsyncCompactor` is used (reminds to use `append_async()`)
+- Raises `RuntimeError` if sync `append()` triggers async compaction
+- `Client.embeddings` public property for entity-type agnostic vector storage
+  (enables custom embeddings for non-fact entities like queries or documents)
+- `EmbeddingClient` re-exported from `llm_kelt` for type hints
+- Embedding quantization framework (`llm_kelt.embedding`) with pluggable storage formats:
+  - F32 (pgvector `vector`) — full precision, native similarity search
+  - F16 (pgvector `halfvec`) — 2x compression, native similarity search
+  - I8 (bytea + scalar quantization) — 4x compression, application-side search
+  - I4 (bytea + packed 4-bit) — 8x compression, application-side search
+  - `Factory` for creating embedding clients with automatic table creation
+  - `Config.prefix` option for custom table names (tenant/application isolation)
+- `DeleteResult` dataclass for atomic fact deletion results (`.deleted`, `.not_found`, `.count`)
+- `EmbeddingAdapter.delete_orphans(dry_run=False)` to clean up embeddings for deleted facts
+- `kelt atomic vacuum [--dry-run]` CLI command for orphan embedding cleanup
+- `llm_kelt.ensure_schema(lg, pg, schema_name=None)` top-level helper for
+  embedding kelt into a foreign database. Provides a public migration path for
+  consumers who have a `PG` instance but don't want to construct a full `Client`
+  just to run migrations, without reaching into `core.*` modules. Shares its
+  migration-setup sequence with `Client(ensure_schema=True)` via
+  `Database.ensure_schema()` so both entry points run the same steps.
+- Re-export `SchemaStatus` and `SchemaState` from `llm_kelt` so callers can
+  inspect the result of `ensure_schema()` without importing from `core.*`.
+- Conversation layer with stateful dialogue management (`llm_kelt.conversation`)
+  - `Conversation` class with token tracking and automatic compaction
+  - `Message`, `ToolCall`, and `Role` types (FieldDict-based, zero serialization overhead)
+  - Sliding window and LLM-summarizing compaction strategies
+  - File-based and PostgreSQL session storage backends
+  - `kelt session` CLI commands for listing, showing, and deleting sessions
+  - Example script (`examples/05_conversation.py`)
+- Debug logging for conversation compaction (messages/tokens before/after, timing, usage ratio)
+- `TieredCompactor` and `AsyncTieredCompactor` for two-phase compaction: trims large tool
+  outputs first (web_fetch, web_search, etc.), only summarizes if still over threshold.
+  Preserves conversation structure better than eager summarization.
+  - Supports guards with retry/escalation (parity with `SummarizingCompactor`)
+  - `trim_threshold_tokens` param for token-based trimming (uses tokenizer instead of chars)
+
+### Changed
+- **Breaking**: Embedding config format changed to use `llm_infer.client.Factory.embeddings_from_config()`.
+Config keys: `model_name` → `model`, added `type` (provider: "openai"/"google"), `rate_limit`,
+`retry`.
+- **Breaking**: Removed `Embedder` class from `llm_kelt.inference`. Use
+  `llm_infer.client.EmbeddingClient` instead (provides retry with exponential backoff).
+- **Breaking**: Renamed embedding storage client export: `EmbeddingClient` → `EmbeddingStoreClient`
+  (avoids collision with `llm_infer.client.EmbeddingClient` for HTTP embedding generation).
+- **Breaking**: `metadata` column renamed to `extra` across all tables (avoids SQLAlchemy conflict)
+- **Breaking**: `metadata` parameter renamed to `extra` in storage APIs (`save()`, `record()`, `link()`, etc.)
+- **Breaking**: `SummarizingCompactor` is now an `AsyncCompactor` (use `append_async()`, accepts guards)
+- **Breaking**: Table `sessions` renamed to `conv_sessions` (avoids conflicts with agent tables)
+- **Breaking**: Migration 006 replaces `fact_embeddings` table with format-specific tables
+  (`embeddings_{prefix}_{dim}_{format}`, e.g., `embeddings_384_f16`). Existing embeddings
+  must be regenerated after migration.
+- **Breaking**: `Conversation.__init__` now requires `lg: Logger` as the first parameter
+- **Breaking**: `FactClient.delete()` now returns `DeleteResult` instead of `bool`, accepts
+  `int | Iterable[int]`, and automatically cleans up associated embeddings
+- **Breaking**: `EmbeddingStore` replaced by `EmbeddingClient` with new quantization-aware API
+  (import from `llm_kelt` or `llm_kelt.embedding`)
+- `Conversation` moved from `llm_kelt.inference.query` to `llm_kelt.conversation.session`
+  (re-exported from `llm_kelt.inference` for backward compatibility)
+- `ContextQuery` now uses the new `Conversation` class with `messages_as_dicts()` for
+  clean LLM API payloads
+- `EmbeddingAdapter` now uses factory-based dynamic dimension routing: embeddings of different
+  dimensions automatically route to the correct storage table (e.g., `embeddings_256_f16` vs
+  `embeddings_384_f16`)
+- `embed_missing_facts()` now requires `dimensions` parameter to specify output dimensions
+- `pgserver.image` upgraded to `docker.io/pgvector/pgvector:pg18`; fully qualified
+  registry lets Podman resolve it without `unqualified-search-registries` config
+
+### Fixed
+- `Conversation.split_for_compaction()` no longer cuts between an `assistant.tool_calls`
+  and its tool result messages (avoids provider 400s on unmatched `tool_call_id`s)
+- `TieredCompactor` rejects truncated summary responses (`finish_reason="length"`)
+  and falls back to a sliding-window drop instead of applying the partial text
+- `TieredCompactor` rejects summaries that fail to shrink the conversation
+  (`after_tokens >= before_tokens`), falling back to a sliding-window drop
+- `.env.yaml` include in `etc/llm-kelt.yaml` and `etc/models.yaml` is now
+  optional (`!include?`) so configs load on fresh checkouts
+- PG-dependent tests are deselected at collection time when Postgres is
+  unreachable (matches appinfra's probe-and-drop pattern; replaces psycopg2 connection errors)
+- Optional-dep tests using `pytest.importorskip("trl" | "peft")` are now
+  ignored at conftest level via `collect_ignore` when those packages are absent
+- Reduced flakiness in `tests/e2e/test_facts.py` by switching LLM calls to
+  `temperature=0.0` and broadening the Python keyword assertion to accept any
+  Python-ecosystem term (matches the existing pattern in the sibling category test).
+
+### Documentation
+- Add CLI reference (`docs/cli.md`) with full command documentation
+- Expand README with prompt tuning, manifest-based training, and adapter registry examples
+- Document training profiles table and stability detection features
+- Add multi-schema operations example (`with_schema()`)
+- Add conversation layer usage guide and CLI reference
+
 ## [0.2.0] - 2026-03-14
 
 ### Added
@@ -93,6 +216,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Example scripts for common workflows
 - API reference documentation in README
 
-[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/llm-works/llm-kelt/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/llm-works/llm-kelt/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/llm-works/llm-kelt/releases/tag/v0.1.0

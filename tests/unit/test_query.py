@@ -3,11 +3,11 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from llm_infer.client import ChatResponse
+from llm_infer.client import ChatResponse, EmbeddingResult
 
+from llm_kelt.conversation import Conversation, Role
 from llm_kelt.core.types import ScoredEntity
-from llm_kelt.inference.embedder import EmbeddingResult
-from llm_kelt.inference.query import ContextQuery, Conversation, RAGArgs
+from llm_kelt.inference.query import ContextQuery, RAGArgs
 from llm_kelt.memory.atomic import Fact
 
 
@@ -19,7 +19,7 @@ class TestRAGArgs:
         args = RAGArgs()
         assert args.top_k == 10
         assert args.min_similarity == 0.3
-        assert args.model_name is None
+        assert args.model is None
         assert args.categories is None
 
     def test_custom_values(self):
@@ -27,39 +27,39 @@ class TestRAGArgs:
         args = RAGArgs(
             top_k=5,
             min_similarity=0.5,
-            model_name="custom-model",
+            model="custom-model",
             categories=["preferences", "rules"],
         )
         assert args.top_k == 5
         assert args.min_similarity == 0.5
-        assert args.model_name == "custom-model"
+        assert args.model == "custom-model"
         assert args.categories == ["preferences", "rules"]
 
 
 class TestConversation:
     """Test Conversation class."""
 
-    def test_add_user_message(self):
+    def test_add_user_message(self, lg):
         """Test adding user message."""
-        conv = Conversation()
-        conv.add_user("Hello")
+        conv = Conversation(lg)
+        conv.add("Hello")
         assert len(conv.messages) == 1
-        assert conv.messages[0]["role"] == "user"
-        assert conv.messages[0]["content"] == "Hello"
+        assert conv.messages[0].role == "user"
+        assert conv.messages[0].content == "Hello"
 
-    def test_add_assistant_message(self):
+    def test_add_assistant_message(self, lg):
         """Test adding assistant message."""
-        conv = Conversation()
-        conv.add_assistant("Hi there")
+        conv = Conversation(lg)
+        conv.add("Hi there", Role.ASSISTANT)
         assert len(conv.messages) == 1
-        assert conv.messages[0]["role"] == "assistant"
-        assert conv.messages[0]["content"] == "Hi there"
+        assert conv.messages[0].role == "assistant"
+        assert conv.messages[0].content == "Hi there"
 
-    def test_clear(self):
+    def test_clear(self, lg):
         """Test clearing conversation."""
-        conv = Conversation()
-        conv.add_user("Hello")
-        conv.add_assistant("Hi")
+        conv = Conversation(lg)
+        conv.add("Hello")
+        conv.add("Hi", Role.ASSISTANT)
         conv.clear()
         assert len(conv.messages) == 0
 
@@ -104,6 +104,7 @@ class TestContextQueryRAG:
             return_value=EmbeddingResult(
                 embedding=[0.1, 0.2, 0.3],
                 model="test-model",
+                dimensions=3,
                 prompt_tokens=5,
             )
         )
@@ -163,7 +164,7 @@ class TestContextQueryRAG:
 
         mock_embedding_adapter.search_similar.assert_called_once_with(
             query=[0.1, 0.2, 0.3],
-            model_name="test-model",
+            model="test-model",
             top_k=5,
             min_similarity=0.4,
             categories=None,
@@ -245,10 +246,10 @@ class TestContextQueryRAG:
         assert call_kwargs["min_similarity"] == 0.7
 
     @pytest.mark.asyncio
-    async def test_ask_with_rag_custom_model_name(
+    async def test_ask_with_rag_custom_model(
         self, mock_client, mock_context_builder, mock_embedding_adapter, mock_embedder
     ):
-        """Test that RAGArgs.model_name overrides embedder model."""
+        """Test that RAGArgs.model overrides embedder model."""
         mock_embedding_adapter.search_similar.return_value = []
 
         query = ContextQuery(
@@ -258,16 +259,16 @@ class TestContextQueryRAG:
             embedding_adapter=mock_embedding_adapter,
         )
 
-        await query.ask("Test", rag=RAGArgs(model_name="custom-embedding-model"))
+        await query.ask("Test", rag=RAGArgs(model="custom-embedding-model"))
 
         call_kwargs = mock_embedding_adapter.search_similar.call_args.kwargs
-        assert call_kwargs["model_name"] == "custom-embedding-model"
+        assert call_kwargs["model"] == "custom-embedding-model"
 
     @pytest.mark.asyncio
     async def test_ask_with_rag_uses_embedder_model_by_default(
         self, mock_client, mock_context_builder, mock_embedding_adapter, mock_embedder, sample_fact
     ):
-        """Test that RAG uses embedder's model when model_name is None."""
+        """Test that RAG uses embedder's model when model is None."""
         mock_embedding_adapter.search_similar.return_value = []
 
         query = ContextQuery(
@@ -280,11 +281,17 @@ class TestContextQueryRAG:
         await query.ask("Test", rag=RAGArgs())
 
         call_kwargs = mock_embedding_adapter.search_similar.call_args.kwargs
-        assert call_kwargs["model_name"] == "test-model"
+        assert call_kwargs["model"] == "test-model"
 
     @pytest.mark.asyncio
     async def test_ask_with_rag_and_conversation(
-        self, mock_client, mock_context_builder, mock_embedding_adapter, mock_embedder, sample_fact
+        self,
+        mock_client,
+        mock_context_builder,
+        mock_embedding_adapter,
+        mock_embedder,
+        sample_fact,
+        lg,
     ):
         """Test that RAG works with multi-turn conversations."""
         mock_embedding_adapter.search_similar.return_value = [
@@ -298,16 +305,16 @@ class TestContextQueryRAG:
             embedding_adapter=mock_embedding_adapter,
         )
 
-        conv = Conversation()
+        conv = Conversation(lg)
         await query.ask("First question", conversation=conv, rag=RAGArgs())
         await query.ask("Follow up", conversation=conv, rag=RAGArgs())
 
         # Conversation should have both exchanges
         assert len(conv.messages) == 4
-        assert conv.messages[0]["content"] == "First question"
-        assert conv.messages[1]["content"] == "Test response"
-        assert conv.messages[2]["content"] == "Follow up"
-        assert conv.messages[3]["content"] == "Test response"
+        assert conv.messages[0].content == "First question"
+        assert conv.messages[1].content == "Test response"
+        assert conv.messages[2].content == "Follow up"
+        assert conv.messages[3].content == "Test response"
 
     @pytest.mark.asyncio
     async def test_ask_with_rag_no_facts_found(

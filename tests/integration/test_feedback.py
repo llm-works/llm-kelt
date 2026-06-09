@@ -130,7 +130,8 @@ class TestFeedbackClient:
         assert kelt_client.atomic.feedback.get(fact_id) is not None
 
         result = kelt_client.atomic.feedback.delete(fact_id)
-        assert result is True
+        assert result.count == 1
+        assert fact_id in result.deleted
 
         assert kelt_client.atomic.feedback.get(fact_id) is None
 

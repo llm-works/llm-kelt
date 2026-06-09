@@ -3,10 +3,9 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from llm_infer.client import ChatResponse
+from llm_infer.client import ChatResponse, EmbeddingResult
 
 from llm_kelt.inference.context import ContextBuilder
-from llm_kelt.inference.embedder import EmbeddingResult
 from llm_kelt.inference.query import ContextQuery, RAGArgs
 
 
@@ -46,6 +45,7 @@ class TestRAGIntegration:
             return EmbeddingResult(
                 embedding=get_embedding(text),
                 model="test-model",
+                dimensions=3,
                 prompt_tokens=len(text),
             )
 
@@ -298,10 +298,10 @@ class TestRAGIntegration:
 
     @pytest.mark.asyncio
     async def test_rag_multi_turn_conversation(
-        self, kelt_client, mock_embedder, mock_llm_client, sample_facts_with_embeddings
+        self, kelt_client, mock_embedder, mock_llm_client, sample_facts_with_embeddings, logger
     ):
         """Test RAG works across multi-turn conversations."""
-        from llm_kelt.inference.query import Conversation
+        from llm_kelt.conversation import Conversation
 
         context_builder = ContextBuilder(kelt_client.atomic.assertions)
         query = ContextQuery(
@@ -311,7 +311,7 @@ class TestRAGIntegration:
             embedding_adapter=kelt_client.atomic.embeddings,
         )
 
-        conv = Conversation()
+        conv = Conversation(logger)
 
         # First turn - Python question
         await query.ask(
@@ -329,8 +329,8 @@ class TestRAGIntegration:
 
         # Conversation should have all messages
         assert len(conv.messages) == 4  # 2 user + 2 assistant
-        assert conv.messages[0]["content"] == "What language should I use?"
-        assert conv.messages[2]["content"] == "Tell me more about that"
+        assert conv.messages[0].content == "What language should I use?"
+        assert conv.messages[2].content == "Tell me more about that"
 
         # Embedder should have been called twice (once per question)
         assert mock_embedder.embed_async.call_count == 2

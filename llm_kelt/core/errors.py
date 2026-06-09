@@ -41,3 +41,21 @@ class ConflictError(KeltError):
     """Raised when an operation conflicts with existing state."""
 
     pass
+
+
+class ContextOverflowError(KeltError):
+    """Raised when conversation exceeds max_tokens and compaction cannot reduce it.
+
+    This typically happens when:
+    - A single message (e.g., large tool result) exceeds max_tokens
+    - The preserved messages (system + min_recent_messages) exceed max_tokens
+
+    Attributes:
+        token_count: Current token count after compaction attempt.
+        max_tokens: Configured maximum tokens.
+    """
+
+    def __init__(self, message: str, token_count: int, max_tokens: int) -> None:
+        super().__init__(message)
+        self.token_count = token_count
+        self.max_tokens = max_tokens

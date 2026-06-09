@@ -6,8 +6,10 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
-from llm_kelt.core.embedding import EmbeddingStore
+from llm_kelt.embedding import Factory as EmbeddingFactory
+from llm_kelt.embedding.types import QuantizationFormat
 
 from .clients import (
     AssertionsClient,
@@ -19,9 +21,10 @@ from .clients import (
     SolutionsClient,
 )
 from .embedding import EmbeddingAdapter
+from .relationships import RelationshipsClient
 
 if TYPE_CHECKING:
-    from llm_kelt.inference.embedder import Embedder
+    from llm_infer.client import EmbeddingClient
 
 
 class Protocol:
@@ -42,7 +45,7 @@ class Protocol:
 
         # Embedding operations
         kelt.atomic.embeddings.embed_fact(fact, "text-embedding-3-small")
-        results = kelt.atomic.embeddings.search_similar(query_embedding, model_name)
+        results = kelt.atomic.embeddings.search_similar(query_embedding, model)
     """
 
     def __init__(
@@ -51,8 +54,10 @@ class Protocol:
         session_factory: Callable[[], Any],
         context_key: str | None,
         *,
-        embedder: Embedder | None = None,
-        embedding_store: EmbeddingStore | None = None,
+        embedder: EmbeddingClient | None = None,
+        embedding_factory: EmbeddingFactory | None = None,
+        embedding_format: QuantizationFormat = QuantizationFormat.F16,
+        embedding_dimensions: int | None = None,
     ) -> None:
         """
         Initialize Atomic memory protocol.
@@ -62,13 +67,17 @@ class Protocol:
             session_factory: Database session factory.
             context_key: Context key to scope all operations to (None = no filtering).
             embedder: Optional embedder for generating embeddings.
-            embedding_store: Optional embedding store for vector operations.
+            embedding_factory: Factory for creating dimension-specific embedding stores.
+            embedding_format: Quantization format for embeddings (default: F16).
+            embedding_dimensions: Default output dimensions for embeddings.
         """
         self._lg = lg
         self._session_factory = session_factory
         self._context_key = context_key
         self._embedder = embedder
-        self._embedding_store = embedding_store
+        self._embedding_factory = embedding_factory
+        self._embedding_format = embedding_format
+        self._embedding_dimensions = embedding_dimensions
 
         # Lazy-initialized clients
         self._assertions: AssertionsClient | None = None
@@ -78,15 +87,18 @@ class Protocol:
         self._directives: DirectivesClient | None = None
         self._interactions: InteractionsClient | None = None
         self._preferences: PreferencesClient | None = None
+        self._relationships: RelationshipsClient | None = None
 
-        # Eagerly initialize embedding adapter so clients can use it
+        # Eagerly initialize embedding adapter if factory is provided
         self._embedding_adapter: EmbeddingAdapter | None = None
-        if self._embedding_store is not None:
+        if self._embedding_factory is not None:
             self._embedding_adapter = EmbeddingAdapter(
-                self._session_factory,
-                self._context_key,
-                self._embedding_store,
-                self._embedder,
+                session_factory=self._session_factory,
+                context_key=self._context_key,
+                factory=self._embedding_factory,
+                format=self._embedding_format,
+                embedder=self._embedder,
+                default_dimensions=self._embedding_dimensions,
             )
 
     @property
@@ -151,18 +163,27 @@ class Protocol:
         return self._preferences
 
     @property
+    def relationships(self) -> RelationshipsClient:
+        """Fact relationship edges (contradicts, supports, etc.)."""
+        if self._relationships is None:
+            self._relationships = RelationshipsClient(
+                self._lg, self._session_factory, self._context_key
+            )
+        return self._relationships
+
+    @property
     def embeddings(self) -> EmbeddingAdapter:
         """Embedding operations for atomic facts."""
-        # Defensive: adapter is eagerly created in __init__ if embedding_store is set
-        # This lazy fallback handles edge cases where adapter was reset or not initialized
         if self._embedding_adapter is None:
-            if self._embedding_store is None:
-                raise RuntimeError("No embedding store configured")
+            if self._embedding_factory is None:
+                raise RuntimeError("No embedding factory configured")
             self._embedding_adapter = EmbeddingAdapter(
-                self._session_factory,
-                self._context_key,
-                self._embedding_store,
-                self._embedder,
+                session_factory=self._session_factory,
+                context_key=self._context_key,
+                factory=self._embedding_factory,
+                format=self._embedding_format,
+                embedder=self._embedder,
+                default_dimensions=self._embedding_dimensions,
             )
         return self._embedding_adapter
 
@@ -173,7 +194,7 @@ class Protocol:
         Returns:
             Dict with counts for each collection type.
         """
-        return {
+        stats: dict[str, int] = {
             "assertions": self.assertions.count(),
             "solutions": self.solutions.count(),
             "predictions": self.predictions.count(),
@@ -182,3 +203,9 @@ class Protocol:
             "interactions": self.interactions.count(),
             "preferences": self.preferences.count(),
         }
+        try:
+            stats["relationships"] = self.relationships.count()
+        except (ProgrammingError, OperationalError) as e:
+            self._lg.warning("failed to count relationships", extra={"exception": e})
+            stats["relationships"] = 0
+        return stats

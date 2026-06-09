@@ -5,12 +5,11 @@ from __future__ import annotations
 from appinfra.db.pg import PG
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
-from llm_infer.client import ChatClient
+from llm_infer.client import ChatClient, EmbeddingClient
 from llm_infer.client import Factory as LLMClientFactory
 
 from .client import Client
 from .core.database import Database
-from .inference.embedder import Embedder
 from .memory.isolation import ClientContext
 
 
@@ -42,12 +41,13 @@ class ClientFactory:
         """
         self._lg = lg
 
-    def _create_embedder(self, config: DotDict) -> Embedder | None:
-        """Create Embedder from config if embedding section exists."""
+    def _create_embedder(self, config: DotDict) -> EmbeddingClient | None:
+        """Create EmbeddingClient from config if embedding section exists."""
         embed_cfg = getattr(config, "embedding", None)
         if embed_cfg is None:
             return None
-        return Embedder(base_url=embed_cfg.base_url, model=embed_cfg.model_name)
+        factory = LLMClientFactory(self._lg)
+        return factory.embeddings_from_config(embed_cfg.to_dict())
 
     def _create_llm_client(self, config: DotDict) -> ChatClient | None:
         """Create LLM client from config if llm section exists."""
@@ -84,8 +84,15 @@ class ClientFactory:
               backends:
                 local: { base_url: "...", model: "..." }
             embedding:
-              model_name: all-MiniLM-L6-v2
+              type: openai  # or "google"
               base_url: http://localhost:8001/v1
+              model: all-MiniLM-L6-v2
+              rate_limit:  # optional
+                per_minute: 60
+              retry:  # optional
+                base: 1.0
+                max_delay: 60
+                timeout: 120
             kelt:
               memory:
                 max_facts: 100
@@ -109,7 +116,7 @@ class ClientFactory:
         self,
         context: ClientContext,
         database: Database,
-        embedder: Embedder | None = None,
+        embedder: EmbeddingClient | None = None,
         llm_client: ChatClient | None = None,
         kelt_config: DotDict | None = None,
         training_config: DotDict | None = None,
@@ -123,7 +130,7 @@ class ClientFactory:
         Args:
             context: ClientContext for data partitioning
             database: Existing Database instance
-            embedder: Optional existing Embedder instance
+            embedder: Optional existing EmbeddingClient instance
             llm_client: Optional existing LLM client instance
             kelt_config: Optional kelt settings (config.kelt section)
             training_config: Optional training settings (config.training section)

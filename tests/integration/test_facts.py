@@ -197,9 +197,81 @@ class TestAssertionsClient:
         assert kelt_client.atomic.assertions.exists(fact_id)
 
         result = kelt_client.atomic.assertions.delete(fact_id)
-        assert result is True
+        assert result.count == 1
+        assert fact_id in result.deleted
 
         assert not kelt_client.atomic.assertions.exists(fact_id)
+
+    def test_delete_batch(self, kelt_client, clean_tables):
+        """Test batch deleting with iterable input including missing IDs."""
+        fact_id1 = kelt_client.atomic.assertions.add("First to delete")
+        fact_id2 = kelt_client.atomic.assertions.add("Second to delete")
+        missing_id = 999999  # Non-existent ID
+
+        result = kelt_client.atomic.assertions.delete([fact_id1, missing_id, fact_id2])
+
+        assert result.count == 2
+        assert set(result.deleted) == {fact_id1, fact_id2}
+        assert result.not_found == [missing_id]
+        assert not kelt_client.atomic.assertions.exists(fact_id1)
+        assert not kelt_client.atomic.assertions.exists(fact_id2)
+
+    def test_delete_rejects_string(self, kelt_client, clean_tables):
+        """Test that delete rejects string input (would split into characters)."""
+        import pytest
+
+        with pytest.raises(TypeError, match="not str"):
+            kelt_client.atomic.assertions.delete("123")
+
+    def test_get_many(self, kelt_client, clean_tables):
+        """Test batch retrieving multiple assertions."""
+        fact1_id = kelt_client.atomic.assertions.add("First assertion")
+        fact2_id = kelt_client.atomic.assertions.add("Second assertion")
+        fact3_id = kelt_client.atomic.assertions.add("Third assertion")
+
+        facts = kelt_client.atomic.assertions.get_many([fact1_id, fact2_id, fact3_id])
+
+        assert len(facts) == 3
+        retrieved_ids = {f.id for f in facts}
+        assert retrieved_ids == {fact1_id, fact2_id, fact3_id}
+
+    def test_get_many_partial_results(self, kelt_client, clean_tables):
+        """Test get_many with some missing IDs - should silently skip them."""
+        fact1_id = kelt_client.atomic.assertions.add("Existing assertion")
+        missing_id = 999999
+
+        facts = kelt_client.atomic.assertions.get_many([fact1_id, missing_id])
+
+        assert len(facts) == 1
+        assert facts[0].id == fact1_id
+
+    def test_get_many_empty_input(self, kelt_client, clean_tables):
+        """Test get_many with empty list returns empty list."""
+        facts = kelt_client.atomic.assertions.get_many([])
+        assert facts == []
+
+    def test_get_many_all_missing(self, kelt_client, clean_tables):
+        """Test get_many with all missing IDs returns empty list."""
+        facts = kelt_client.atomic.assertions.get_many([999998, 999999])
+        assert facts == []
+
+    def test_get_many_respects_context(self, kelt_client, database, logger, clean_tables):
+        """Test get_many only returns facts from the client's context."""
+        from llm_kelt import ClientContext
+        from llm_kelt.client import Client
+
+        # Create fact in default context
+        fact_in_ctx = kelt_client.atomic.assertions.add("In context")
+
+        # Create another client with different context
+        other_ctx = ClientContext(context_key="other:context", schema_name=None)
+        other_client = Client(database=database, context=other_ctx, lg=logger)
+        other_fact_id = other_client.atomic.assertions.add("Other context")
+
+        # Default client should not see other context's fact
+        facts = kelt_client.atomic.assertions.get_many([fact_in_ctx, other_fact_id])
+        assert len(facts) == 1
+        assert facts[0].id == fact_in_ctx
 
 
 class TestAssertionsEmbeddings:
@@ -208,13 +280,13 @@ class TestAssertionsEmbeddings:
     def test_set_embedding(self, kelt_client, clean_tables):
         """Test setting an embedding for an assertion."""
         fact_id = kelt_client.atomic.assertions.add("User prefers Python")
-        embedding = [0.1, 0.2, 0.3, 0.4, 0.5]
+        embedding = [0.1, 0.2, 0.3]
 
         # Should not raise - use embeddings adapter
         kelt_client.atomic.embeddings.set_embedding(fact_id, embedding, "test-model")
 
         # Verify by listing assertions without embeddings
-        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model")
+        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model", 3)
         assert all(f.id != fact_id for f in without)
 
     def test_set_embedding_upsert(self, kelt_client, clean_tables):
@@ -230,7 +302,7 @@ class TestAssertionsEmbeddings:
         # Verify via search_similar - should find the assertion with new embedding
         results = kelt_client.atomic.embeddings.search_similar(
             query=[0.4, 0.5, 0.6],
-            model_name="test-model",
+            model="test-model",
             min_similarity=0.9,
         )
         assert len(results) == 1
@@ -240,19 +312,19 @@ class TestAssertionsEmbeddings:
         """Test setting embeddings with different model names."""
         fact_id = kelt_client.atomic.assertions.add("Multi-model assertion")
         embedding1 = [0.1, 0.2, 0.3]
-        embedding2 = [0.4, 0.5, 0.6, 0.7]  # Different dimensions
+        embedding2 = [0.4, 0.5, 0.6]
 
         kelt_client.atomic.embeddings.set_embedding(fact_id, embedding1, "model-a")
         kelt_client.atomic.embeddings.set_embedding(fact_id, embedding2, "model-b")
 
         # Assertion should not appear in list_without_embeddings for either model
-        without_a = kelt_client.atomic.embeddings.list_without_embeddings("model-a")
-        without_b = kelt_client.atomic.embeddings.list_without_embeddings("model-b")
+        without_a = kelt_client.atomic.embeddings.list_without_embeddings("model-a", 3)
+        without_b = kelt_client.atomic.embeddings.list_without_embeddings("model-b", 3)
         assert all(f.id != fact_id for f in without_a)
         assert all(f.id != fact_id for f in without_b)
 
         # But should appear for a different model
-        without_c = kelt_client.atomic.embeddings.list_without_embeddings("model-c")
+        without_c = kelt_client.atomic.embeddings.list_without_embeddings("model-c", 3)
         assert any(f.id == fact_id for f in without_c)
 
     def test_list_without_embeddings(self, kelt_client, clean_tables):
@@ -263,7 +335,7 @@ class TestAssertionsEmbeddings:
 
         kelt_client.atomic.embeddings.set_embedding(fact1_id, [0.1, 0.2, 0.3], "test-model")
 
-        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model")
+        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model", 3)
 
         fact_ids = [f.id for f in without]
         assert fact1_id not in fact_ids
@@ -276,7 +348,7 @@ class TestAssertionsEmbeddings:
         fact2_id = kelt_client.atomic.assertions.add("Inactive assertion")
         kelt_client.atomic.assertions.deactivate(fact2_id)
 
-        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model")
+        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model", 3)
 
         fact_ids = [f.id for f in without]
         assert fact1_id in fact_ids
@@ -287,7 +359,7 @@ class TestAssertionsEmbeddings:
         for i in range(10):
             kelt_client.atomic.assertions.add(f"Assertion {i}")
 
-        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model", limit=3)
+        without = kelt_client.atomic.embeddings.list_without_embeddings("test-model", 3, limit=3)
         assert len(without) == 3
 
     def test_search_similar(self, kelt_client, clean_tables):
@@ -304,7 +376,7 @@ class TestAssertionsEmbeddings:
         # Search for something similar to fact1
         results = kelt_client.atomic.embeddings.search_similar(
             query=[0.85, 0.15, 0.0],
-            model_name="test",
+            model="test",
             top_k=10,
             min_similarity=0.5,
         )
@@ -331,7 +403,7 @@ class TestAssertionsEmbeddings:
         # High threshold - should only match very similar
         results = kelt_client.atomic.embeddings.search_similar(
             query=[1.0, 0.0, 0.0],
-            model_name="test",
+            model="test",
             min_similarity=0.95,
         )
 
@@ -347,7 +419,7 @@ class TestAssertionsEmbeddings:
 
         results = kelt_client.atomic.embeddings.search_similar(
             query=[0.5, 0.5, 0.0],
-            model_name="test",
+            model="test",
             top_k=3,
             min_similarity=0.0,
         )
@@ -359,14 +431,14 @@ class TestAssertionsEmbeddings:
         fact1_id = kelt_client.atomic.assertions.add("Active assertion")
         fact2_id = kelt_client.atomic.assertions.add("Inactive assertion")
 
-        kelt_client.atomic.embeddings.set_embedding(fact1_id, [1.0, 0.0], "test")
-        kelt_client.atomic.embeddings.set_embedding(fact2_id, [1.0, 0.0], "test")
+        kelt_client.atomic.embeddings.set_embedding(fact1_id, [1.0, 0.0, 0.0], "test")
+        kelt_client.atomic.embeddings.set_embedding(fact2_id, [1.0, 0.0, 0.0], "test")
         kelt_client.atomic.assertions.deactivate(fact2_id)
 
         # Default: active assertions only
         results = kelt_client.atomic.embeddings.search_similar(
-            query=[1.0, 0.0],
-            model_name="test",
+            query=[1.0, 0.0, 0.0],
+            model="test",
             min_similarity=0.0,
         )
 
@@ -382,7 +454,7 @@ class TestAssertionsEmbeddings:
         # Search with completely different embedding and high threshold
         results = kelt_client.atomic.embeddings.search_similar(
             query=[0.0, 0.0, 1.0],
-            model_name="test",
+            model="test",
             min_similarity=0.99,
         )
 
@@ -391,11 +463,11 @@ class TestAssertionsEmbeddings:
     def test_search_similar_wrong_model_returns_empty(self, kelt_client, clean_tables):
         """Test search_similar returns empty when model doesn't match."""
         fact_id = kelt_client.atomic.assertions.add("Test assertion")
-        kelt_client.atomic.embeddings.set_embedding(fact_id, [1.0, 0.0], "model-a")
+        kelt_client.atomic.embeddings.set_embedding(fact_id, [1.0, 0.0, 0.0], "model-a")
 
         results = kelt_client.atomic.embeddings.search_similar(
-            query=[1.0, 0.0],
-            model_name="model-b",  # Different model
+            query=[1.0, 0.0, 0.0],
+            model="model-b",  # Different model
             min_similarity=0.0,
         )
 
@@ -404,12 +476,12 @@ class TestAssertionsEmbeddings:
     def test_delete_embedding_on_fact_delete(self, kelt_client, clean_tables, database):
         """Test that embeddings can be cleaned up when deleting facts."""
         fact_id = kelt_client.atomic.assertions.add("Assertion to delete")
-        kelt_client.atomic.embeddings.set_embedding(fact_id, [0.1, 0.2], "test")
+        kelt_client.atomic.embeddings.set_embedding(fact_id, [0.1, 0.2, 0.3], "test")
 
         # Verify embedding exists
         results = kelt_client.atomic.embeddings.search_similar(
-            query=[0.1, 0.2],
-            model_name="test",
+            query=[0.1, 0.2, 0.3],
+            model="test",
             min_similarity=0.9,
         )
         assert len(results) == 1
@@ -420,11 +492,40 @@ class TestAssertionsEmbeddings:
 
         # Embedding should be gone
         results_after = kelt_client.atomic.embeddings.search_similar(
-            query=[0.1, 0.2],
-            model_name="test",
+            query=[0.1, 0.2, 0.3],
+            model="test",
             min_similarity=0.0,
         )
         assert len(results_after) == 0
+
+    def test_delete_fact_cleans_up_embedding_atomically(self, kelt_client, clean_tables, database):
+        """Test that FactClient.delete() removes embedding in same transaction.
+
+        This verifies the atomicity fix: embedding deletion uses the same session
+        as fact deletion, ensuring both succeed or fail together.
+        """
+        fact_id = kelt_client.atomic.assertions.add("Fact with embedding")
+        kelt_client.atomic.embeddings.set_embedding(fact_id, [0.5, 0.5, 0.5], "test-model")
+
+        # Verify both exist
+        assert kelt_client.atomic.assertions.exists(fact_id)
+        assert kelt_client.atomic.embeddings.has_embedding(fact_id, "test-model", 3)
+
+        # Delete fact - should automatically clean up embedding
+        result = kelt_client.atomic.assertions.delete(fact_id)
+        assert result.count == 1
+
+        # Both fact and embedding should be gone
+        assert not kelt_client.atomic.assertions.exists(fact_id)
+        assert not kelt_client.atomic.embeddings.has_embedding(fact_id, "test-model", 3)
+
+        # Verify no orphan embeddings left
+        results = kelt_client.atomic.embeddings.search_similar(
+            query=[0.5, 0.5, 0.5],
+            model="test-model",
+            min_similarity=0.9,
+        )
+        assert len(results) == 0
 
     def test_search_similar_with_categories_filter(self, kelt_client, clean_tables):
         """Test that search_similar filters by categories in SQL."""
@@ -441,7 +542,7 @@ class TestAssertionsEmbeddings:
         # Search without categories - should get all
         results_all = kelt_client.atomic.embeddings.search_similar(
             query=[0.9, 0.1, 0.0],
-            model_name="test",
+            model="test",
             min_similarity=0.5,
         )
         assert len(results_all) == 3
@@ -449,7 +550,7 @@ class TestAssertionsEmbeddings:
         # Search with single category filter
         results_prefs = kelt_client.atomic.embeddings.search_similar(
             query=[0.9, 0.1, 0.0],
-            model_name="test",
+            model="test",
             min_similarity=0.5,
             categories=["preferences"],
         )
@@ -459,7 +560,7 @@ class TestAssertionsEmbeddings:
         # Search with multiple categories
         results_multi = kelt_client.atomic.embeddings.search_similar(
             query=[0.9, 0.1, 0.0],
-            model_name="test",
+            model="test",
             min_similarity=0.5,
             categories=["preferences", "rules"],
         )
@@ -472,7 +573,7 @@ class TestAssertionsEmbeddings:
         # Search with non-existent category
         results_empty = kelt_client.atomic.embeddings.search_similar(
             query=[0.9, 0.1, 0.0],
-            model_name="test",
+            model="test",
             min_similarity=0.5,
             categories=["nonexistent"],
         )
@@ -512,7 +613,7 @@ class TestAssertionsEmbeddings:
         # Search with filter for minority category
         results = kelt_client.atomic.embeddings.search_similar(
             query=[1.0, 0.0, 0.0],
-            model_name="test",
+            model="test",
             top_k=5,  # Without pre-filter, top-5 would all be majority
             min_similarity=0.0,
             filter=EmbeddingFilter().categories("minority"),

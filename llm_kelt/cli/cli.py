@@ -2,7 +2,7 @@
 
 from appinfra.app import AppBuilder
 
-from .tools import ProxyTool, TrainTool
+from .tools import AtomicTool, ProxyTool, SessionTool, TrainTool
 
 
 def main() -> int:
@@ -14,8 +14,10 @@ def main() -> int:
         .logging.with_level("info")
         .with_location(1)
         .done()
-        .tools.with_tool(ProxyTool())
+        .tools.with_tool(AtomicTool())
+        .with_tool(ProxyTool())
         .with_tool(TrainTool())
+        .with_tool(SessionTool())
         .done()
         .build()
     )
