@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-08
+
 ### Added
 - `FactEntityStore.link(if_not_exists=True)` for idempotent fact-entity linking using PostgreSQL
   upsert; avoids session corruption from `IntegrityError` on duplicate keys
@@ -20,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Canonical entities with alias-based deduplication and scoped visibility
   - Entity relationships, fact-entity linkage, and reference tracking
   - Batch queries: `get_by_names()`, `get_relationships_for_entities()`, `get_entities_for_facts()`
+- Fact relationships layer (`llm_kelt.memory.atomic.relationships`): `RelationshipsClient`
+  + `RelType` enum (`contradicts`, `supports`, `supersedes`, `derived_from`, `related_to`)
+  for typed graph edges between atomic facts. Recursive CTE traversal with PG14+ cycle
+  detection; symmetric types normalize ID ordering; per-context edges via `context_key`.
+- `AssertionsClient.get_many(fact_ids)` for batch fact retrieval by ID
+  (eliminates N+1 query patterns)
 - `Conversation.to_dict()` / `Conversation.from_dict()` for serializing conversation state
   (enables mid-loop pause/resume by persisting messages and token count)
 - Hard context limit enforcement: `max_tokens` is now a guaranteed cap, not just a compaction trigger
@@ -208,6 +216,7 @@ Config keys: `model_name` → `model`, added `type` (provider: "openai"/"google"
 - Example scripts for common workflows
 - API reference documentation in README
 
-[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/llm-works/llm-kelt/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/llm-works/llm-kelt/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/llm-works/llm-kelt/releases/tag/v0.1.0
