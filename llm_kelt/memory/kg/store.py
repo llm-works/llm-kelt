@@ -223,7 +223,7 @@ class EntityStore:
         """
         with self._scope(sa_session) as s:
             stmt = sql_delete(Entity).where(Entity.scope_key == scope_key)
-            if entity_type:
+            if entity_type is not None:
                 stmt = stmt.where(Entity.entity_type == entity_type)
             result = cast(
                 "CursorResult[Any]", s.execute(stmt.execution_options(synchronize_session=False))

@@ -337,6 +337,17 @@ class TestDeleteInScope:
         assert count == 2
         assert kelt_client.kg.entities.in_scope("org:acme", entity_type=None) == []
 
+    def test_empty_string_entity_type_does_not_disable_filter(self, kelt_client):
+        """Only None disables filtering; empty string remains a filter value."""
+        keep = kelt_client.kg.entities.create(
+            scope_key="org:acme", canonical_name="Theme A", entity_type="theme"
+        )
+
+        count = kelt_client.kg.entities.delete_in_scope("org:acme", entity_type="")
+
+        assert count == 0
+        assert kelt_client.kg.entities.get(keep.id) is not None
+
     def test_cascades_to_related_data(self, kelt_client, database):
         """Aliases, fact links, and relationships are removed with the entity."""
         from llm_kelt.memory.kg.models import EntityAlias, EntityRelationship, FactEntity
