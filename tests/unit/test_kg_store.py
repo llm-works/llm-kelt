@@ -276,6 +276,113 @@ class TestScopedQueries:
         assert resolved is not None
 
 
+class TestDeleteInScope:
+    """Tests for EntityStore.delete_in_scope bulk deletion."""
+
+    def test_deletes_only_exact_scope(self, kelt_client):
+        """Entities in ancestor and sibling scopes survive."""
+        kelt_client.kg.entities.create(
+            scope_key="global", canonical_name="Global Theme", entity_type="theme"
+        )
+        kelt_client.kg.entities.create(
+            scope_key="org:acme", canonical_name="Parent Theme", entity_type="theme"
+        )
+        kelt_client.kg.entities.create(
+            scope_key="org:acme:user:alice", canonical_name="Theme A", entity_type="theme"
+        )
+        kelt_client.kg.entities.create(
+            scope_key="org:acme:user:bob", canonical_name="Sibling Theme", entity_type="theme"
+        )
+
+        count = kelt_client.kg.entities.delete_in_scope("org:acme:user:alice")
+
+        assert count == 1
+        # in_scope resolves ancestors, so only the exact-scope entity is gone
+        survivors = {
+            e.canonical_name for e in kelt_client.kg.entities.in_scope("org:acme:user:alice")
+        }
+        assert survivors == {"global theme", "parent theme"}
+        siblings = {e.canonical_name for e in kelt_client.kg.entities.in_scope("org:acme:user:bob")}
+        assert "sibling theme" in siblings
+
+    def test_entity_type_filter(self, kelt_client):
+        """Only entities of the requested type are deleted."""
+        kelt_client.kg.entities.create(
+            scope_key="org:acme", canonical_name="Theme A", entity_type="theme"
+        )
+        kelt_client.kg.entities.create(
+            scope_key="org:acme", canonical_name="Theme B", entity_type="theme"
+        )
+        keep = kelt_client.kg.entities.create(
+            scope_key="org:acme", canonical_name="Company A", entity_type="company"
+        )
+
+        count = kelt_client.kg.entities.delete_in_scope("org:acme", entity_type="theme")
+
+        assert count == 2
+        remaining = kelt_client.kg.entities.in_scope("org:acme")
+        assert [e.id for e in remaining] == [keep.id]
+
+    def test_deletes_all_types_without_filter(self, kelt_client):
+        """entity_type=None deletes all types in the scope."""
+        kelt_client.kg.entities.create(
+            scope_key="org:acme", canonical_name="Theme A", entity_type="theme"
+        )
+        kelt_client.kg.entities.create(
+            scope_key="org:acme", canonical_name="Company A", entity_type="company"
+        )
+
+        count = kelt_client.kg.entities.delete_in_scope("org:acme")
+
+        assert count == 2
+        assert kelt_client.kg.entities.in_scope("org:acme", entity_type=None) == []
+
+    def test_empty_string_entity_type_does_not_disable_filter(self, kelt_client):
+        """Only None disables filtering; empty string remains a filter value."""
+        keep = kelt_client.kg.entities.create(
+            scope_key="org:acme", canonical_name="Theme A", entity_type="theme"
+        )
+
+        count = kelt_client.kg.entities.delete_in_scope("org:acme", entity_type="")
+
+        assert count == 0
+        assert kelt_client.kg.entities.get(keep.id) is not None
+
+    def test_cascades_to_related_data(self, kelt_client, database):
+        """Aliases, fact links, and relationships are removed with the entity."""
+        from llm_kelt.memory.kg.models import EntityAlias, EntityRelationship, FactEntity
+
+        fact_id = kelt_client.atomic.assertions.add("Fact about theme A", category="analysis")
+        entity = kelt_client.kg.entities.create(
+            scope_key="org:acme",
+            canonical_name="Theme A",
+            entity_type="theme",
+            aliases=["TA"],
+        )
+        other = kelt_client.kg.entities.create(
+            scope_key="org:acme", canonical_name="Company A", entity_type="company"
+        )
+        kelt_client.kg.fact_entities.link(fact_id, entity.id, "org:acme", role="theme")
+        kelt_client.kg.relationships.add(entity.id, other.id, "related_to", scope_key="org:acme")
+
+        count = kelt_client.kg.entities.delete_in_scope("org:acme", entity_type="theme")
+
+        assert count == 1
+        assert kelt_client.kg.entities.get(entity.id) is None
+        with database.session() as session:
+            assert session.query(EntityAlias).filter_by(entity_id=entity.id).count() == 0
+            assert session.query(FactEntity).filter_by(entity_id=entity.id).count() == 0
+            assert (
+                session.query(EntityRelationship).filter_by(from_entity_id=entity.id).count() == 0
+            )
+        # The related entity itself survives
+        assert kelt_client.kg.entities.get(other.id) is not None
+
+    def test_empty_scope_returns_zero(self, kelt_client):
+        """Deleting from a scope with no entities returns 0 without error."""
+        assert kelt_client.kg.entities.delete_in_scope("org:nonexistent") == 0
+
+
 class TestEntityRelationships:
     """Tests for entity-to-entity relationships."""
 

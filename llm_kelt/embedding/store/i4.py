@@ -176,6 +176,10 @@ class Int4Store(StoreBase):
             qemb = self._row_to_quantized(row)
             return dequantize_int4(qemb)
 
+    def _embedding_from_row(self, row: Any) -> list[float]:
+        """Dequantize a row's int4 embedding to float32."""
+        return dequantize_int4(self._row_to_quantized(row))
+
     def get_quantized(
         self,
         entity_type: str,

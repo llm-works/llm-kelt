@@ -258,6 +258,37 @@ class EmbeddingAdapter:
         store = self._get_store(dims)
         return store.get(self.ENTITY_TYPE, str(fact_id), model)
 
+    def get_embeddings(
+        self,
+        fact_ids: list[int],
+        model: str,
+        dimensions: int | None = None,
+    ) -> dict[int, list[float]]:
+        """
+        Get embeddings for multiple facts in a single query.
+
+        Args:
+            fact_ids: The fact IDs.
+            model: Embedding model name.
+            dimensions: Embedding dimensions (determines which table to query).
+                If None, uses default_dimensions.
+
+        Returns:
+            Mapping of fact_id to embedding vector. Facts without a stored
+            embedding for the model are absent from the result.
+
+        Raises:
+            ValueError: If dimensions is None and no default_dimensions configured.
+        """
+        dims = dimensions if dimensions is not None else self._default_dimensions
+        if dims is None:
+            raise ValueError("dimensions required when no default_dimensions configured")
+        if not fact_ids:
+            return {}
+        store = self._get_store(dims)
+        found = store.get_many(self.ENTITY_TYPE, [str(fid) for fid in fact_ids], model)
+        return {int(entity_id): embedding for entity_id, embedding in found.items()}
+
     def _build_entity_id_subquery(
         self,
         effective_filter: EmbeddingFilter | None,
