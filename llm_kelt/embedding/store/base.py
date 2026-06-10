@@ -91,6 +91,25 @@ class EmbeddingStoreProtocol(Protocol):
         """
         ...
 
+    def get_many(
+        self,
+        entity_type: str,
+        entity_ids: list[str],
+        model: str,
+    ) -> dict[str, list[float]]:
+        """Get embeddings for multiple entities in one query (dequantized to float32).
+
+        Args:
+            entity_type: Type prefix.
+            entity_ids: Entity identifiers.
+            model: Embedding model name.
+
+        Returns:
+            Mapping of entity_id to float32 embedding. IDs without a stored
+            embedding are absent from the result.
+        """
+        ...
+
     def delete(
         self,
         entity_type: str,
@@ -186,6 +205,30 @@ class StoreBase:
     def table_name(self) -> str:
         """Table name."""
         return str(self._model.__tablename__)
+
+    def _embedding_from_row(self, row: Any) -> list[float]:
+        """Decode a row's stored embedding to float32. Format-specific."""
+        raise NotImplementedError
+
+    def get_many(
+        self,
+        entity_type: str,
+        entity_ids: list[str],
+        model: str,
+    ) -> dict[str, list[float]]:
+        """Get embeddings for multiple entities in one query (dequantized to float32)."""
+        from sqlalchemy import select
+
+        if not entity_ids:
+            return {}
+
+        with self._session_factory() as session:
+            stmt = select(self._model).where(
+                self._model.entity_type == entity_type,
+                self._model.entity_id.in_(entity_ids),
+                self._model.model_name == model,
+            )
+            return {row.entity_id: self._embedding_from_row(row) for row in session.scalars(stmt)}
 
     def delete(
         self,

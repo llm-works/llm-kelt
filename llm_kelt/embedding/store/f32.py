@@ -146,3 +146,7 @@ class Float32Store(StoreBase):
             )
             result = session.scalar(stmt)
             return list(result) if result is not None else None
+
+    def _embedding_from_row(self, row: Any) -> list[float]:
+        """Decode a row's vector embedding to float32."""
+        return list(row.embedding)

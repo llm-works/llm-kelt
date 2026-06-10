@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `EmbeddingAdapter.get_embeddings(fact_ids, model)` for batch embedding retrieval in a
+  single query (eliminates N+1 query patterns); plumbed through `StoreClient.get_many()`
+  and all storage formats with format-specific dequantization
+
 ## [0.3.0] - 2026-06-08
 
 ### Added

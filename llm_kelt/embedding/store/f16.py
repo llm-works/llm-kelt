@@ -146,3 +146,7 @@ class Float16Store(StoreBase):
             )
             result = session.scalar(stmt)
             return result.to_list() if result is not None else None
+
+    def _embedding_from_row(self, row: Any) -> list[float]:
+        """Decode a row's halfvec embedding to float32."""
+        return list(row.embedding.to_list())
