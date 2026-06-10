@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `EmbeddingAdapter.get_embeddings(fact_ids, model)` for batch embedding retrieval in a
   single query (eliminates N+1 query patterns); plumbed through `StoreClient.get_many()`
   and all storage formats with format-specific dequantization
+- `EntityStore.delete_in_scope(scope_key, entity_type=None)` for bulk entity deletion in a
+  single statement; matches scope_key exactly (no ancestor-scope resolution, unlike
+  `in_scope` reads) and removes related data via FK cascades
 
 ## [0.3.0] - 2026-06-08
 
