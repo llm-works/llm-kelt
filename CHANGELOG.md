@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single statement; matches scope_key exactly (no ancestor-scope resolution, unlike
   `in_scope` reads) and removes related data via FK cascades
 
+### Fixed
+- Alembic bookkeeping moved from the default `alembic_version` row to a namespaced
+  `alembic_version_kelt` table, avoiding collision with neighbor alembic-managed libraries
+  sharing the same Postgres schema. Existing installs re-stamp on next `ensure_schema()`.
+
 ## [0.3.0] - 2026-06-08
 
 ### Added

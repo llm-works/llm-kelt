@@ -30,6 +30,11 @@ if TYPE_CHECKING:
 # Value chosen arbitrarily but must remain stable across all library versions.
 _ADVISORY_LOCK_KEY = 7829104563218907456
 
+# Alembic bookkeeping table. Namespaced so a neighbor library sharing the same
+# Postgres schema (e.g. appware.monetize) can run its own alembic against the default
+# `alembic_version` row without colliding with kelt's revisions.
+_VERSION_TABLE_NAME = "alembic_version_kelt"
+
 # Schema name validation pattern - must be a valid SQL identifier.
 # Must start with lowercase letter, can contain lowercase letters, numbers, and underscores.
 # Limited to 63 chars (PostgreSQL identifier limit) to prevent truncation.
@@ -39,7 +44,7 @@ _SCHEMA_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 class SchemaState(Enum):
     """Schema version state relative to library version."""
 
-    MISSING = "missing"  # No alembic_version table
+    MISSING = "missing"  # No version table
     CURRENT = "current"  # Version matches head
     NEEDS_UPGRADE = "upgrade"  # Schema behind, can upgrade
     TOO_NEW = "too_new"  # Schema ahead, cannot downgrade
@@ -115,8 +120,9 @@ class SchemaManager:
         config = AlembicConfig(str(alembic_ini))
         config.set_main_option("script_location", str(self._migrations_path))
         config.set_main_option("sqlalchemy.url", str(self._engine.url))
-        # Tell Alembic which schema to use for alembic_version table
+        # Tell Alembic which schema + table to use for the version bookkeeping row.
         config.set_main_option("version_table_schema", self._schema_name)
+        config.set_main_option("version_table", _VERSION_TABLE_NAME)
         return config
 
     def _get_head_version(self) -> str:
@@ -133,12 +139,16 @@ class SchemaManager:
         try:
             with self._engine.connect() as conn:
                 context = MigrationContext.configure(
-                    conn, opts={"version_table_schema": self._schema_name}
+                    conn,
+                    opts={
+                        "version_table_schema": self._schema_name,
+                        "version_table": _VERSION_TABLE_NAME,
+                    },
                 )
                 revision = context.get_current_revision()
                 return str(revision) if revision is not None else None
         except Exception as e:
-            # Handle case where alembic_version table doesn't exist yet
+            # Handle case where the version table doesn't exist yet
             # (e.g., fresh schema with no migrations applied)
             if "UndefinedTable" in type(e).__name__:
                 return None
@@ -266,14 +276,17 @@ class SchemaManager:
         )
 
     def _stamp_alembic_version(self, conn, version: str) -> None:
-        """Stamp alembic_version table with given revision."""
+        """Stamp the version table with given revision."""
         conn.execute(
-            text("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) PRIMARY KEY)")
+            text(
+                f"CREATE TABLE IF NOT EXISTS {_VERSION_TABLE_NAME} "
+                f"(version_num VARCHAR(32) PRIMARY KEY)"
+            )
         )
         conn.execute(
             text(
-                "INSERT INTO alembic_version (version_num) VALUES (:rev) "
-                "ON CONFLICT (version_num) DO NOTHING"
+                f"INSERT INTO {_VERSION_TABLE_NAME} (version_num) VALUES (:rev) "
+                f"ON CONFLICT (version_num) DO NOTHING"
             ),
             {"rev": version},
         )
