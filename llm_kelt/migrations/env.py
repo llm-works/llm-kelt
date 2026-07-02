@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from llm_kelt.core.models import Base
+from llm_kelt.core.schema import _VERSION_TABLE_NAME
 
 # This is the Alembic Config object
 config = context.config
@@ -63,6 +64,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        version_table=_VERSION_TABLE_NAME,
     )
 
     with context.begin_transaction():
@@ -100,7 +102,7 @@ def run_migrations_online() -> None:  # cq: exempt
             connection.execute(text("SAVEPOINT check_version"))
             try:
                 result = connection.execute(
-                    text(f'SELECT version_num FROM "{schema_name}".alembic_version')
+                    text(f'SELECT version_num FROM "{schema_name}"."{_VERSION_TABLE_NAME}"')
                 )
                 current_rev = result.scalar()
                 connection.execute(text("RELEASE SAVEPOINT check_version"))
@@ -127,6 +129,7 @@ def run_migrations_online() -> None:  # cq: exempt
                 connection=connection,
                 target_metadata=target_metadata,
                 version_table_schema=schema_name,
+                version_table=_VERSION_TABLE_NAME,
             )
             with context.begin_transaction():
                 context.run_migrations()
@@ -135,7 +138,7 @@ def run_migrations_online() -> None:  # cq: exempt
 
             # Verify the migration succeeded
             result = connection.execute(
-                text(f'SELECT version_num FROM "{schema_name}".alembic_version')
+                text(f'SELECT version_num FROM "{schema_name}"."{_VERSION_TABLE_NAME}"')
             )
             new_rev = result.scalar()
             _lg.info("migration complete", extra={"new_revision": new_rev})

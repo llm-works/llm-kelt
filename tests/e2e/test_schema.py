@@ -8,14 +8,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
 from llm_kelt.core.errors import SchemaVersionError
-from llm_kelt.core.schema import SchemaManager, SchemaState
+from llm_kelt.core.schema import _VERSION_TABLE_NAME, SchemaManager, SchemaState
 
 
 @pytest.fixture(autouse=True)
 def ensure_alembic_version(logger, database):
-    """Ensure alembic_version table exists and is at correct version.
+    """Ensure the version table exists and is at the correct version.
 
-    This is needed because the tests manipulate the alembic_version table directly,
+    This is needed because the tests manipulate the version table directly,
     and when running in parallel, the table might not exist if another test hasn't
     called ensure_schema() first.
 
@@ -26,34 +26,37 @@ def ensure_alembic_version(logger, database):
 
     schema = database.schema
 
-    # Check if alembic_version has a fake future version from a previous failed test.
+    # Check if the version table has a fake future version from a previous failed test.
     # We must fix this BEFORE calling ensure_schema(), which would raise SchemaVersionError.
     # Note: Use schema-qualified table names since tests use isolated schemas.
     try:
         with database.engine.connect() as conn:
             result = conn.execute(
-                text(f'SELECT version_num FROM "{schema}".alembic_version LIMIT 1')
+                text(f'SELECT version_num FROM "{schema}"."{_VERSION_TABLE_NAME}" LIMIT 1')
             )
             row = result.fetchone()
             if row and row[0] == "9999_future_version":
                 # Reset to head version before ensure_schema() sees the bad state
                 head = manager._get_head_version()
-                conn.execute(text(f'DELETE FROM "{schema}".alembic_version'))
+                conn.execute(text(f'DELETE FROM "{schema}"."{_VERSION_TABLE_NAME}"'))
                 conn.execute(
-                    text(f'INSERT INTO "{schema}".alembic_version (version_num) VALUES (:rev)'),
+                    text(
+                        f'INSERT INTO "{schema}"."{_VERSION_TABLE_NAME}" '
+                        f"(version_num) VALUES (:rev)"
+                    ),
                     {"rev": head},
                 )
                 conn.commit()
     except ProgrammingError as e:
         # Table doesn't exist yet - that's fine, ensure_schema will create it
-        if "alembic_version" not in str(e):
+        if _VERSION_TABLE_NAME not in str(e):
             raise  # Re-raise if it's a different error
 
     manager.ensure_schema()
     yield
 
 
-# Group all schema tests to run on the same worker (they manipulate alembic_version)
+# Group all schema tests to run on the same worker (they manipulate the version table)
 @pytest.mark.xdist_group("schema")
 class TestSchemaManager:
     """Test SchemaManager functionality."""
@@ -62,7 +65,7 @@ class TestSchemaManager:
         """Test that get_status returns CURRENT after ensure_schema."""
         manager = SchemaManager(logger, database.engine, schema_name=database.schema)
 
-        # First ensure schema is initialized (stamps alembic_version)
+        # First ensure schema is initialized (stamps the version table)
         manager.ensure_schema()
 
         status = manager.get_status()
@@ -128,10 +131,11 @@ class TestSchemaManager:
 
         # Insert a fake future version (use schema-qualified table names)
         with database.engine.connect() as conn:
-            conn.execute(text(f'DELETE FROM "{schema}".alembic_version'))
+            conn.execute(text(f'DELETE FROM "{schema}"."{_VERSION_TABLE_NAME}"'))
             conn.execute(
                 text(
-                    f"INSERT INTO \"{schema}\".alembic_version (version_num) VALUES ('9999_future_version')"
+                    f'INSERT INTO "{schema}"."{_VERSION_TABLE_NAME}" '
+                    f"(version_num) VALUES ('9999_future_version')"
                 )
             )
             conn.commit()
@@ -145,22 +149,25 @@ class TestSchemaManager:
         finally:
             # Always restore correct version, even if test fails
             with database.engine.connect() as conn:
-                conn.execute(text(f'DELETE FROM "{schema}".alembic_version'))
+                conn.execute(text(f'DELETE FROM "{schema}"."{_VERSION_TABLE_NAME}"'))
                 conn.execute(
-                    text(f'INSERT INTO "{schema}".alembic_version (version_num) VALUES (:rev)'),
+                    text(
+                        f'INSERT INTO "{schema}"."{_VERSION_TABLE_NAME}" '
+                        f"(version_num) VALUES (:rev)"
+                    ),
                     {"rev": original_version},
                 )
                 conn.commit()
 
     def test_get_status_missing(self, logger, database):
-        """Test that get_status returns MISSING when alembic_version is empty."""
+        """Test that get_status returns MISSING when the version table is empty."""
         schema = database.schema
         manager = SchemaManager(logger, database.engine, schema_name=schema)
         head = manager._get_head_version()
 
-        # Clear alembic_version (use schema-qualified table name)
+        # Clear the version table (use schema-qualified table name)
         with database.engine.connect() as conn:
-            conn.execute(text(f'DELETE FROM "{schema}".alembic_version'))
+            conn.execute(text(f'DELETE FROM "{schema}"."{_VERSION_TABLE_NAME}"'))
             conn.commit()
 
         try:
@@ -172,7 +179,10 @@ class TestSchemaManager:
             # Restore
             with database.engine.connect() as conn:
                 conn.execute(
-                    text(f'INSERT INTO "{schema}".alembic_version (version_num) VALUES (:rev)'),
+                    text(
+                        f'INSERT INTO "{schema}"."{_VERSION_TABLE_NAME}" '
+                        f"(version_num) VALUES (:rev)"
+                    ),
                     {"rev": head},
                 )
                 conn.commit()
@@ -245,12 +255,12 @@ class TestEnsureSchemaHelper:
                 result = conn.execute(
                     text(
                         "SELECT COUNT(*) FROM information_schema.tables "
-                        "WHERE table_schema = :schema AND table_name = 'alembic_version'"
+                        "WHERE table_schema = :schema AND table_name = :name"
                     ),
-                    {"schema": override_schema},
+                    {"schema": override_schema, "name": _VERSION_TABLE_NAME},
                 ).scalar()
                 assert result == 1, (
-                    f"alembic_version should exist in override schema '{override_schema}'"
+                    f"{_VERSION_TABLE_NAME} should exist in override schema '{override_schema}'"
                 )
         finally:
             with pg_with_tables.engine.connect() as conn:
