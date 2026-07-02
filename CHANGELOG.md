@@ -16,9 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `in_scope` reads) and removes related data via FK cascades
 
 ### Fixed
-- Alembic bookkeeping moved from the default `alembic_version` row to a namespaced
-  `alembic_version_kelt` table, avoiding collision with neighbor alembic-managed libraries
-  sharing the same Postgres schema. Existing installs re-stamp on next `ensure_schema()`.
+- Alembic bookkeeping moved from `alembic_version` to `alembic_version_kelt`, avoiding
+  collision with neighbor libraries. **Existing installs:** stamp the new table manually
+  before upgrading (`INSERT INTO schema.alembic_version_kelt (version_num) SELECT version_num
+  FROM schema.alembic_version`). Auto-migration is unsafe due to possible prior collisions.
 
 ## [0.3.0] - 2026-06-08
 
