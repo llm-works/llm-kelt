@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `in_scope` reads) and removes related data via FK cascades
 
 ### Fixed
+- `Float16Store` row decoding accepts both `pgvector.HalfVector` and `list[float]`,
+  fixing a silent "no embeddings found" degradation when a same-session upsert-then-read
+  hit the ORM identity map (raised `'list' object has no attribute 'to_list'`)
 - Alembic bookkeeping moved from `alembic_version` to `alembic_version_kelt`, avoiding
   collision with neighbor libraries. **Existing installs:** stamp the new table manually
   before upgrading (`INSERT INTO schema.alembic_version_kelt (version_num) SELECT version_num
