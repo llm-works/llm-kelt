@@ -51,12 +51,11 @@ class TestEmbeddingFromRow:
         assert result == [0.1, 0.2, 0.3]
         assert all(isinstance(v, float) for v in result)
 
-    def test_list_row_with_numpy_scalars(self) -> None:
-        """Mixed-scalar list normalizes to plain Python floats."""
-        import numpy as np
-
-        row = SimpleNamespace(embedding=[np.float16(0.1), np.float32(0.2), np.float64(0.3)])
+    def test_list_row_normalizes_to_float(self) -> None:
+        """Non-float numeric list normalizes to plain Python floats."""
+        row = SimpleNamespace(embedding=[1, 2, 3])  # ints, not floats
 
         result = _store()._embedding_from_row(row)
 
+        assert result == [1.0, 2.0, 3.0]
         assert all(type(v) is float for v in result)
