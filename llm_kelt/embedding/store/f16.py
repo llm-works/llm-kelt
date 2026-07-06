@@ -145,21 +145,21 @@ class Float16Store(StoreBase):
                 self._model.model_name == model,
             )
             result = session.scalar(stmt)
-            if result is None:
-                return None
-            if isinstance(result, list):
-                return [float(v) for v in result]
-            return [float(v) for v in result.to_list()]
+            return self._decode_embedding(result) if result is not None else None
 
-    def _embedding_from_row(self, row: Any) -> list[float]:
-        """Decode a row's halfvec embedding to float32.
+    @staticmethod
+    def _decode_embedding(val: Any) -> list[float]:
+        """Convert halfvec/list to float32 list.
 
         Accepts both pgvector.HalfVector (from a fresh DB read via HALFVEC's
         result_processor) and list[float] (from a same-session read after an
         upsert, where the ORM's identity map still carries the raw value
         assigned before flush).
         """
-        val = row.embedding
         if isinstance(val, list):
             return [float(v) for v in val]
         return [float(v) for v in val.to_list()]
+
+    def _embedding_from_row(self, row: Any) -> list[float]:
+        """Decode a row's halfvec embedding to float32."""
+        return self._decode_embedding(row.embedding)
