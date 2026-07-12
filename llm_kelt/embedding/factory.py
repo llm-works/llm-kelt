@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -17,6 +18,11 @@ if TYPE_CHECKING:
 
 
 _model_cache: dict[tuple[str | None, str], type] = {}
+# Serializes the check-then-create window. Class definition registers the
+# Table with EmbeddingBase.metadata, and a second concurrent registration
+# for the same __tablename__ raises InvalidRequestError. The cost of this
+# lock is only paid on first-touch per (schema, table) key.
+_model_cache_lock = threading.Lock()
 
 
 class ModelCache:
@@ -33,11 +39,17 @@ class ModelCache:
     """
 
     def get_or_create(self, config: Config) -> type:
-        """Get cached model or create and cache a new one."""
+        """Get cached model or create and cache a new one (thread-safe)."""
         key = (config.schema, config.table_name)
-        if key not in _model_cache:
-            _model_cache[key] = self._create_model(config)
-        return _model_cache[key]
+        cached = _model_cache.get(key)
+        if cached is not None:
+            return cached
+        with _model_cache_lock:
+            cached = _model_cache.get(key)
+            if cached is None:
+                cached = self._create_model(config)
+                _model_cache[key] = cached
+            return cached
 
     def _create_model(self, config: Config) -> type:
         """Create a new model class for the given config."""

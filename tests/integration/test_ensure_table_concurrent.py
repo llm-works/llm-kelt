@@ -65,12 +65,23 @@ class TestConcurrentEnsureTable:
             # Each thread gets its own StoreClient — StoreClient's own
             # _table_ensured flag is per-instance, so every thread's
             # ensure_table() actually traverses the DDL race path.
-            client = factory.create(database.session, cfg)
+            #
+            # ``factory.create`` runs before the barrier: any setup failure
+            # here (e.g. a metadata race in the model cache) must abort the
+            # barrier so the other workers don't hang for 60s waiting on a
+            # thread that already died.
+            try:
+                client = factory.create(database.session, cfg)
+            except BaseException as e:  # noqa: BLE001 — surface setup errors
+                barrier.abort()
+                with errors_lock:
+                    errors.append(e)
+                return
             try:
                 barrier.wait(timeout=60)
                 client._store.ensure_table()  # type: ignore[attr-defined]
             except threading.BrokenBarrierError:
-                pass  # Another thread failed during setup; not an ensure_table error
+                pass  # Another worker failed setup; recorded via its own errors entry.
             except BaseException as e:  # noqa: BLE001 — capture everything
                 with errors_lock:
                     errors.append(e)
