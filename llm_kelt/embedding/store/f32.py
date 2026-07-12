@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from appinfra.db.pg import index_exists, table_exists, with_object_lock
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from .base import StoreBase, ensure_session, index_exists, table_exists
+from .base import StoreBase, ensure_session
 
 if TYPE_CHECKING:
     from ..types import Calibration
@@ -35,26 +36,32 @@ class Float32Store(StoreBase):
         self._table_ensured = False
 
     def ensure_table(self) -> None:
-        """Create table and HNSW index if they don't exist."""
+        """Create table and HNSW index if they don't exist.
+
+        Concurrent first-touch is serialized by a Postgres advisory lock
+        keyed on the table name — see ``appinfra.db.pg.with_object_lock``.
+        Steady-state cost is zero: ``_table_ensured`` short-circuits before
+        the lock is ever taken.
+        """
         if self._table_ensured:
             return
 
+        schema = getattr(self._model.__table__, "schema", None)
+        qualified_table = f"{schema}.{self.table_name}" if schema else self.table_name
+        hnsw_idx = f"idx_{self.table_name}_hnsw"
+        hnsw_sql = text(
+            f"CREATE INDEX {hnsw_idx} ON {qualified_table} "
+            f"USING hnsw (embedding vector_cosine_ops) "
+            f"WITH (m = 16, ef_construction = 64)"
+        )
+
         with self._session_factory() as session:
             conn = session.connection()
-
-            if not table_exists(conn, self.table_name):
-                self._model.__table__.create(conn, checkfirst=True)
-
-            hnsw_idx = f"idx_{self.table_name}_hnsw"
-            if not index_exists(conn, hnsw_idx):
-                conn.execute(
-                    text(
-                        f"CREATE INDEX {hnsw_idx} ON {self.table_name} "
-                        f"USING hnsw (embedding vector_cosine_ops) "
-                        f"WITH (m = 16, ef_construction = 64)"
-                    )
-                )
-
+            with with_object_lock(session, f"kelt.ensure:{schema}.{self.table_name}"):
+                if not table_exists(conn, self.table_name, schema=schema):
+                    self._model.__table__.create(conn)
+                if not index_exists(conn, hnsw_idx, schema=schema):
+                    conn.execute(hnsw_sql)
             session.commit()
         self._table_ensured = True
 

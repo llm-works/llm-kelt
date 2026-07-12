@@ -7,12 +7,13 @@ import math
 from collections.abc import Callable
 from typing import Any
 
+from appinfra.db.pg import ensure_object, table_exists
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from ..quantize import dequantize_int4, quantize_int4
 from ..types import Calibration, QuantizationFormat, QuantizedEmbedding
-from .base import StoreBase, ensure_session, table_exists
+from .base import StoreBase, ensure_session
 
 
 class Int4Store(StoreBase):
@@ -37,16 +38,24 @@ class Int4Store(StoreBase):
         self._table_ensured = False
 
     def ensure_table(self) -> None:
-        """Create table if it doesn't exist."""
+        """Create table if it doesn't exist.
+
+        Concurrent first-touch is serialized by a Postgres advisory lock —
+        see ``appinfra.db.pg.ensure_object``. Steady-state cost is zero:
+        ``_table_ensured`` short-circuits before the lock is ever taken.
+        """
         if self._table_ensured:
             return
 
+        schema = getattr(self._model.__table__, "schema", None)
         with self._session_factory() as session:
             conn = session.connection()
-            if table_exists(conn, self.table_name):
-                self._table_ensured = True
-                return
-            self._model.__table__.create(conn, checkfirst=True)
+            ensure_object(
+                session,
+                key=f"kelt.ensure:{schema}.{self.table_name}",
+                exists_fn=lambda: table_exists(conn, self.table_name, schema=schema),
+                create_fn=lambda: self._model.__table__.create(conn),
+            )
             session.commit()
         self._table_ensured = True
 

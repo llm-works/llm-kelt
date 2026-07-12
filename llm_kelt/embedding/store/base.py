@@ -327,26 +327,6 @@ def ensure_session(session: Any | None, session_factory: Callable[[], Any]):
             yield sess
 
 
-def table_exists(conn: Any, table_name: str) -> bool:
-    """Check if a table exists in the current search_path."""
-    from sqlalchemy import text
-
-    result = conn.execute(
-        text(
-            "SELECT 1 FROM pg_catalog.pg_class c "
-            "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
-            "WHERE c.relname = :table_name "
-            "AND pg_catalog.pg_table_is_visible(c.oid)"
-        ).bindparams(table_name=table_name)
-    )
-    return result.scalar() is not None
-
-
-def index_exists(conn: Any, index_name: str) -> bool:
-    """Check if an index exists in the database."""
-    from sqlalchemy import text
-
-    result = conn.execute(
-        text("SELECT 1 FROM pg_indexes WHERE indexname = :idx_name").bindparams(idx_name=index_name)
-    )
-    return result.scalar() is not None
+# Race-safe first-touch DDL primitives live in appinfra now. Stores import
+# ``ensure_object`` / ``with_object_lock`` / ``table_exists`` / ``index_exists``
+# from ``appinfra.db.pg`` directly rather than re-exporting them here.
