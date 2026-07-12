@@ -5,16 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from appinfra.db.pg import index_exists, table_exists, with_object_lock
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from .base import (
-    StoreBase,
-    create_if_missing,
-    ensure_session,
-    index_exists,
-    table_exists,
-)
+from .base import StoreBase, ensure_session
 
 if TYPE_CHECKING:
     from ..types import Calibration
@@ -43,10 +38,10 @@ class Float32Store(StoreBase):
     def ensure_table(self) -> None:
         """Create table and HNSW index if they don't exist.
 
-        Idempotent under concurrent first-touch: each CREATE runs inside a
-        savepoint via ``create_if_missing`` so a lost race raises a caught
-        duplicate-name error instead of propagating. See ``table_exists``
-        for the schema-visibility side of the same race.
+        Concurrent first-touch is serialized by a Postgres advisory lock
+        keyed on the table name — see ``appinfra.db.pg.with_object_lock``.
+        Steady-state cost is zero: ``_table_ensured`` short-circuits before
+        the lock is ever taken.
         """
         if self._table_ensured:
             return
@@ -61,14 +56,11 @@ class Float32Store(StoreBase):
 
         with self._session_factory() as session:
             conn = session.connection()
-
-            if not table_exists(conn, self.table_name, schema=schema):
-                create_if_missing(
-                    session, lambda: self._model.__table__.create(conn, checkfirst=True)
-                )
-            if not index_exists(conn, hnsw_idx, schema=schema):
-                create_if_missing(session, lambda: conn.execute(hnsw_sql))
-
+            with with_object_lock(session, f"kelt.ensure:{schema}.{self.table_name}"):
+                if not table_exists(conn, self.table_name, schema=schema):
+                    self._model.__table__.create(conn)
+                if not index_exists(conn, hnsw_idx, schema=schema):
+                    conn.execute(hnsw_sql)
             session.commit()
         self._table_ensured = True
 

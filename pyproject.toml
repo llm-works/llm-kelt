@@ -12,7 +12,7 @@ authors = [{name = "LLM Works LLC", email = "info@llm-works.ai"}]
 requires-python = ">=3.11"
 dependencies = [
     # Core infrastructure
-    "appinfra>=0.2.1",
+    "appinfra>=0.8",
 
     # Storage
     "sqlalchemy>=2.0,<3.0",
