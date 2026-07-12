@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `in_scope` reads) and removes related data via FK cascades
 
 ### Fixed
+- Embedding tables now bind to the configured Postgres schema via ORM `__table_args__`,
+  so DDL and DML name the schema explicitly instead of relying on `search_path` fallback.
+  `Client` / `atomic.Protocol` / `KGStore` forward the schema automatically; `Config.schema`
+  exposes the same on the factory-level API.
 - `ensure_table()` is now race-safe and schema-aware: concurrent first-touch from multiple
   workers no longer collides on `pg_type_typname_nsp_index`; tables in non-default schemas
   are detected correctly

@@ -75,6 +75,7 @@ class ScopedClient:
             embedding_factory=self._parent._embedding_factory,
             embedding_format=self._parent._embedding_format,
             embedding_dimensions=self._parent._embedding_dimensions,
+            embedding_schema=self._schema_name,
         )
         self._initialized = True
 

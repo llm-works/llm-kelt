@@ -136,6 +136,7 @@ class EmbeddingAdapter:
         format: QuantizationFormat,
         embedder: EmbeddingClient | None = None,
         default_dimensions: int | None = None,
+        schema: str | None = None,
     ) -> None:
         """
         Initialize EmbeddingAdapter with dynamic dimension routing.
@@ -147,6 +148,9 @@ class EmbeddingAdapter:
             format: Quantization format to use (F32, F16, I8, I4).
             embedder: Optional EmbeddingClient for generating embeddings via HTTP.
             default_dimensions: Default dimensions for embed_fact when not specified.
+            schema: Postgres schema for the embedding tables. When set, every
+                dimension-specific store is created with a schema-qualified ORM
+                model so reads and writes never fall back through search_path.
         """
         self._session_factory = session_factory
         self._context_key = context_key
@@ -154,6 +158,7 @@ class EmbeddingAdapter:
         self._format = format
         self._embedder = embedder
         self._default_dimensions = default_dimensions
+        self._schema = schema
         self._stores: dict[int, EmbeddingStoreClient] = {}
         self._stores_lock = threading.Lock()
 
@@ -167,6 +172,7 @@ class EmbeddingAdapter:
                     context_key=self._context_key or "_default",
                     format=self._format,
                     dimensions=dimensions,
+                    schema=self._schema,
                 )
                 self._stores[dimensions] = self._factory.create(self._session_factory, config)
             return self._stores[dimensions]
