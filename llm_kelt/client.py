@@ -128,7 +128,7 @@ class Client:
 
         self._embedding_factory = EmbeddingFactory()
         self._embedding_format = QuantizationFormat.F16
-        self._embedding_schema = self._db.schema
+        self._embedding_schema = self._db.schema or self._context.schema_name
         if self._embeddings is None:
             config = EmbeddingConfig(
                 context_key=self._context.context_key or "_default",
