@@ -128,11 +128,13 @@ class Client:
 
         self._embedding_factory = EmbeddingFactory()
         self._embedding_format = QuantizationFormat.F16
+        self._embedding_schema = self._db.schema or self._context.schema_name
         if self._embeddings is None:
             config = EmbeddingConfig(
                 context_key=self._context.context_key or "_default",
                 format=self._embedding_format,
                 dimensions=384,
+                schema=self._embedding_schema,
             )
             self._embeddings = self._embedding_factory.create(self._db.session, config)
 
@@ -148,6 +150,7 @@ class Client:
             embedding_factory=self._embedding_factory,
             embedding_format=self._embedding_format,
             embedding_dimensions=self._embedding_dimensions,
+            embedding_schema=self._embedding_schema,
         )
         self._kg = KGStore(
             self._lg,
@@ -155,6 +158,7 @@ class Client:
             embedder=self._embedder,
             embedding_factory=self._embedding_factory,
             embedding_format=self._embedding_format,
+            embedding_schema=self._embedding_schema,
         )
         self._context_builder = ContextBuilder(self._atomic.assertions)
         self._train: TrainFactory | None = None

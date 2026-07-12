@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -16,23 +17,39 @@ if TYPE_CHECKING:
     from .client import StoreClient
 
 
-_model_cache: dict[str, type] = {}
+_model_cache: dict[tuple[str | None, str], type] = {}
+# Serializes the check-then-create window. Class definition registers the
+# Table with EmbeddingBase.metadata, and a second concurrent registration
+# for the same __tablename__ raises InvalidRequestError. The cost of this
+# lock is only paid on first-touch per (schema, table) key.
+_model_cache_lock = threading.Lock()
 
 
 class ModelCache:
     """Cache for dynamically-created embedding model classes.
 
-    Embedding models are created on-demand for specific table names (derived from
-    format, dimensions, and optional prefix). Uses a module-level cache shared
-    across all Factory instances to prevent duplicate index/constraint accumulation.
+    Embedding models are created on-demand for specific (schema, table) pairs
+    derived from format, dimensions, prefix, and the configured schema. Uses a
+    module-level cache shared across all Factory instances to prevent duplicate
+    index/constraint accumulation.
+
+    Cache key includes schema: two configs pointing at the same table name in
+    different schemas produce distinct ORM classes so each binds ``__table_args__``
+    correctly and reads/writes stay schema-qualified.
     """
 
     def get_or_create(self, config: Config) -> type:
-        """Get cached model or create and cache a new one."""
-        table_name = config.table_name
-        if table_name not in _model_cache:
-            _model_cache[table_name] = self._create_model(config)
-        return _model_cache[table_name]
+        """Get cached model or create and cache a new one (thread-safe)."""
+        key = (config.schema, config.table_name)
+        cached = _model_cache.get(key)
+        if cached is not None:
+            return cached
+        with _model_cache_lock:
+            cached = _model_cache.get(key)
+            if cached is None:
+                cached = self._create_model(config)
+                _model_cache[key] = cached
+            return cached
 
     def _create_model(self, config: Config) -> type:
         """Create a new model class for the given config."""
@@ -46,21 +63,33 @@ class ModelCache:
             case QuantizationFormat.I4:
                 return self._create_i4_model(config)
 
+    @staticmethod
+    def _table_args(table_name: str, schema: str | None) -> tuple:
+        args: tuple = (
+            UniqueConstraint(
+                "entity_type", "entity_id", "model_name", name=f"uq_{table_name}_entity_model"
+            ),
+            Index(f"idx_{table_name}_entity", "entity_type", "entity_id"),
+            Index(f"idx_{table_name}_model", "model_name"),
+        )
+        if schema is not None:
+            args = args + ({"schema": schema},)
+        return args
+
+    @staticmethod
+    def _class_suffix(config: Config) -> str:
+        return f"{config.schema}_{config.table_name}" if config.schema else config.table_name
+
     def _create_f32_model(self, config: Config) -> type:
         from pgvector.sqlalchemy import Vector
 
         table_name = config.table_name
         dimensions = config.dimensions
+        table_args = self._table_args(table_name, config.schema)
 
         class EmbeddingF32(EmbeddingBase):
             __tablename__ = table_name
-            __table_args__ = (
-                UniqueConstraint(
-                    "entity_type", "entity_id", "model_name", name=f"uq_{table_name}_entity_model"
-                ),
-                Index(f"idx_{table_name}_entity", "entity_type", "entity_id"),
-                Index(f"idx_{table_name}_model", "model_name"),
-            )
+            __table_args__ = table_args
 
             id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
             entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -71,8 +100,9 @@ class ModelCache:
                 DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
             )
 
-        EmbeddingF32.__name__ = f"EmbeddingF32_{table_name}"
-        EmbeddingF32.__qualname__ = f"EmbeddingF32_{table_name}"
+        suffix = self._class_suffix(config)
+        EmbeddingF32.__name__ = f"EmbeddingF32_{suffix}"
+        EmbeddingF32.__qualname__ = f"EmbeddingF32_{suffix}"
         return EmbeddingF32
 
     def _create_f16_model(self, config: Config) -> type:
@@ -80,16 +110,11 @@ class ModelCache:
 
         table_name = config.table_name
         dimensions = config.dimensions
+        table_args = self._table_args(table_name, config.schema)
 
         class EmbeddingF16(EmbeddingBase):
             __tablename__ = table_name
-            __table_args__ = (
-                UniqueConstraint(
-                    "entity_type", "entity_id", "model_name", name=f"uq_{table_name}_entity_model"
-                ),
-                Index(f"idx_{table_name}_entity", "entity_type", "entity_id"),
-                Index(f"idx_{table_name}_model", "model_name"),
-            )
+            __table_args__ = table_args
 
             id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
             entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -100,22 +125,18 @@ class ModelCache:
                 DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
             )
 
-        EmbeddingF16.__name__ = f"EmbeddingF16_{table_name}"
-        EmbeddingF16.__qualname__ = f"EmbeddingF16_{table_name}"
+        suffix = self._class_suffix(config)
+        EmbeddingF16.__name__ = f"EmbeddingF16_{suffix}"
+        EmbeddingF16.__qualname__ = f"EmbeddingF16_{suffix}"
         return EmbeddingF16
 
     def _create_i8_model(self, config: Config) -> type:
         table_name = config.table_name
+        table_args = self._table_args(table_name, config.schema)
 
         class EmbeddingI8(EmbeddingBase):
             __tablename__ = table_name
-            __table_args__ = (
-                UniqueConstraint(
-                    "entity_type", "entity_id", "model_name", name=f"uq_{table_name}_entity_model"
-                ),
-                Index(f"idx_{table_name}_entity", "entity_type", "entity_id"),
-                Index(f"idx_{table_name}_model", "model_name"),
-            )
+            __table_args__ = table_args
 
             id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
             entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -128,22 +149,18 @@ class ModelCache:
                 DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
             )
 
-        EmbeddingI8.__name__ = f"EmbeddingI8_{table_name}"
-        EmbeddingI8.__qualname__ = f"EmbeddingI8_{table_name}"
+        suffix = self._class_suffix(config)
+        EmbeddingI8.__name__ = f"EmbeddingI8_{suffix}"
+        EmbeddingI8.__qualname__ = f"EmbeddingI8_{suffix}"
         return EmbeddingI8
 
     def _create_i4_model(self, config: Config) -> type:
         table_name = config.table_name
+        table_args = self._table_args(table_name, config.schema)
 
         class EmbeddingI4(EmbeddingBase):
             __tablename__ = table_name
-            __table_args__ = (
-                UniqueConstraint(
-                    "entity_type", "entity_id", "model_name", name=f"uq_{table_name}_entity_model"
-                ),
-                Index(f"idx_{table_name}_entity", "entity_type", "entity_id"),
-                Index(f"idx_{table_name}_model", "model_name"),
-            )
+            __table_args__ = table_args
 
             id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
             entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -156,8 +173,9 @@ class ModelCache:
                 DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
             )
 
-        EmbeddingI4.__name__ = f"EmbeddingI4_{table_name}"
-        EmbeddingI4.__qualname__ = f"EmbeddingI4_{table_name}"
+        suffix = self._class_suffix(config)
+        EmbeddingI4.__name__ = f"EmbeddingI4_{suffix}"
+        EmbeddingI4.__qualname__ = f"EmbeddingI4_{suffix}"
         return EmbeddingI4
 
 

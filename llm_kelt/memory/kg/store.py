@@ -817,12 +817,14 @@ class KGStore:
         embedding_factory: EmbeddingFactory | None = None,
         embedding_format: QuantizationFormat | None = None,
         embedding_dimensions: int | None = None,
+        embedding_schema: str | None = None,
     ) -> None:
         self._lg = lg
         self._session_factory = session_factory
         self._embedder = embedder
         self._embedding_factory = embedding_factory
         self._embedding_format = embedding_format or QuantizationFormat.F16
+        self._embedding_schema = embedding_schema
 
         self.entities = EntityStore(lg, session_factory)
         self.refs = EntityRefStore(lg, session_factory)
@@ -851,6 +853,7 @@ class KGStore:
             format=self._embedding_format,
             embedder=embedder,
             default_dimensions=dimensions,
+            schema=self._embedding_schema,
         )
 
     @property

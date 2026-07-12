@@ -58,6 +58,7 @@ class Protocol:
         embedding_factory: EmbeddingFactory | None = None,
         embedding_format: QuantizationFormat = QuantizationFormat.F16,
         embedding_dimensions: int | None = None,
+        embedding_schema: str | None = None,
     ) -> None:
         """
         Initialize Atomic memory protocol.
@@ -70,6 +71,9 @@ class Protocol:
             embedding_factory: Factory for creating dimension-specific embedding stores.
             embedding_format: Quantization format for embeddings (default: F16).
             embedding_dimensions: Default output dimensions for embeddings.
+            embedding_schema: Postgres schema for embedding tables. Forwarded to
+                the EmbeddingAdapter so every dimension-specific store binds a
+                schema-qualified ORM model.
         """
         self._lg = lg
         self._session_factory = session_factory
@@ -78,6 +82,7 @@ class Protocol:
         self._embedding_factory = embedding_factory
         self._embedding_format = embedding_format
         self._embedding_dimensions = embedding_dimensions
+        self._embedding_schema = embedding_schema
 
         # Lazy-initialized clients
         self._assertions: AssertionsClient | None = None
@@ -89,17 +94,21 @@ class Protocol:
         self._preferences: PreferencesClient | None = None
         self._relationships: RelationshipsClient | None = None
 
-        # Eagerly initialize embedding adapter if factory is provided
-        self._embedding_adapter: EmbeddingAdapter | None = None
-        if self._embedding_factory is not None:
-            self._embedding_adapter = EmbeddingAdapter(
-                session_factory=self._session_factory,
-                context_key=self._context_key,
-                factory=self._embedding_factory,
-                format=self._embedding_format,
-                embedder=self._embedder,
-                default_dimensions=self._embedding_dimensions,
-            )
+        self._embedding_adapter: EmbeddingAdapter | None = self._build_adapter()
+
+    def _build_adapter(self) -> EmbeddingAdapter | None:
+        """Eagerly construct the embedding adapter when a factory is available."""
+        if self._embedding_factory is None:
+            return None
+        return EmbeddingAdapter(
+            session_factory=self._session_factory,
+            context_key=self._context_key,
+            factory=self._embedding_factory,
+            format=self._embedding_format,
+            embedder=self._embedder,
+            default_dimensions=self._embedding_dimensions,
+            schema=self._embedding_schema,
+        )
 
     @property
     def assertions(self) -> AssertionsClient:
@@ -175,16 +184,9 @@ class Protocol:
     def embeddings(self) -> EmbeddingAdapter:
         """Embedding operations for atomic facts."""
         if self._embedding_adapter is None:
-            if self._embedding_factory is None:
+            self._embedding_adapter = self._build_adapter()
+            if self._embedding_adapter is None:
                 raise RuntimeError("No embedding factory configured")
-            self._embedding_adapter = EmbeddingAdapter(
-                session_factory=self._session_factory,
-                context_key=self._context_key,
-                factory=self._embedding_factory,
-                format=self._embedding_format,
-                embedder=self._embedder,
-                default_dimensions=self._embedding_dimensions,
-            )
         return self._embedding_adapter
 
     def get_stats(self) -> dict[str, int]:
