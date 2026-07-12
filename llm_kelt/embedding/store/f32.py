@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from .base import StoreBase, ensure_session, index_exists, table_exists
+from .base import (
+    StoreBase,
+    create_if_missing,
+    ensure_session,
+    index_exists,
+    table_exists,
+)
 
 if TYPE_CHECKING:
     from ..types import Calibration
@@ -35,25 +41,33 @@ class Float32Store(StoreBase):
         self._table_ensured = False
 
     def ensure_table(self) -> None:
-        """Create table and HNSW index if they don't exist."""
+        """Create table and HNSW index if they don't exist.
+
+        Idempotent under concurrent first-touch: each CREATE runs inside a
+        savepoint via ``create_if_missing`` so a lost race raises a caught
+        duplicate-name error instead of propagating. See ``table_exists``
+        for the schema-visibility side of the same race.
+        """
         if self._table_ensured:
             return
+
+        schema = getattr(self._model.__table__, "schema", None)
+        hnsw_idx = f"idx_{self.table_name}_hnsw"
+        hnsw_sql = text(
+            f"CREATE INDEX {hnsw_idx} ON {self.table_name} "
+            f"USING hnsw (embedding vector_cosine_ops) "
+            f"WITH (m = 16, ef_construction = 64)"
+        )
 
         with self._session_factory() as session:
             conn = session.connection()
 
-            if not table_exists(conn, self.table_name):
-                self._model.__table__.create(conn, checkfirst=True)
-
-            hnsw_idx = f"idx_{self.table_name}_hnsw"
-            if not index_exists(conn, hnsw_idx):
-                conn.execute(
-                    text(
-                        f"CREATE INDEX {hnsw_idx} ON {self.table_name} "
-                        f"USING hnsw (embedding vector_cosine_ops) "
-                        f"WITH (m = 16, ef_construction = 64)"
-                    )
+            if not table_exists(conn, self.table_name, schema=schema):
+                create_if_missing(
+                    session, lambda: self._model.__table__.create(conn, checkfirst=True)
                 )
+            if not index_exists(conn, hnsw_idx, schema=schema):
+                create_if_missing(session, lambda: conn.execute(hnsw_sql))
 
             session.commit()
         self._table_ensured = True

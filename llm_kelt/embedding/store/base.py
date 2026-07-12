@@ -327,26 +327,80 @@ def ensure_session(session: Any | None, session_factory: Callable[[], Any]):
             yield sess
 
 
-def table_exists(conn: Any, table_name: str) -> bool:
-    """Check if a table exists in the current search_path."""
+def create_if_missing(session: Any, create_fn: Callable[[], Any]) -> None:
+    """Run a DDL creator inside a savepoint, absorbing duplicate-name races.
+
+    Two workers can both observe a missing table/index at check time and both
+    fire CREATE. The second raises IntegrityError on the composite type's
+    ``pg_type_typname_nsp_index`` (or ProgrammingError "relation already
+    exists"); the savepoint rolls those back without aborting the outer
+    transaction, so subsequent DDL in the same ensure_table() call can still
+    commit.
+    """
+    from sqlalchemy.exc import IntegrityError, ProgrammingError
+
+    try:
+        with session.begin_nested():
+            create_fn()
+    except (IntegrityError, ProgrammingError):
+        pass
+
+
+def table_exists(conn: Any, table_name: str, schema: str | None = None) -> bool:
+    """Check if a table exists in the database.
+
+    When ``schema`` is given, the check is scoped to that namespace by name,
+    independent of the session's ``search_path``. When ``schema`` is None,
+    the check falls back to any schema in the session's
+    ``current_schemas(true)``.
+
+    The previous implementation used ``pg_table_is_visible(c.oid)``, which
+    resolves against ``search_path`` at query time. Callers that manage
+    ``search_path`` per statement (rather than per session) saw a false
+    negative here even when the target table existed, which produced a
+    spurious ``CREATE TABLE`` and a ``pg_type_typname_nsp_index`` collision
+    on the auto-generated composite type in that same schema.
+    """
     from sqlalchemy import text
 
-    result = conn.execute(
-        text(
-            "SELECT 1 FROM pg_catalog.pg_class c "
-            "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
-            "WHERE c.relname = :table_name "
-            "AND pg_catalog.pg_table_is_visible(c.oid)"
-        ).bindparams(table_name=table_name)
-    )
+    if schema is not None:
+        result = conn.execute(
+            text(
+                "SELECT 1 FROM pg_catalog.pg_class c "
+                "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE c.relname = :table_name AND n.nspname = :schema"
+            ).bindparams(table_name=table_name, schema=schema)
+        )
+    else:
+        result = conn.execute(
+            text(
+                "SELECT 1 FROM pg_catalog.pg_class c "
+                "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE c.relname = :table_name "
+                "AND n.nspname = ANY(current_schemas(true))"
+            ).bindparams(table_name=table_name)
+        )
     return result.scalar() is not None
 
 
-def index_exists(conn: Any, index_name: str) -> bool:
-    """Check if an index exists in the database."""
+def index_exists(conn: Any, index_name: str, schema: str | None = None) -> bool:
+    """Check if an index exists in the database.
+
+    When ``schema`` is given, the check is scoped to that namespace by name.
+    When ``schema`` is None, the check is global (matches any schema).
+    """
     from sqlalchemy import text
 
-    result = conn.execute(
-        text("SELECT 1 FROM pg_indexes WHERE indexname = :idx_name").bindparams(idx_name=index_name)
-    )
+    if schema is not None:
+        result = conn.execute(
+            text(
+                "SELECT 1 FROM pg_indexes WHERE indexname = :idx_name AND schemaname = :schema"
+            ).bindparams(idx_name=index_name, schema=schema)
+        )
+    else:
+        result = conn.execute(
+            text("SELECT 1 FROM pg_indexes WHERE indexname = :idx_name").bindparams(
+                idx_name=index_name
+            )
+        )
     return result.scalar() is not None

@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..quantize import dequantize_int8, quantize_int8
 from ..types import Calibration, QuantizationFormat, QuantizedEmbedding
-from .base import StoreBase, ensure_session, table_exists
+from .base import StoreBase, create_if_missing, ensure_session, table_exists
 
 
 class Int8Store(StoreBase):
@@ -37,16 +37,24 @@ class Int8Store(StoreBase):
         self._table_ensured = False
 
     def ensure_table(self) -> None:
-        """Create table if it doesn't exist."""
+        """Create table if it doesn't exist.
+
+        Idempotent under concurrent first-touch: CREATE runs inside a
+        savepoint via ``create_if_missing`` so a lost race raises a caught
+        duplicate-name error instead of propagating. See ``table_exists``
+        for the schema-visibility side of the same race.
+        """
         if self._table_ensured:
             return
 
+        schema = getattr(self._model.__table__, "schema", None)
+
         with self._session_factory() as session:
             conn = session.connection()
-            if table_exists(conn, self.table_name):
+            if table_exists(conn, self.table_name, schema=schema):
                 self._table_ensured = True
                 return
-            self._model.__table__.create(conn, checkfirst=True)
+            create_if_missing(session, lambda: self._model.__table__.create(conn, checkfirst=True))
             session.commit()
         self._table_ensured = True
 
