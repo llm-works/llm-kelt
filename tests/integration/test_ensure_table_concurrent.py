@@ -1,22 +1,19 @@
 """Integration test for concurrent ensure_table() first-touch.
 
-The unit tests in tests/unit/test_ensure_table_race.py mock the Postgres
-error path to prove that create_if_missing() swallows the right SQLSTATEs
-(23505, 42P07, 42710) and re-raises the rest. This test drives real
-Postgres to prove:
+Verifies that advisory-lock serialization in ensure_table() handles
+concurrent first-touch correctly:
 
-1. Concurrent CREATE TABLE from N threads produces the SQLSTATEs we claim
-   (specifically the pg_type_typname_nsp_index collision from the
-   auto-generated composite type), not something else the filter would
-   let through unnoticed.
-2. SQLAlchemy's session.begin_nested() actually issues a SAVEPOINT and
-   the outer transaction survives a caught rollback.
-3. The final commit at the end of ensure_table() succeeds after the
-   savepoint absorbs the losing worker's failure.
+1. N threads racing on ensure_table() for a fresh table all succeed —
+   advisory locks serialize the DDL so only one thread creates the table
+   while others wait and then find it already exists.
+2. The table and HNSW index (for pgvector formats) exist exactly once
+   after the race completes.
+3. No thread raises an exception.
 
 Reproduces the bug reported in llm-xray's fresh-boot startup, where two
 worker processes racing on ensure_table() collided on
-pg_type_typname_nsp_index for embeddings_384_f16.
+pg_type_typname_nsp_index for embeddings_384_f16 (now prevented by
+advisory lock).
 """
 
 from __future__ import annotations

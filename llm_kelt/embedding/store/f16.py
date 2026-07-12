@@ -47,9 +47,10 @@ class Float16Store(StoreBase):
             return
 
         schema = getattr(self._model.__table__, "schema", None)
+        qualified_table = f"{schema}.{self.table_name}" if schema else self.table_name
         hnsw_idx = f"idx_{self.table_name}_hnsw"
         hnsw_sql = text(
-            f"CREATE INDEX {hnsw_idx} ON {self.table_name} "
+            f"CREATE INDEX {hnsw_idx} ON {qualified_table} "
             f"USING hnsw (embedding halfvec_cosine_ops) "
             f"WITH (m = 16, ef_construction = 64)"
         )
