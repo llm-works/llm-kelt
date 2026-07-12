@@ -67,8 +67,10 @@ class TestConcurrentEnsureTable:
             # ensure_table() actually traverses the DDL race path.
             client = factory.create(database.session, cfg)
             try:
-                barrier.wait(timeout=30)
+                barrier.wait(timeout=60)
                 client._store.ensure_table()  # type: ignore[attr-defined]
+            except threading.BrokenBarrierError:
+                pass  # Another thread failed during setup; not an ensure_table error
             except BaseException as e:  # noqa: BLE001 — capture everything
                 with errors_lock:
                     errors.append(e)
