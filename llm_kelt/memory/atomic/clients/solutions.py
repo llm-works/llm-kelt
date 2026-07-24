@@ -1,6 +1,6 @@
 """Solutions client for agent problem/answer records."""
 
-from typing import cast
+from typing import Any, cast
 
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import select
@@ -134,8 +134,16 @@ class SolutionsClient(FactClient[SolutionDetails]):
         tool_calls: list[dict] | None = None,
         category: str | None = None,
         source: str = "agent",
+        *,
+        context: dict[str, Any] | None = None,
     ) -> int:
-        """Record an agent solution."""
+        """Record an agent solution.
+
+        Args:
+            context: Caller-owned metadata forwarded to the embedder for cost
+                tracking / tracing on the auto-embed path. See
+                ``llm_infer.client.EmbeddingCallbacks``.
+        """
         self._validate_solution_inputs(
             agent_name, problem, problem_context, answer, tokens_used, latency_ms, tool_calls
         )
@@ -160,7 +168,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
             session.flush()
 
             # Auto-embed if embedder configured
-            self._auto_embed_fact(fact, session)
+            self._auto_embed_fact(fact, session, context=context)
 
             return fact.id
 

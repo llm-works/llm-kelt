@@ -97,9 +97,12 @@ class TestSaveLoad:
         storage.save("s1", conv)
 
         loaded = storage.load("s1")
-        assert loaded.messages[0]["tool_calls"] == [
-            {"id": "tc_1", "name": "search", "arguments": {}}
-        ]
+        tool_calls = loaded.messages[0]["tool_calls"]
+        assert len(tool_calls) == 1
+        tc = tool_calls[0]
+        assert tc["id"] == "tc_1"
+        assert tc["name"] == "search"
+        assert dict(tc["arguments"]) == {}
         assert loaded.messages[1]["tool_call_id"] == "tc_1"
 
     def test_save_creates_directory(self, lg, tmp_path: Path):

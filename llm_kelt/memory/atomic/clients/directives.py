@@ -1,7 +1,7 @@
 """Directives client for standing user instructions."""
 
 from datetime import UTC, datetime
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import select
@@ -57,8 +57,16 @@ class DirectivesClient(FactClient[DirectiveDetails]):
         parsed_rules: dict | None = None,
         expires_at: datetime | None = None,
         category: str | None = None,
+        *,
+        context: dict[str, Any] | None = None,
     ) -> int:
-        """Record a directive."""
+        """Record a directive.
+
+        Args:
+            context: Caller-owned metadata forwarded to the embedder for cost
+                tracking / tracing on the auto-embed path. See
+                ``llm_infer.client.EmbeddingCallbacks``.
+        """
         self._validate_directive(text, directive_type)
 
         with self._session_factory() as session:
@@ -86,7 +94,7 @@ class DirectivesClient(FactClient[DirectiveDetails]):
             session.flush()
 
             # Auto-embed if embedder configured
-            self._auto_embed_fact(fact, session)
+            self._auto_embed_fact(fact, session, context=context)
 
             return fact.id
 

@@ -1,7 +1,7 @@
 """Predictions client for hypothesis tracking and calibration."""
 
 from datetime import UTC, date, datetime
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import select
@@ -122,8 +122,16 @@ class PredictionsClient(FactClient[PredictionDetails]):
         tags: list[str] | None = None,
         verification_source: str | None = None,
         verification_url: str | None = None,
+        *,
+        context: dict[str, Any] | None = None,
     ) -> int:
-        """Record a prediction."""
+        """Record a prediction.
+
+        Args:
+            context: Caller-owned metadata forwarded to the embedder for cost
+                tracking / tracing on the auto-embed path. See
+                ``llm_infer.client.EmbeddingCallbacks``.
+        """
         self._validate_prediction(hypothesis, confidence)
         parsed_date = self._parse_resolution_date(resolution_date)
         res_type = self._determine_resolution_type(parsed_date, resolution_event, resolution_metric)
@@ -147,7 +155,7 @@ class PredictionsClient(FactClient[PredictionDetails]):
             session.flush()
 
             # Auto-embed if embedder configured
-            self._auto_embed_fact(fact, session)
+            self._auto_embed_fact(fact, session, context=context)
 
             return fact.id
 

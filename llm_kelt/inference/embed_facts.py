@@ -1,7 +1,7 @@
 """Utilities for batch embedding facts."""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
 from llm_infer.client import EmbeddingClient
@@ -50,13 +50,14 @@ async def _embed_individually(
     embedder: EmbeddingClient,
     embedding_adapter: EmbeddingAdapter,
     model: str,
+    context: dict[str, Any] | None,
 ) -> tuple[int, int]:
     """Embed facts one at a time as fallback, returning (processed, failed) counts."""
     processed = 0
     failed = 0
     for fact in facts:
         try:
-            result = await embedder.embed_async(fact.content)
+            result = await embedder.embed_async(fact.content, context=context)
             embedding_adapter.set_embedding(fact.id, result.embedding, model)
             processed += 1
         except Exception as e:
@@ -74,17 +75,18 @@ async def _process_batch(
     embedder: EmbeddingClient,
     embedding_adapter: EmbeddingAdapter,
     model: str,
+    context: dict[str, Any] | None,
 ) -> tuple[int, int]:
     """Process a single batch of facts, with fallback to individual embedding."""
     try:
-        batch_result = await embedder.embed_batch_async([f.content for f in facts])
+        batch_result = await embedder.embed_batch_async([f.content for f in facts], context=context)
         return _store_embeddings(lg, facts, batch_result.embeddings, embedding_adapter, model)
     except Exception as e:
         lg.warning(
             "batch embedding failed, falling back to individual",
             extra={"batch_size": len(facts), "exception": e},
         )
-        return await _embed_individually(lg, facts, embedder, embedding_adapter, model)
+        return await _embed_individually(lg, facts, embedder, embedding_adapter, model, context)
 
 
 async def embed_missing_facts(
@@ -93,6 +95,8 @@ async def embed_missing_facts(
     embedding_adapter: EmbeddingAdapter,
     dimensions: int,
     batch_size: int = 50,
+    *,
+    context: dict[str, Any] | None = None,
 ) -> EmbedFactsResult:
     """
     Embed all facts that don't have embeddings for the embedder's model.
@@ -108,6 +112,8 @@ async def embed_missing_facts(
         embedding_adapter: EmbeddingAdapter for storing embeddings.
         dimensions: Output dimensions for embeddings (determines storage table).
         batch_size: Number of facts to embed per batch.
+        context: Caller-owned metadata forwarded to the embedder for cost
+            tracking / tracing. Applied to every batch and individual retry.
 
     Returns:
         EmbedFactsResult with counts of processed and failed facts.
@@ -121,7 +127,7 @@ async def embed_missing_facts(
         if not facts:
             break
 
-        p, f = await _process_batch(lg, facts, embedder, embedding_adapter, model)
+        p, f = await _process_batch(lg, facts, embedder, embedding_adapter, model, context)
         processed += p
         failed += f
 

@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `EntityStore.delete_in_scope(scope_key, entity_type=None)` for bulk entity deletion in a
   single statement; matches scope_key exactly (no ancestor-scope resolution, unlike
   `in_scope` reads) and removes related data via FK cascades
+- `context=` kwarg on the atomic write methods (`assertions.add`, `solutions.record`,
+  `predictions.record`, `directives.record`), the embedding adapters, `embed_missing_facts`,
+  and (as `embedder_context=`) `ContextQuery.ask`; forwarded to `EmbeddingClient` callbacks
 
 ### Fixed
 - Embedding tables now bind to the configured Postgres schema via ORM `__table_args__`,

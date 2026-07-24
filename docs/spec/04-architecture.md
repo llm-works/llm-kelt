@@ -525,9 +525,7 @@ class CompositeStrategy(AdaptationStrategy):
     ) -> AdaptedRequest:
         request = AdaptedRequest(messages=messages, system=system)
         for strategy in self._strategies:
-            request = await strategy.adapt_request(
-                request.messages, request.system
-            )
+            request = await strategy.adapt_request(request.messages, request.system)
         return request
 ```
 
@@ -551,10 +549,10 @@ Data flows from collection to trained artifacts.
 
 ```python
 class ExportFormat(Enum):
-    JSONL = "jsonl"              # Generic line-delimited JSON
-    ALPACA = "alpaca"            # instruction/input/output format
-    SHAREGPT = "sharegpt"        # conversations format
-    DPO_PAIRS = "dpo_pairs"      # chosen/rejected format
+    JSONL = "jsonl"  # Generic line-delimited JSON
+    ALPACA = "alpaca"  # instruction/input/output format
+    SHAREGPT = "sharegpt"  # conversations format
+    DPO_PAIRS = "dpo_pairs"  # chosen/rejected format
 ```
 
 ### Training Jobs
@@ -564,14 +562,14 @@ class ExportFormat(Enum):
 class TrainingJob:
     id: str
     context_key: str
-    method: str                   # "lora", "dpo", "classifier"
-    status: str                   # "pending", "running", "completed", "failed"
+    method: str  # "lora", "dpo", "classifier"
+    status: str  # "pending", "running", "completed", "failed"
     config: RunConfig
-    input_path: str               # Path to exported data
-    output_path: str | None       # Path to trained artifact
+    input_path: str  # Path to exported data
+    output_path: str | None  # Path to trained artifact
     created_at: datetime
     completed_at: datetime | None
-    metrics: dict | None          # Training metrics
+    metrics: dict | None  # Training metrics
 ```
 
 ### Adapter Registry
@@ -694,9 +692,7 @@ class AdaptationOrchestrator:
         """Apply all strategies to the request."""
         request = AdaptedRequest(messages=messages, system=system)
         for strategy in self._strategies:
-            request = await strategy.adapt_request(
-                request.messages, request.system
-            )
+            request = await strategy.adapt_request(request.messages, request.system)
         return request
 ```
 

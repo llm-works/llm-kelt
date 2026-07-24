@@ -72,17 +72,17 @@ RAG (Retrieval-Augmented Generation) finds facts relevant to each query using se
 
 ```python
 from llm_infer.client import Factory as LLMClientFactory
-from llm_kelt.inference import (
-    ContextBuilder, ContextQuery, RAGArgs, embed_missing_facts
-)
+from llm_kelt.inference import ContextBuilder, ContextQuery, RAGArgs, embed_missing_facts
 
 # 1. Embed facts for semantic search
 factory = LLMClientFactory(logger)
-embedder = factory.embeddings_from_config({
-    "type": "openai",
-    "base_url": "http://localhost:8001/v1",
-    "model": "text-embedding-3-small",
-})
+embedder = factory.embeddings_from_config(
+    {
+        "type": "openai",
+        "base_url": "http://localhost:8001/v1",
+        "model": "text-embedding-3-small",
+    }
+)
 await embed_missing_facts(logger, embedder, kelt.facts)
 
 # 2. Create context-aware query interface

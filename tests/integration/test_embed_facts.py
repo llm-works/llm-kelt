@@ -23,7 +23,7 @@ class TestEmbedMissingFactsIntegration:
             val = len(text) / 100.0
             return [val, val + 0.1, val + 0.2]
 
-        async def embed_batch_async(texts):
+        async def embed_batch_async(texts, *, context=None):
             embeddings = [make_embedding(t) for t in texts]
             return BatchEmbeddingResult(
                 embeddings=embeddings,
@@ -33,7 +33,7 @@ class TestEmbedMissingFactsIntegration:
                 total_prompt_tokens=sum(len(t) for t in texts),
             )
 
-        async def embed_async(text):
+        async def embed_async(text, *, context=None):
             return EmbeddingResult(
                 embedding=make_embedding(text),
                 model="test-model",

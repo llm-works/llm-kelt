@@ -90,9 +90,11 @@ CREATE INDEX idx_facts_embedding ON facts USING ivfflat (embedding vector_cosine
 ```python
 # kelt/adaptation/types.py
 
+
 @dataclass
 class ScoredFact:
     """Fact with relevance score from vector search."""
+
     fact: Fact
     similarity: float  # 0-1, from embedding search
 
@@ -100,6 +102,7 @@ class ScoredFact:
 @dataclass
 class SelectionResult:
     """Result of context selection (agent produces this)."""
+
     facts: list[Fact]
     confidence: float  # How confident in selection (0-1)
     tier: str  # "rules" | "embedding" | "llm" - which method was used
@@ -119,6 +122,7 @@ Agent must implement these protocols to participate in the pipeline.
 # kelt/adaptation/protocols.py
 
 from typing import Protocol, runtime_checkable
+
 
 @runtime_checkable
 class ContextSelector(Protocol):
@@ -183,6 +187,7 @@ Agent provides concrete implementations of the protocols.
 
 ```python
 # agent/adaptation/selectors.py
+
 
 class RuleBasedSelector(ContextSelector):
     """Fast rule-based selection for simple cases."""
@@ -411,13 +416,16 @@ Agent can define rules for fast context routing:
 ```python
 # agent/adaptation/rules.py
 
+
 @dataclass
 class SelectionRule:
     """Rule for context selection."""
+
     name: str
     condition: Callable[[str, Fact], bool]
     priority: int = 0
     always_include: bool = False
+
 
 # Example rules
 RULES = [
