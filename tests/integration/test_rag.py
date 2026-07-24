@@ -41,7 +41,7 @@ class TestRAGIntegration:
             # Default embedding
             return [0.3, 0.3, 0.3]
 
-        async def embed_async(text):
+        async def embed_async(text, *, context=None):
             return EmbeddingResult(
                 embedding=get_embedding(text),
                 model="test-model",

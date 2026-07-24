@@ -90,7 +90,9 @@ class TestEmbedMissingFacts:
 
         assert result.processed == 3
         assert result.failed == 0
-        mock_embedder.embed_batch_async.assert_called_once_with(["Fact 1", "Fact 2", "Fact 3"])
+        mock_embedder.embed_batch_async.assert_called_once_with(
+            ["Fact 1", "Fact 2", "Fact 3"], context=None
+        )
         assert mock_facts_client.set_embedding.call_count == 3
 
     @pytest.mark.asyncio
@@ -233,6 +235,49 @@ class TestEmbedMissingFacts:
         )
 
         mock_facts_client.list_without_embeddings.assert_called_once_with("test-model", 2, limit=25)
+
+    @pytest.mark.asyncio
+    async def test_context_forwarded_to_batch(
+        self, mock_logger, mock_embedder, mock_facts_client, sample_facts
+    ):
+        """context= kwarg is threaded into embed_batch_async."""
+        mock_facts_client.list_without_embeddings.side_effect = [sample_facts, []]
+        mock_embedder.embed_batch_async.return_value = BatchEmbeddingResult(
+            embeddings=[[0.1], [0.2], [0.3]],
+            model="m",
+            dimensions=1,
+            size=3,
+            total_prompt_tokens=3,
+        )
+        ctx = {"tenant": "acme", "trace_id": "abc123"}
+
+        await embed_missing_facts(
+            mock_logger, mock_embedder, mock_facts_client, dimensions=1, context=ctx
+        )
+
+        mock_embedder.embed_batch_async.assert_called_once_with(
+            ["Fact 1", "Fact 2", "Fact 3"], context=ctx
+        )
+
+    @pytest.mark.asyncio
+    async def test_context_forwarded_on_individual_fallback(
+        self, mock_logger, mock_embedder, mock_facts_client, sample_facts
+    ):
+        """context= reaches embed_async when the batch path fails over."""
+        mock_facts_client.list_without_embeddings.side_effect = [sample_facts, []]
+        mock_embedder.embed_batch_async.side_effect = Exception("batch broke")
+        mock_embedder.embed_async.return_value = EmbeddingResult(
+            embedding=[0.1], model="m", dimensions=1, prompt_tokens=1
+        )
+        ctx = {"tenant": "acme"}
+
+        await embed_missing_facts(
+            mock_logger, mock_embedder, mock_facts_client, dimensions=1, context=ctx
+        )
+
+        assert mock_embedder.embed_async.call_count == 3
+        for call in mock_embedder.embed_async.call_args_list:
+            assert call.kwargs.get("context") == ctx
 
     @pytest.mark.asyncio
     async def test_embed_breaks_on_no_progress(

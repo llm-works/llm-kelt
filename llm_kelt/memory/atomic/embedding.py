@@ -183,6 +183,8 @@ class EmbeddingAdapter:
         model: str | None = None,
         dimensions: int | None = None,
         session: Any | None = None,
+        *,
+        context: dict[str, Any] | None = None,
     ) -> None:
         """
         Generate and store embedding for a fact.
@@ -193,6 +195,9 @@ class EmbeddingAdapter:
             dimensions: Output dimensions. If None, uses adapter default or embedder config.
             session: Optional session to use. If None, creates new session and commits.
                      If provided, uses existing session without committing (caller controls).
+            context: Caller-owned metadata forwarded to the embedder for
+                cost tracking / tracing. Passed straight to
+                ``EmbeddingClient.embed``; see llm_infer.client.EmbeddingCallbacks.
 
         Raises:
             RuntimeError: If no embedder is configured.
@@ -206,7 +211,7 @@ class EmbeddingAdapter:
                 f"embedder model {self._embedder.model!r} does not match requested {model!r}"
             )
         dims = dimensions if dimensions is not None else self._default_dimensions
-        result = self._embedder.embed(fact.content, dimensions=dims)
+        result = self._embedder.embed(fact.content, dimensions=dims, context=context)
         store = self._get_store(len(result.embedding))
         store.store(
             entity_type=self.ENTITY_TYPE,

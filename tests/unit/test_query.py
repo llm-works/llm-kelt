@@ -142,7 +142,30 @@ class TestContextQueryRAG:
 
         await query.ask("What language should I use?", rag=RAGArgs())
 
-        mock_embedder.embed_async.assert_called_once_with("What language should I use?")
+        mock_embedder.embed_async.assert_called_once_with(
+            "What language should I use?", context=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_ask_with_rag_forwards_embedder_context(
+        self, mock_client, mock_context_builder, mock_embedding_adapter, mock_embedder, sample_fact
+    ):
+        """embedder_context kwarg reaches the RAG embed_async call."""
+        mock_embedding_adapter.search_similar.return_value = [
+            ScoredEntity(entity=sample_fact, score=0.9)
+        ]
+
+        query = ContextQuery(
+            client=mock_client,
+            context_builder=mock_context_builder,
+            embedder=mock_embedder,
+            embedding_adapter=mock_embedding_adapter,
+        )
+
+        ctx = {"tenant": "acme", "workflow": "onboarding"}
+        await query.ask("Q?", rag=RAGArgs(), embedder_context=ctx)
+
+        mock_embedder.embed_async.assert_called_once_with("Q?", context=ctx)
 
     @pytest.mark.asyncio
     async def test_ask_with_rag_searches_similar_facts(

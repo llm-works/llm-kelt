@@ -1,7 +1,7 @@
 """High-level context-aware query interface."""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from llm_infer.client import ChatClient
 
@@ -81,6 +81,8 @@ class ContextQuery:
         include_facts: bool = True,
         fact_categories: list[str] | None = None,
         rag: RAGArgs | None = None,
+        *,
+        embedder_context: dict[str, Any] | None = None,
     ) -> str:
         """
         Ask a question with context-aware context.
@@ -95,6 +97,10 @@ class ContextQuery:
             fact_categories: Only include facts from these categories (ignored when rag
                 is provided; use rag.categories instead)
             rag: RAG configuration - enables semantic retrieval when provided
+            embedder_context: Caller-owned metadata forwarded to the embedder
+                for cost tracking / tracing. Only used when ``rag`` is set,
+                since that's the only path that calls the embedder here.
+                See ``llm_infer.client.EmbeddingCallbacks``.
 
         Returns:
             The assistant's response
@@ -118,7 +124,7 @@ class ContextQuery:
         base = system_prompt if system_prompt is not None else self._base_system_prompt
 
         if rag is not None:
-            system = await self._build_rag_prompt(base, question, rag)
+            system = await self._build_rag_prompt(base, question, rag, embedder_context)
         elif include_facts:
             system = self._context_builder.build_system_prompt(
                 base_prompt=base,
@@ -149,6 +155,7 @@ class ContextQuery:
         base: str,
         question: str,
         rag: RAGArgs,
+        embedder_context: dict[str, Any] | None = None,
     ) -> str:
         """Build system prompt using RAG-based fact retrieval."""
         if self._embedder is None:
@@ -157,7 +164,7 @@ class ContextQuery:
             raise ValueError("RAG requires embedding_adapter to be configured")
 
         # Embed the question
-        result = await self._embedder.embed_async(question)
+        result = await self._embedder.embed_async(question, context=embedder_context)
 
         # Determine model for search
         model = rag.model if rag.model else self._embedder.model
