@@ -280,7 +280,13 @@ class FactClient(Generic[T]):
                 stmt = stmt.where(context_filter)
             return (session.scalar(stmt) or 0) > 0
 
-    def _auto_embed_fact(self, fact: Fact, session: Any) -> None:
+    def _auto_embed_fact(
+        self,
+        fact: Fact,
+        session: Any,
+        *,
+        context: dict[str, Any] | None = None,
+    ) -> None:
         """
         Automatically embed a fact if embedding adapter is configured.
 
@@ -293,10 +299,15 @@ class FactClient(Generic[T]):
         Args:
             fact: The fact to embed (must have fact.id set).
             session: Database session to use (ensures transactional consistency).
+            context: Caller-owned metadata forwarded to the embedder for cost
+                tracking / tracing. Threaded from public write methods (add /
+                record) so callers who own an EmbeddingClient with callbacks
+                can bill against the caller's context. See
+                ``llm_infer.client.EmbeddingCallbacks``.
         """
         if self._embedding_adapter is not None:
             try:
-                self._embedding_adapter.embed_fact(fact, session=session)
+                self._embedding_adapter.embed_fact(fact, session=session, context=context)
             except Exception as e:
                 # Log warning but let fact creation succeed
                 # Embedding service availability should not block fact creation
