@@ -57,6 +57,7 @@ Agent provides the **intelligence** (selectors, evaluators, routers, retry strat
 ```python
 # kelt/adaptation/types.py
 
+
 @dataclass
 class PipelineState:
     """Carries context through pipeline execution."""
@@ -90,6 +91,7 @@ class PipelineState:
 @dataclass
 class PipelineResult:
     """Final result from pipeline execution."""
+
     response: str
     facts_used: list[Fact]
     model_used: str
@@ -101,6 +103,7 @@ class PipelineResult:
 @dataclass
 class PipelineConfig:
     """Pipeline configuration."""
+
     max_attempts: int = 3
     candidate_limit: int = 30
     quality_threshold: float = 0.7
@@ -114,11 +117,14 @@ class PipelineConfig:
 
 from typing import Protocol, runtime_checkable
 
+
 @runtime_checkable
 class ContextSelector(Protocol):
     """Select relevant context. See 06-context-routing.md."""
-    async def select(self, query: str, candidates: list[ScoredFact], max_facts: int) -> SelectionResult:
-        ...
+
+    async def select(
+        self, query: str, candidates: list[ScoredFact], max_facts: int
+    ) -> SelectionResult: ...
 
 
 @runtime_checkable
@@ -196,9 +202,11 @@ class RetryStrategy(Protocol):
 ```python
 # kelt/adaptation/types.py
 
+
 @dataclass
 class EvaluationResult:
     """Result from quality evaluation."""
+
     score: float  # 0-1
     passed: bool  # score >= threshold
     reasoning: str | None = None
@@ -208,6 +216,7 @@ class EvaluationResult:
 @dataclass
 class RoutingDecision:
     """Result from model routing."""
+
     model: str  # Model identifier
     reason: str  # Why this model
 
@@ -215,6 +224,7 @@ class RoutingDecision:
 @dataclass
 class RetryDecision:
     """Result from retry strategy."""
+
     should_retry: bool
     escalate_model: bool  # Try larger model?
     adjust_context: bool  # Retrieve more context?
@@ -225,6 +235,7 @@ class RetryDecision:
 
 ```python
 # kelt/adaptation/pipeline.py
+
 
 class AdaptationPipeline:
     """
@@ -286,9 +297,7 @@ class AdaptationPipeline:
                 )
 
                 # Step 2: Select context (AGENT HOOK)
-                selection = await self.selector.select(
-                    query, state.candidates, max_facts=10
-                )
+                selection = await self.selector.select(query, state.candidates, max_facts=10)
                 state.selected_facts = selection.facts
                 state.selection_confidence = selection.confidence
 
@@ -298,9 +307,7 @@ class AdaptationPipeline:
                 state.model_used = routing.model
 
                 # Step 4: Build context and generate (kelt primitive)
-                context_str = self.kelt.build_context(
-                    [f.id for f in selection.facts]
-                )
+                context_str = self.kelt.build_context([f.id for f in selection.facts])
                 full_system = f"{system or ''}\n\n{context_str}".strip()
 
                 result = await model.complete(full_system, messages)
@@ -309,9 +316,7 @@ class AdaptationPipeline:
                 state.total_tokens += result.tokens
 
                 # Step 5: Evaluate quality (AGENT HOOK)
-                evaluation = await self.evaluator.evaluate(
-                    query, result.content, selection.facts
-                )
+                evaluation = await self.evaluator.evaluate(query, result.content, selection.facts)
                 state.scores["quality"] = evaluation.score
 
                 # Step 6: Check if done or retry (AGENT HOOK)
@@ -380,6 +385,7 @@ Agent provides concrete implementations of kelt's protocols.
 
 ```python
 # agent/adaptation/evaluators.py
+
 
 class LLMJudgeEvaluator(QualityEvaluator):
     """Use LLM to judge response quality."""
@@ -487,6 +493,7 @@ class RuleBasedEvaluator(QualityEvaluator):
 ```python
 # agent/adaptation/routers.py
 
+
 class ConfidenceBasedRouter(ModelRouter):
     """Route based on context selection confidence."""
 
@@ -548,6 +555,7 @@ class QueryComplexityRouter(ModelRouter):
 
 ```python
 # agent/adaptation/retry.py
+
 
 class ExponentialBackoffRetry(RetryStrategy):
     """Retry with escalation on repeated failures."""
@@ -638,6 +646,7 @@ from agent.adaptation.selectors import HybridSelector
 from agent.adaptation.evaluators import LLMJudgeEvaluator
 from agent.adaptation.routers import ConfidenceBasedRouter
 from agent.adaptation.retry import ExponentialBackoffRetry
+
 
 class OrchestrationAgent(WorkerAgent):
     """Agent that uses kelt's pipeline with custom intelligence."""

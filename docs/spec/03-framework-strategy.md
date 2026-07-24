@@ -113,11 +113,14 @@ kelt defines what agent must implement:
 class ContextSelector(Protocol):
     async def select(query, candidates, max_facts) -> SelectionResult: ...
 
+
 class QualityEvaluator(Protocol):
     async def evaluate(query, response, context) -> EvaluationResult: ...
 
+
 class ModelRouter(Protocol):
     async def route(query, context_confidence) -> RoutingDecision: ...
+
 
 class RetryStrategy(Protocol):
     async def should_retry(attempt, quality_score, error) -> RetryDecision: ...
@@ -199,6 +202,7 @@ from agent.adaptation.selectors import HybridSelector
 from agent.adaptation.evaluators import LLMJudgeEvaluator
 from agent.adaptation.routers import ConfidenceBasedRouter
 from agent.adaptation.retry import ExponentialBackoffRetry
+
 
 class OrchestrationAgent:
     def setup(self):

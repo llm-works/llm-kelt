@@ -79,18 +79,22 @@ conv.add("What is a Python decorator?")
 conv.add("A decorator wraps another function to extend its behavior.", Role.ASSISTANT)
 
 # Check state
-conv.message_count   # 3
-conv.token_count     # estimated tokens
-conv.usage_ratio     # fraction of limit used
+conv.message_count  # 3
+conv.token_count  # estimated tokens
+conv.usage_ratio  # fraction of limit used
 conv.needs_compaction()  # True when usage exceeds threshold
 ```
 
 ### Tool Call Messages
 
 ```python
-conv.add("", Role.ASSISTANT, tool_calls=[
-    {"id": "tc_1", "name": "list_files", "arguments": {"path": "."}},
-])
+conv.add(
+    "",
+    Role.ASSISTANT,
+    tool_calls=[
+        {"id": "tc_1", "name": "list_files", "arguments": {"path": "."}},
+    ],
+)
 conv.add("main.py\nutils.py", Role.TOOL, tool_call_id="tc_1")
 ```
 
@@ -292,6 +296,7 @@ client.directives.record(
 
 # Add expiring directive
 from datetime import datetime, timedelta
+
 client.directives.record(
     text="Focus on kubernetes this week",
     directive_type="one-time",
