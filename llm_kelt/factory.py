@@ -10,6 +10,7 @@ from llm_infer.client import Factory as LLMClientFactory
 
 from .client import Client
 from .core.database import Database
+from .core.schema import SchemaMode
 from .memory.isolation import ClientContext
 
 
@@ -62,7 +63,7 @@ class ClientFactory:
         context: ClientContext,
         config: DotDict,
         db_key: str = "main",
-        ensure_schema: bool = True,
+        schema_mode: SchemaMode = SchemaMode.ENSURE,
     ) -> Client:
         """
         Create Client with all dependencies from config.
@@ -71,7 +72,8 @@ class ClientFactory:
             context: ClientContext for data partitioning
             config: Full application config (e.g., Config("etc/llm-kelt.yaml"))
             db_key: Database config key (default: "main")
-            ensure_schema: If True (default), auto-migrate schema on init
+            schema_mode: How to handle the schema at construction. Defaults to
+                SchemaMode.ENSURE. See ``Client`` for VERIFY and SKIP semantics.
 
         Returns:
             Configured Client instance
@@ -109,7 +111,7 @@ class ClientFactory:
             llm_client=self._create_llm_client(config),
             kelt_config=getattr(config, "kelt", None),
             training_config=getattr(config, "training", None),
-            ensure_schema=ensure_schema,
+            schema_mode=schema_mode,
         )
 
     def create(
@@ -120,7 +122,7 @@ class ClientFactory:
         llm_client: ChatClient | None = None,
         kelt_config: DotDict | None = None,
         training_config: DotDict | None = None,
-        ensure_schema: bool = True,
+        schema_mode: SchemaMode = SchemaMode.ENSURE,
     ) -> Client:
         """
         Create Client with existing resources.
@@ -134,7 +136,8 @@ class ClientFactory:
             llm_client: Optional existing LLM client instance
             kelt_config: Optional kelt settings (config.kelt section)
             training_config: Optional training settings (config.training section)
-            ensure_schema: If True (default), auto-migrate schema on init
+            schema_mode: How to handle the schema at construction. Defaults to
+                SchemaMode.ENSURE. See ``Client`` for VERIFY and SKIP semantics.
 
         Returns:
             Configured Client instance
@@ -147,5 +150,5 @@ class ClientFactory:
             llm_client=llm_client,
             kelt_config=kelt_config,
             training_config=training_config,
-            ensure_schema=ensure_schema,
+            schema_mode=schema_mode,
         )

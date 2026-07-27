@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from llm_kelt import ClientContext
+from llm_kelt import ClientContext, SchemaMode
 from llm_kelt.client import Client
 from llm_kelt.scoped_client import ScopedClient
 
@@ -29,7 +29,7 @@ class TestClientWithSchema:
     @pytest.fixture
     def kelt_client(self, mock_logger, mock_database):
         """Create Client with mocked dependencies."""
-        with patch.object(Client, "_verify_schema"):
+        with patch.object(Client, "_apply_schema_mode"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
                     context = ClientContext(context_key="test-agent")
@@ -37,7 +37,7 @@ class TestClientWithSchema:
                         database=mock_database,
                         context=context,
                         lg=mock_logger,
-                        ensure_schema=True,
+                        schema_mode=SchemaMode.ENSURE,
                     )
                     return client
 
@@ -57,12 +57,12 @@ class TestClientWithSchema:
         assert scoped_b.schema_name == "schema_b"
         assert scoped_a is not scoped_b
 
-    def test_with_schema_inherits_ensure_schema(self, kelt_client):
-        """Test that ScopedClient inherits ensure_schema setting from parent."""
+    def test_with_schema_inherits_schema_mode(self, kelt_client):
+        """Test that ScopedClient inherits schema_mode from parent."""
         scoped = kelt_client.with_schema("my_schema")
 
         # Access private attribute to verify
-        assert scoped._ensure_schema is True
+        assert scoped._schema_mode is SchemaMode.ENSURE
 
     def test_with_schema_inherits_context_key(self, kelt_client):
         """Test that ScopedClient uses parent's context_key."""
@@ -104,7 +104,7 @@ class TestScopedClientLazyInit:
             lg=mock_logger,
             parent=mock_parent,
             schema_name="my_schema",
-            ensure_schema=True,
+            schema_mode=SchemaMode.ENSURE,
         )
 
         assert scoped._initialized is False
@@ -118,7 +118,7 @@ class TestScopedClientLazyInit:
             lg=mock_logger,
             parent=mock_parent,
             schema_name="my_schema",
-            ensure_schema=True,
+            schema_mode=SchemaMode.ENSURE,
         )
 
         # Patch SchemaManager to avoid actual migrations
@@ -128,13 +128,13 @@ class TestScopedClientLazyInit:
         assert scoped._initialized is True
         mock_parent._db.scoped.assert_called_once_with("my_schema")
 
-    def test_ensure_schema_called_when_enabled(self, mock_logger, mock_parent):
-        """Test that ensure_schema creates schema when enabled."""
+    def test_schema_created_when_mode_ensure(self, mock_logger, mock_parent):
+        """Test that schema is created when schema_mode is ENSURE."""
         scoped = ScopedClient(
             lg=mock_logger,
             parent=mock_parent,
             schema_name="my_schema",
-            ensure_schema=True,
+            schema_mode=SchemaMode.ENSURE,
         )
 
         with patch("llm_kelt.scoped_client.SchemaManager") as mock_schema_manager_cls:
@@ -148,19 +148,45 @@ class TestScopedClientLazyInit:
         scoped_db.ensure_schema.assert_called_once()
         mock_manager.ensure_schema.assert_called_once()
 
-    def test_ensure_schema_not_called_when_disabled(self, mock_logger, mock_parent):
-        """Test that ensure_schema skips creation when disabled."""
+    def test_schema_verified_when_mode_verify(self, mock_logger, mock_parent):
+        """Test that schema is verified (not created) when schema_mode is VERIFY."""
+        from llm_kelt.core.schema import SchemaState
+
         scoped = ScopedClient(
             lg=mock_logger,
             parent=mock_parent,
             schema_name="my_schema",
-            ensure_schema=False,
+            schema_mode=SchemaMode.VERIFY,
+        )
+
+        with patch("llm_kelt.scoped_client.SchemaManager") as mock_schema_manager_cls:
+            mock_manager = Mock()
+            mock_status = Mock()
+            mock_status.state = SchemaState.CURRENT
+            mock_manager.get_status.return_value = mock_status
+            mock_schema_manager_cls.return_value = mock_manager
+
+            _ = scoped.atomic
+
+        # Verify schema was checked but not created
+        scoped_db = mock_parent._db.scoped.return_value
+        scoped_db.ensure_schema.assert_not_called()
+        mock_manager.get_status.assert_called_once()
+        mock_manager.ensure_schema.assert_not_called()
+
+    def test_schema_skipped_when_mode_skip(self, mock_logger, mock_parent):
+        """Test that schema is not checked or created when schema_mode is SKIP."""
+        scoped = ScopedClient(
+            lg=mock_logger,
+            parent=mock_parent,
+            schema_name="my_schema",
+            schema_mode=SchemaMode.SKIP,
         )
 
         with patch("llm_kelt.scoped_client.SchemaManager") as mock_schema_manager_cls:
             _ = scoped.atomic
 
-        # Verify schema creation was NOT called
+        # Verify schema was not touched at all
         scoped_db = mock_parent._db.scoped.return_value
         scoped_db.ensure_schema.assert_not_called()
         mock_schema_manager_cls.assert_not_called()
@@ -171,7 +197,7 @@ class TestScopedClientLazyInit:
             lg=mock_logger,
             parent=mock_parent,
             schema_name="my_schema",
-            ensure_schema=True,
+            schema_mode=SchemaMode.ENSURE,
         )
 
         with patch("llm_kelt.scoped_client.SchemaManager"):
@@ -193,7 +219,7 @@ class TestScopedClientSchemaName:
             lg=Mock(),
             parent=mock_parent,
             schema_name="early_access_schema",
-            ensure_schema=True,
+            schema_mode=SchemaMode.ENSURE,
         )
 
         # schema_name should work without initialization

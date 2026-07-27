@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `SchemaMode` enum exported from `llm_kelt` (`ENSURE` / `VERIFY` / `SKIP`); `SKIP`
+  lets read-only consumers construct a `Client` without pulling `pgvector`/`numpy`
 - `EmbeddingAdapter.get_embeddings(fact_ids, model)` for batch embedding retrieval in a
   single query (eliminates N+1 query patterns); plumbed through `StoreClient.get_many()`
   and all storage formats with format-specific dequantization
@@ -17,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `context=` kwarg on the atomic write methods (`assertions.add`, `solutions.record`,
   `predictions.record`, `directives.record`), the embedding adapters, `embed_missing_facts`,
   and (as `embedder_context=`) `ContextQuery.ask`; forwarded to `EmbeddingClient` callbacks
+
+### Changed
+- **Breaking:** `Client`, `ClientFactory`, and `ScopedClient` take `schema_mode: SchemaMode`
+  in place of `ensure_schema: bool`. `True` → `SchemaMode.ENSURE`; `False` → `SchemaMode.VERIFY`.
 
 ### Fixed
 - Embedding tables now bind to the configured Postgres schema via ORM `__table_args__`,
