@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from appinfra.log import Logger
 
-from .core.schema import SchemaManager
+from .core.schema import SchemaManager, SchemaMode
 from .memory import atomic
 
 if TYPE_CHECKING:
@@ -21,7 +21,7 @@ class ScopedClient:
     Client operations scoped to a specific PostgreSQL schema.
 
     Provides lazy initialization: the schema and tables are created
-    on first use if ensure_schema was True at construction.
+    on first use when schema_mode is SchemaMode.ENSURE.
 
     Usage:
         # Get scoped client from parent
@@ -36,7 +36,7 @@ class ScopedClient:
         lg: Logger,
         parent: Client,
         schema_name: str,
-        ensure_schema: bool,
+        schema_mode: SchemaMode,
     ) -> None:
         """
         Initialize scoped client.
@@ -45,12 +45,13 @@ class ScopedClient:
             lg: Logger instance
             parent: Parent Client for shared resources (embedder, etc.)
             schema_name: PostgreSQL schema name for this scope
-            ensure_schema: If True, create schema + tables on first use
+            schema_mode: Inherited from parent. ENSURE creates schema + tables
+                on first use; VERIFY/SKIP assume the schema exists.
         """
         self._lg = lg
         self._parent = parent
         self._schema_name = schema_name
-        self._ensure_schema = ensure_schema
+        self._schema_mode = schema_mode
 
         # Lazy-initialized
         self._scoped_db: ScopedDatabase | None = None
@@ -62,7 +63,7 @@ class ScopedClient:
         """Perform actual initialization (called once, inside lock)."""
         self._scoped_db = self._parent._db.scoped(self._schema_name)
 
-        if self._ensure_schema:
+        if self._schema_mode is SchemaMode.ENSURE:
             self._scoped_db.ensure_schema()
             manager = SchemaManager(self._lg, self._scoped_db.engine, schema_name=self._schema_name)
             manager.ensure_schema()

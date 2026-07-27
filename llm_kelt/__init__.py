@@ -61,7 +61,7 @@ from .core.errors import (
     SchemaVersionError,
     ValidationError,
 )
-from .core.schema import SchemaState, SchemaStatus
+from .core.schema import SchemaMode, SchemaState, SchemaStatus
 from .embedding import Config as EmbeddingConfig
 from .embedding import QuantizationFormat
 from .embedding import StoreClient as EmbeddingStoreClient
@@ -87,4 +87,5 @@ __all__ = [
     "ensure_schema",
     "SchemaStatus",
     "SchemaState",
+    "SchemaMode",
 ]

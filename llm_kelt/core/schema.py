@@ -50,6 +50,27 @@ class SchemaState(Enum):
     TOO_NEW = "too_new"  # Schema ahead, cannot downgrade
 
 
+class SchemaMode(Enum):
+    """How Client should treat the database schema at construction time.
+
+    ENSURE  — run migrations, creating or upgrading the schema as needed.
+              Requires write access to the database.
+    VERIFY  — read-only check that the schema matches head; raise
+              SchemaVersionError otherwise. Still exec_modules the migration
+              files (transitively imports pgvector).
+    SKIP    — do not touch alembic. No head lookup, no version check, no
+              migration-file import. Caller accepts responsibility for the
+              schema being usable; a stale schema surfaces as a query-time
+              error rather than a construction-time SchemaVersionError.
+              Intended for lightweight read-only consumers that only issue
+              SELECTs and do not want the pgvector import chain pulled in.
+    """
+
+    ENSURE = "ensure"
+    VERIFY = "verify"
+    SKIP = "skip"
+
+
 @dataclass
 class SchemaStatus:
     """Current schema status information."""

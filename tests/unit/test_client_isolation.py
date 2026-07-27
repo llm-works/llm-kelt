@@ -31,7 +31,7 @@ class TestClientIsolation:
         from unittest.mock import patch
 
         # Mock the schema verification
-        with patch.object(Client, "_verify_schema"):
+        with patch.object(Client, "_apply_schema_mode"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
                     context = ClientContext(context_key="a" * 32, schema_name=None)
@@ -54,7 +54,7 @@ class TestClientIsolation:
         """Test overriding just schema with with_isolation()."""
         from unittest.mock import patch
 
-        with patch.object(Client, "_verify_schema"):
+        with patch.object(Client, "_apply_schema_mode"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
                     new_client = kelt_client.with_isolation(schema_name="public")
@@ -67,7 +67,7 @@ class TestClientIsolation:
         """Test overriding just context_key with with_isolation()."""
         from unittest.mock import patch
 
-        with patch.object(Client, "_verify_schema"):
+        with patch.object(Client, "_apply_schema_mode"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
                     new_client = kelt_client.with_isolation(context_key="b" * 32)
@@ -80,7 +80,7 @@ class TestClientIsolation:
         """Test overriding both fields with with_isolation()."""
         from unittest.mock import patch
 
-        with patch.object(Client, "_verify_schema"):
+        with patch.object(Client, "_apply_schema_mode"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
                     new_client = kelt_client.with_isolation(
@@ -95,7 +95,7 @@ class TestClientIsolation:
         """Test that with_isolation() preserves other client parameters."""
         from unittest.mock import patch
 
-        with patch.object(Client, "_verify_schema"):
+        with patch.object(Client, "_apply_schema_mode"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
                     new_client = kelt_client.with_isolation(schema_name="public")
@@ -107,7 +107,7 @@ class TestClientIsolation:
         """Test that with_isolation() with no args doesn't change context."""
         from unittest.mock import patch
 
-        with patch.object(Client, "_verify_schema"):
+        with patch.object(Client, "_apply_schema_mode"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
                     new_client = kelt_client.with_isolation()
@@ -124,7 +124,7 @@ class TestClientIsolation:
         mock_database.schema = "customer_acme"
 
         # Create client with both fields set
-        with patch.object(Client, "_verify_schema"):
+        with patch.object(Client, "_apply_schema_mode"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
                     context = ClientContext(context_key="a" * 32, schema_name="customer_acme")
@@ -135,7 +135,7 @@ class TestClientIsolation:
                     )
 
         # Clear context_key to None, keep schema_name
-        with patch.object(Client, "_verify_schema"):
+        with patch.object(Client, "_apply_schema_mode"):
             with patch.object(Client, "_setup_stores"):
                 with patch.object(Client, "_setup_query_interface"):
                     with patch.object(Client, "_ensure_schema_config"):

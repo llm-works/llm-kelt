@@ -11,7 +11,7 @@ from llm_infer.client import ChatClient, EmbeddingClient
 from .core.content import ContentStore
 from .core.database import Database
 from .core.errors import SchemaVersionError
-from .core.schema import SchemaManager, SchemaState, SchemaStatus
+from .core.schema import SchemaManager, SchemaMode, SchemaState, SchemaStatus
 from .embedding import Config as EmbeddingConfig
 from .embedding import Factory as EmbeddingFactory
 from .embedding import StoreClient as EmbeddingStoreClient
@@ -87,7 +87,7 @@ class Client:
         llm_client: ChatClient | None = None,
         kelt_config: DotDict | None = None,
         training_config: DotDict | None = None,
-        ensure_schema: bool = True,
+        schema_mode: SchemaMode = SchemaMode.ENSURE,
         embeddings: EmbeddingStoreClient | None = None,
         embedding_dimensions: int | None = None,
     ) -> None:
@@ -97,13 +97,19 @@ class Client:
         Args:
             database: Database instance
             context: ClientContext for data partitioning (any string format)
-            lg: Optional logger instance
+            lg: Logger instance
             embedder: Optional EmbeddingClient for generating embeddings via HTTP.
             llm_client: Optional LLM client for context-aware queries
             kelt_config: Optional kelt settings (config.kelt section)
             training_config: Optional training settings (config.training section)
-            ensure_schema: If True (default), auto-migrate schema on init
-            embeddings: Optional EmbeddingStoreClient. If None, creates default (F16, 384 dims).
+            schema_mode: How to handle the database schema at construction.
+                Defaults to SchemaMode.ENSURE. Use SchemaMode.SKIP for
+                lightweight read-only consumers that must not pull the
+                pgvector/numpy import chain (alembic's ScriptDirectory walks
+                the migrations directory, whose files import pgvector).
+            embeddings: Optional EmbeddingStoreClient. If neither embeddings
+                nor embedder is provided, no default store is materialised
+                (avoids the pgvector.HALFVEC import for read-only consumers).
             embedding_dimensions: Optional output dimensions for embeddings. None uses model default.
         """
         self._db = database
@@ -113,22 +119,34 @@ class Client:
         self._llm_client = llm_client
         self._kelt_config = kelt_config
         self._training_config = training_config
-        self._ensure_schema = ensure_schema
+        self._schema_mode = schema_mode
         self._embeddings = embeddings
         self._embedding_dimensions = embedding_dimensions
 
-        self._ensure_schema_config(ensure=ensure_schema)
-        self._verify_schema(ensure=ensure_schema)
+        self._ensure_schema_config(ensure=schema_mode is SchemaMode.ENSURE)
+        self._apply_schema_mode(schema_mode)
         self._setup_stores()
         self._setup_query_interface()
 
     def _setup_embedding_factory(self) -> None:
-        """Initialize embedding factory for dynamic dimension routing."""
+        """Initialize embedding factory for dynamic dimension routing.
+
+        When the caller has provided neither an embedder nor an existing
+        embedding store, the factory (and the default F16 store it would
+        build) is left unset. This defers the pgvector/numpy import chain
+        so lightweight read-only consumers can construct a Client without
+        pulling numpy into their runtime.
+        """
         from .embedding import QuantizationFormat
 
-        self._embedding_factory = EmbeddingFactory()
         self._embedding_format = QuantizationFormat.F16
         self._embedding_schema = self._db.schema or self._context.schema_name
+
+        if self._embeddings is None and self._embedder is None:
+            self._embedding_factory = None
+            return
+
+        self._embedding_factory = EmbeddingFactory()
         if self._embeddings is None:
             config = EmbeddingConfig(
                 context_key=self._context.context_key or "_default",
@@ -247,7 +265,7 @@ class Client:
             llm_client=self._llm_client,
             kelt_config=self._kelt_config,
             training_config=self._training_config,
-            ensure_schema=False,  # Don't re-run schema checks
+            schema_mode=SchemaMode.VERIFY,  # Parent already applied migrations
             embeddings=self._embeddings,
             embedding_dimensions=self._embedding_dimensions,
         )
@@ -257,8 +275,8 @@ class Client:
         Get a client scoped to a specific schema.
 
         All operations on the returned client use the specified schema.
-        If ensure_schema was True at client construction, the schema and
-        tables are created lazily on first use.
+        If schema_mode was SchemaMode.ENSURE at client construction, the
+        schema and tables are created lazily on first use.
 
         This is the preferred way to perform multi-schema operations from
         a single Client instance. Unlike with_isolation(), this does not
@@ -273,7 +291,7 @@ class Client:
 
         Example:
             # Schema-agnostic client
-            client = KeltClient(database=db, context_key="my-agent", ensure_schema=True)
+            client = KeltClient(database=db, context_key="my-agent")
 
             # Schema specified at operation time
             client.with_schema("hn_exp").atomic.solutions.record(...)
@@ -285,7 +303,7 @@ class Client:
             lg=self._lg,
             parent=self,
             schema_name=schema_name,
-            ensure_schema=self._ensure_schema,
+            schema_mode=self._schema_mode,
         )
 
     @property
@@ -419,8 +437,19 @@ class Client:
 
             # Delete when entity is removed
             kelt.embeddings.delete("myapp.query", "q123")
+
+        Raises:
+            RuntimeError: If neither an ``embedder`` nor an existing
+                ``embeddings`` store was supplied at construction (the
+                default store is only materialised when embeddings will
+                actually be used, to keep the pgvector import off the
+                read-only construction path).
         """
-        assert self._embeddings is not None  # Always set in _setup_stores
+        if self._embeddings is None:
+            raise RuntimeError(
+                "Embeddings not configured: construct Client with an embedder "
+                "or an EmbeddingStoreClient to enable this property."
+            )
         return self._embeddings
 
     @property
@@ -485,17 +514,23 @@ class Client:
                 extra={"schema": context_schema},
             )
 
-    def _verify_schema(self, *, ensure: bool) -> None:
-        """Verify database schema is current, optionally auto-migrating.
+    def _apply_schema_mode(self, mode: SchemaMode) -> None:
+        """Handle the schema at construction time per the requested mode.
 
-        Args:
-            ensure: If True, create database and run migrations automatically.
-                    If False, only verify — raise SchemaVersionError if not current.
+        ENSURE runs migrations. VERIFY reads the head revision and compares
+        with the DB (still exec_modules the migration files, pulling
+        pgvector transitively). SKIP does not touch alembic at all, so no
+        pgvector/numpy import is triggered — the caller has accepted that
+        a stale schema will surface as a query-time error.
         """
-        if ensure:
+        if mode is SchemaMode.SKIP:
+            return
+
+        if mode is SchemaMode.ENSURE:
             self._db.ensure_schema(self._context.schema_name)
             return
 
+        # VERIFY
         schema_name = self._context.schema_name or self._db.schema
         manager = SchemaManager(self._lg, self._db.engine, schema_name=schema_name)
         status = manager.get_status()
@@ -503,7 +538,7 @@ class Client:
             raise SchemaVersionError(
                 f"Schema is not current (state={status.state.value}, "
                 f"current={status.current_version}, head={status.head_version}). "
-                "Use ensure_schema=True to auto-migrate."
+                "Use schema_mode=SchemaMode.ENSURE to auto-migrate."
             )
 
     def get_schema_status(self) -> SchemaStatus:
