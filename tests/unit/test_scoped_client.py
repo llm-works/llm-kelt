@@ -148,8 +148,10 @@ class TestScopedClientLazyInit:
         scoped_db.ensure_schema.assert_called_once()
         mock_manager.ensure_schema.assert_called_once()
 
-    def test_schema_not_created_when_mode_not_ensure(self, mock_logger, mock_parent):
-        """Test that schema is not created when schema_mode is VERIFY or SKIP."""
+    def test_schema_verified_when_mode_verify(self, mock_logger, mock_parent):
+        """Test that schema is verified (not created) when schema_mode is VERIFY."""
+        from llm_kelt.core.schema import SchemaState
+
         scoped = ScopedClient(
             lg=mock_logger,
             parent=mock_parent,
@@ -158,9 +160,33 @@ class TestScopedClientLazyInit:
         )
 
         with patch("llm_kelt.scoped_client.SchemaManager") as mock_schema_manager_cls:
+            mock_manager = Mock()
+            mock_status = Mock()
+            mock_status.state = SchemaState.CURRENT
+            mock_manager.get_status.return_value = mock_status
+            mock_schema_manager_cls.return_value = mock_manager
+
             _ = scoped.atomic
 
-        # Verify schema creation was NOT called
+        # Verify schema was checked but not created
+        scoped_db = mock_parent._db.scoped.return_value
+        scoped_db.ensure_schema.assert_not_called()
+        mock_manager.get_status.assert_called_once()
+        mock_manager.ensure_schema.assert_not_called()
+
+    def test_schema_skipped_when_mode_skip(self, mock_logger, mock_parent):
+        """Test that schema is not checked or created when schema_mode is SKIP."""
+        scoped = ScopedClient(
+            lg=mock_logger,
+            parent=mock_parent,
+            schema_name="my_schema",
+            schema_mode=SchemaMode.SKIP,
+        )
+
+        with patch("llm_kelt.scoped_client.SchemaManager") as mock_schema_manager_cls:
+            _ = scoped.atomic
+
+        # Verify schema was not touched at all
         scoped_db = mock_parent._db.scoped.return_value
         scoped_db.ensure_schema.assert_not_called()
         mock_schema_manager_cls.assert_not_called()

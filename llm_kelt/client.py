@@ -302,10 +302,7 @@ class Client:
             ScopedClient bound to the schema
 
         Example:
-            # Schema-agnostic client
-            client = KeltClient(database=db, context_key="my-agent")
-
-            # Schema specified at operation time
+            client = Client(lg, database=db, context=ClientContext(context_key="my-agent"))
             client.with_schema("hn_exp").atomic.solutions.record(...)
             client.with_schema("playground").atomic.facts.add(...)
         """

@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 
 from appinfra.log import Logger
 
-from .core.schema import SchemaManager, SchemaMode
+from .core.errors import SchemaVersionError
+from .core.schema import SchemaManager, SchemaMode, SchemaState
 from .memory import atomic
 
 if TYPE_CHECKING:
@@ -67,6 +68,14 @@ class ScopedClient:
             self._scoped_db.ensure_schema()
             manager = SchemaManager(self._lg, self._scoped_db.engine, schema_name=self._schema_name)
             manager.ensure_schema()
+        elif self._schema_mode is SchemaMode.VERIFY:
+            manager = SchemaManager(self._lg, self._scoped_db.engine, schema_name=self._schema_name)
+            status = manager.get_status()
+            if status.state != SchemaState.CURRENT:
+                raise SchemaVersionError(
+                    f"Scoped schema '{self._schema_name}' is not current "
+                    f"(state={status.state.value}). Use schema_mode=SchemaMode.ENSURE."
+                )
 
         self._atomic = atomic.Protocol(
             self._lg,
