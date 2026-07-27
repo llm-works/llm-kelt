@@ -554,7 +554,18 @@ class Client:
             )
 
     def get_schema_status(self) -> SchemaStatus:
-        """Get current schema status for diagnostics."""
+        """Get current schema status for diagnostics.
+
+        Raises:
+            RuntimeError: If called on a SKIP-constructed client (querying
+                schema status loads alembic, defeating SKIP's purpose).
+        """
+        if self._schema_mode is SchemaMode.SKIP:
+            raise RuntimeError(
+                "get_schema_status() is unavailable on SKIP clients — it would "
+                "import alembic/pgvector. Use VERIFY or ENSURE if you need "
+                "schema diagnostics."
+            )
         schema_name = self._context.schema_name or self._db.schema
         manager = SchemaManager(self._lg, self._db.engine, schema_name=schema_name)
         return manager.get_status()
