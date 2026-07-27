@@ -107,9 +107,10 @@ class Client:
                 lightweight read-only consumers that must not pull the
                 pgvector/numpy import chain (alembic's ScriptDirectory walks
                 the migrations directory, whose files import pgvector).
-            embeddings: Optional EmbeddingStoreClient. If neither embeddings
-                nor embedder is provided, no default store is materialised
-                (avoids the pgvector.HALFVEC import for read-only consumers).
+            embeddings: Optional EmbeddingStoreClient. For SKIP mode, if neither
+                embeddings nor embedder is provided, no default store is created
+                (avoids the pgvector import). ENSURE/VERIFY always create the
+                default store so callers can seed embeddings directly.
             embedding_dimensions: Optional output dimensions for embeddings. None uses model default.
         """
         self._db = database
@@ -131,18 +132,28 @@ class Client:
     def _setup_embedding_factory(self) -> None:
         """Initialize embedding factory for dynamic dimension routing.
 
-        When the caller has provided neither an embedder nor an existing
-        embedding store, the factory (and the default F16 store it would
-        build) is left unset. This defers the pgvector/numpy import chain
-        so lightweight read-only consumers can construct a Client without
-        pulling numpy into their runtime.
+        When schema_mode is SKIP and the caller has provided neither an
+        embedder nor an existing embedding store, the factory (and the
+        default F16 store it would build) is left unset. This defers the
+        pgvector/numpy import chain so lightweight read-only consumers can
+        construct a Client without pulling numpy into their runtime.
+
+        For ENSURE/VERIFY modes, the default store is always materialised
+        (as it was pre-4088a9f) so callers can seed embeddings directly
+        via ``atomic.embeddings.set_embedding()`` without an embedder.
         """
         from .embedding import QuantizationFormat
 
         self._embedding_format = QuantizationFormat.F16
         self._embedding_schema = self._db.schema or self._context.schema_name
 
-        if self._embeddings is None and self._embedder is None:
+        # Only skip the default store when read-only intent is explicit (SKIP).
+        # ENSURE/VERIFY callers expect the store even without an embedder.
+        if (
+            self._schema_mode is SchemaMode.SKIP
+            and self._embeddings is None
+            and self._embedder is None
+        ):
             self._embedding_factory = None
             return
 
@@ -256,7 +267,8 @@ class Client:
         # Merge with current context
         merged = replace(self.context, **overrides)
 
-        # Create new client with merged context
+        # SKIP propagates (VERIFY would pull pgvector); ENSURE/VERIFY → VERIFY.
+        child_mode = SchemaMode.SKIP if self._schema_mode is SchemaMode.SKIP else SchemaMode.VERIFY
         return Client(
             database=self._db,
             context=merged,
@@ -265,7 +277,7 @@ class Client:
             llm_client=self._llm_client,
             kelt_config=self._kelt_config,
             training_config=self._training_config,
-            schema_mode=SchemaMode.VERIFY,  # Parent already applied migrations
+            schema_mode=child_mode,
             embeddings=self._embeddings,
             embedding_dimensions=self._embedding_dimensions,
         )

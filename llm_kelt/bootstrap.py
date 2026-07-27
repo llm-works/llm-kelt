@@ -32,7 +32,7 @@ def ensure_schema(
 
     Use this when embedding kelt into a foreign database — e.g., a service that
     owns its own PG and wants kelt's tables alongside its own. The migration-setup
-    sequence is shared with `Client(ensure_schema=True)` via `Database.ensure_schema()`,
+    sequence is shared with `Client(schema_mode=SchemaMode.ENSURE)` via `Database.ensure_schema()`,
     so both entry points run the same steps. Note that constructing a `Client`
     afterward still requires passing `schema_name` via `ClientContext` if it
     differs from `pg.schema`; this helper only handles the migration side.

@@ -23,8 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Breaking:** `Client`, `ClientFactory`, and `ScopedClient` take `schema_mode: SchemaMode`
   in place of `ensure_schema: bool`. `True` → `SchemaMode.ENSURE`; `False` → `SchemaMode.VERIFY`.
-- **Breaking:** `Client` no longer creates a default embedding store when constructed with
-  neither `embedder` nor `embeddings`; `Client.embeddings` raises `RuntimeError` instead.
 
 ### Fixed
 - Embedding tables now bind to the configured Postgres schema via ORM `__table_args__`,
