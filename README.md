@@ -90,12 +90,13 @@ embedding:
   base_url: http://localhost:8001/v1
   model: text-embedding-3-small
 
-adapters:
-  lora:
-    base_path: ~/models/adapters
+kelt:
+  adapters:
+    lora:
+      base_path: ~/models/adapters
 ```
 
-`llm`, `embedding`, and `adapters` are only required for the subsystems that use them
+`llm`, `embedding`, and `kelt.adapters` are only required for the subsystems that use them
 (`ContextQuery`, RAG, and training respectively).
 
 ## Examples
