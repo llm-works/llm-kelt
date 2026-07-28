@@ -1,354 +1,220 @@
-# CLI Reference
+# CLI reference
 
-The `kelt` CLI provides commands for training management and adapter operations.
+Entry point: `kelt`. Config file: `llm-kelt.yaml` (searched in current directory, then
+`$KELT_CONFIG_FILE`). All subcommands accept `--help`.
 
-## Training Commands
+Top-level structure:
 
-All training commands are under `kelt train` (alias: `kelt t`).
+```
+kelt atomic   (a)    Atomic memory maintenance
+kelt proxy    (p)    OpenAI-compatible chat proxy
+kelt train    (t)    Training and adapter management
+kelt session  (sess) Conversation session storage
+```
 
-### Run Training
+## `kelt atomic`
 
-Execute a training manifest:
+Maintenance operations on atomic memory.
+
+### `kelt atomic vacuum`
+
+Remove embeddings whose facts have been deleted.
 
 ```bash
-# Interactive selection from pending manifests
-kelt train run
-
-# Run specific manifest
-kelt train run manifests/my-adapter.yaml
-
-# Override model
-kelt train run manifests/my-adapter.yaml --model Qwen2.5-7B-Instruct
-
-# Skip adapter registration after training
-kelt train run manifests/my-adapter.yaml --skip-register
-
-# Manual LoRA profile (auto-detected by default)
-kelt train run manifests/my-adapter.yaml --lora-profile large
-
-# List available models
-kelt train run --list-models
+kelt atomic vacuum [--dry-run]
 ```
 
-**Options:**
-| Flag | Description |
-|------|-------------|
-| `--model, -m` | Override model (path, HF ID, or configured name) |
-| `--list-models` | List available models and exit |
-| `--skip-register` | Skip adapter registration after training |
-| `--lora-profile` | Manual profile override: `small`, `medium`, `large`, `xlarge` |
+`--dry-run` reports the count without deleting.
 
----
+Note: currently raises `NotImplementedError` on quantized embedding stores. Tracked for a
+follow-up release.
 
-### List Manifests
+## `kelt proxy` (`p`)
 
-List pending or completed training manifests:
+Run an OpenAI-compatible HTTP server that injects atomic memory into every chat request.
+
+### `kelt proxy serve` (`s`)
 
 ```bash
-# List pending manifests
-kelt train list
-
-# List completed manifests
-kelt train list --completed
+kelt proxy serve [--host HOST] [--port PORT] [--context CONTEXT_KEY]
 ```
 
-**Aliases:** `kelt train l`, `kelt train ls`
+| Flag | Notes |
+|---|---|
+| `--host`, `-h` | Bind address. Defaults from config. |
+| `--port`, `-p` | Bind port. Defaults from config. |
+| `--context` | `context_key` to inject facts for. Falls back to config. |
 
----
+The proxy forwards `POST /v1/chat/completions` to the configured LLM backend after adding a
+system message containing the assertions for `--context`. Non-chat endpoints (`/v1/models`,
+etc.) pass through unmodified.
 
-### Show Manifest
+## `kelt train` (`t`)
 
-Display manifest details:
+### `kelt train run` (`r`)
+
+Run a manifest.
 
 ```bash
-# Show by path
-kelt train show manifests/my-adapter.yaml
-
-# Show by name (looks in pending/)
-kelt train show my-adapter
+kelt train run [MANIFEST] \
+  [--model M] [--list-models] \
+  [--skip-register] \
+  [--lora-profile {small,medium,large,xlarge}]
 ```
 
----
+Interactive picker if `MANIFEST` omitted — lists everything in `<registry>/pending/`.
 
-### Direct SFT Training
+| Flag | Notes |
+|---|---|
+| `--model`, `-m` | Override manifest's base model (path, HF ID, or name resolvable in `models.locations`). |
+| `--list-models` | Print resolvable model list and exit. |
+| `--skip-register` | Train and save output but don't write to the adapter registry. |
+| `--lora-profile` | Force a size profile. Otherwise auto-detected from the resolved model. |
 
-Train an SFT adapter directly from JSONL data (bypasses manifest workflow):
+Exit code non-zero on any failure (manifest not found, model resolution failure, training
+error).
+
+### `kelt train list` (`l`, `ls`)
 
 ```bash
-kelt train sft \
-  --data train.jsonl \
-  --output ./my-adapter \
-  --model Qwen2.5-7B-Instruct \
-  --epochs 3 \
-  --lr 2e-4
-
-# Resume from checkpoint
-kelt train sft --data train.jsonl --output ./my-adapter --based-on ./checkpoint
-
-# Disable quantization (full precision)
-kelt train sft --data train.jsonl --output ./my-adapter --no-quantize
+kelt train list [--completed]
 ```
 
-**Aliases:** `kelt train s`
+Lists pending manifests by default. `--completed` (`-c`) shows the completed directory
+(supports `.yaml` and gzipped `.yaml.gz`).
 
-**Options:**
-| Flag | Description |
-|------|-------------|
-| `--data, -d` | Input JSONL path (required) |
-| `--output, -o` | Output adapter directory (required) |
-| `--model, -m` | Model name or path |
-| `--epochs` | Training epochs |
-| `--lr` | Learning rate |
-| `--based-on, -b` | Resume from checkpoint path |
-| `--no-quantize` | Disable QLoRA quantization |
-
-**Data format** (JSONL):
-```json
-{"instruction": "What is 2+2?", "output": "The answer is 4."}
-{"instruction": "Say hello.", "output": "Hello!"}
-```
-
----
-
-### Direct DPO Training
-
-Train a DPO adapter directly from JSONL data:
+### `kelt train show`
 
 ```bash
-kelt train dpo \
-  --data preferences.jsonl \
-  --output ./my-dpo-adapter \
-  --model Qwen2.5-7B-Instruct \
-  --beta 0.1
-
-# Stack on existing adapter
-kelt train dpo --data prefs.jsonl --output ./stacked --based-on ./parent-adapter
+kelt train show MANIFEST
 ```
 
-**Aliases:** `kelt train d`
+`MANIFEST` is a path, a name, or a bare basename (searched in the pending directory). Prints
+adapter, method, model, epochs, LR, DPO beta, and data source.
 
-**Options:**
-| Flag | Description |
-|------|-------------|
-| `--data, -d` | Input JSONL path (required) |
-| `--output, -o` | Output adapter directory (required) |
-| `--model, -m` | Model name or path |
-| `--beta` | DPO beta parameter (default: 0.1) |
-| `--epochs` | Training epochs |
-| `--lr` | Learning rate |
-| `--based-on, -b` | Parent adapter for stacking |
-| `--no-quantize` | Disable QLoRA quantization |
+### `kelt train dpo` (`d`)
 
-**Data format** (JSONL):
-```json
-{"prompt": "Explain X", "chosen": "Clear explanation...", "rejected": "Confusing explanation..."}
-```
-
----
-
-### List Adapters
-
-List registered adapters:
+Direct DPO training without a manifest.
 
 ```bash
-# List all adapters
-kelt train adapters
-
-# Show only deployed adapters
-kelt train adapters --deployed
+kelt train dpo --data JSONL --output DIR \
+  [--model M] [--beta B] [--no-quantize] \
+  [--epochs N] [--lr LR] [--based-on PARENT]
 ```
 
-**Aliases:** `kelt train a`
+Input JSONL rows: `{"prompt": ..., "chosen": ..., "rejected": ...}`.
 
----
+### `kelt train sft` (`s`)
 
-### Deploy Adapter
-
-Deploy an adapter version to make it available for inference:
+Direct SFT training.
 
 ```bash
-# Deploy latest version
-kelt train deploy my-adapter
-
-# Deploy specific version (by version ID or md5 prefix)
-kelt train deploy my-adapter --version 20260315-120000-abc123
-
-# Deploy with md5 prefix matching
-kelt train deploy my-adapter --version abc123
-
-# Add deployment (keep existing)
-kelt train deploy my-adapter --policy add
-
-# Replace existing deployment (default)
-kelt train deploy my-adapter --policy replace
-
-# Clear all deployments for adapter
-kelt train deploy my-adapter --clear
+kelt train sft --data JSONL --output DIR \
+  [--model M] [--no-quantize] \
+  [--epochs N] [--lr LR] [--based-on RESUME]
 ```
 
-**Aliases:** `kelt train dp`
+Input JSONL rows: `{"instruction"|"prompt": ..., "output"|"response": ...}`.
 
-**Options:**
-| Flag | Description |
-|------|-------------|
-| `--version, -v` | Version ID or md5 prefix (latest if omitted) |
-| `--policy, -p` | `add` or `replace` (default: replace) |
-| `--clear, -c` | Remove all deployments for adapter |
-
----
-
-### Merge Adapter
-
-Merge a LoRA adapter into base model weights (creates a new model):
+### `kelt train adapters` (`a`)
 
 ```bash
-# Merge by adapter path
-kelt train merge ./adapters/my-adapter
-
-# Merge deployed adapter by name
-kelt train merge my-adapter
-
-# Merge by md5 hash
-kelt train merge abc123def456
-
-# Specify output path
-kelt train merge my-adapter --output ./merged-model
-
-# Override base model
-kelt train merge my-adapter --model Qwen2.5-7B-Instruct
-
-# Specify output dtype
-kelt train merge my-adapter --dtype float16
+kelt train adapters [--deployed]
 ```
 
-**Aliases:** `kelt train m`
+Lists registered adapters and whether each is currently deployed. `--deployed` (`-d`) filters
+to only deployed adapters.
 
-**Options:**
-| Flag | Description |
-|------|-------------|
-| `--model, -m` | Base model name (auto-detected from adapter if omitted) |
-| `--output, -o` | Output path (default: `<model>-<md5>`) |
-| `--dtype` | Output dtype: `bfloat16`, `float16`, `float32` (default: bfloat16) |
-| `--overwrite` | Overwrite existing output without prompting |
-
-**Use cases:**
-- VLM models where vLLM doesn't apply LoRA correctly
-- Creating standalone fine-tuned models for deployment
-- Reducing inference overhead by baking in the adapter
-
----
-
-## Session Commands
-
-All session commands are under `kelt session` (alias: `kelt s`).
-
-### List Sessions
-
-List stored conversation sessions:
+### `kelt train deploy` (`dp`)
 
 ```bash
-# List recent sessions (default: 20)
-kelt session list
-
-# Show more sessions
-kelt session list -n 50
+kelt train deploy ADAPTER [--version V] [--policy {add,replace}] [--clear]
 ```
 
-**Aliases:** `kelt session ls`
+Deploy a specific version of a registered adapter, or `--clear` to remove all deployments
+for the adapter. Version can be a full version ID or an md5 prefix (`abc123`), with unique
+prefix resolution.
 
-**Options:**
+| Flag | Notes |
+|---|---|
+| `--version`, `-v` | Version ID or md5 prefix. Latest if omitted. |
+| `--policy`, `-p` | `replace` (default) — undeploy other versions; `add` — coexist. |
+| `--clear`, `-c` | Undeploy every version of `ADAPTER`. Ignores `--version`. |
 
-| Flag | Description |
-|------|-------------|
-| `--limit, -n` | Max sessions to show (default: 20) |
+### `kelt train merge` (`m`)
 
----
-
-### Show Session
-
-Display session contents:
+Bake a LoRA adapter into base model weights, producing a full checkpoint.
 
 ```bash
-# Show session messages
-kelt session show my-session
-
-# Output as JSON
-kelt session show my-session --json
+kelt train merge ADAPTER \
+  [--model M] [--output O] \
+  [--dtype {bfloat16,float16,float32}] [--overwrite]
 ```
 
-**Options:**
+`ADAPTER` is a path, a deployed name, or an md5 prefix. `--model` (`-m`) is auto-detected
+from the adapter's `adapter_config.json` if omitted. Output defaults to `<model>-<adapter>`.
+`--dtype` defaults to `bfloat16`. `--overwrite` skips the "output exists" prompt.
 
-| Flag | Description |
-|------|-------------|
-| `--json` | Output as JSON instead of formatted text |
+## `kelt session` (`sess`)
 
----
+Manage on-disk conversation sessions written by `FileSessionStorage`. Session directory
+defaults to `~/.llm-kelt/sessions`, overridable with `--sessions-dir` on `kelt session ...`.
 
-### Delete Session
-
-Delete a stored session:
+### `kelt session list` (`ls`)
 
 ```bash
-kelt session delete my-session
+kelt session list [--limit N]
 ```
 
-**Aliases:** `kelt session rm`
+Prints session ID, message count, token count, and a preview of the first user message.
 
----
-
-### Sessions Directory
-
-By default, sessions are stored in `~/.llm-kelt/sessions/`. Override with `--sessions-dir`:
+### `kelt session show`
 
 ```bash
-kelt session --sessions-dir /path/to/sessions list
+kelt session show SESSION_ID [--json]
 ```
 
----
+Human-readable dump by default. `--json` emits the full stored session as a single JSON blob.
 
-## Proxy Server
-
-Start the context-injecting proxy server:
+### `kelt session delete` (`rm`)
 
 ```bash
-kelt proxy
+kelt session delete SESSION_ID
 ```
 
-The proxy intercepts LLM requests and injects relevant context from the kelt database.
+Deletes the session file. Idempotent — no error if the session doesn't exist.
 
----
+## Config file lookup
 
-## Configuration
+The CLI reads `llm-kelt.yaml` from (in order):
 
-The CLI reads configuration from:
+1. `$KELT_CONFIG_FILE` if set.
+2. `./etc/llm-kelt.yaml`.
+3. `./llm-kelt.yaml`.
 
-1. `etc/llm-kelt.yaml` (main config)
-2. `.env.yaml` (local overrides, gitignored)
+`--config <path>` on any subcommand overrides. Errors on missing config for subcommands that
+need it (`train`, `atomic`, `proxy`).
 
-Key configuration sections:
+## Registry path
+
+`kelt train` reads its registry from `config.kelt.adapters.lora.base_path`. Without that
+key, every `train` subcommand fails with a clear error message. Set it in
+`etc/llm-kelt.yaml`:
 
 ```yaml
-# Model locations for training
-models:
-  locations:
-    - ~/ops/models/hf
-  selection:
-    generate:
-      default: Qwen2.5-7B-Instruct
+kelt:
+  adapters:
+    lora:
+      base_path: ~/models/adapters
+```
 
-# Adapter registry path
-adapters:
-  lora:
-    base_path: ~/ops/models/adapters/peft
+The registry directory layout:
 
-# Training defaults by method
-training:
-  default_profiles:
-    sft:
-      epochs: 3
-      batch_size: 4
-      learning_rate: 0.0002
-    dpo:
-      beta: 0.1
-      epochs: 3
+```
+<base_path>/
+  pending/           manifests waiting to run
+  completed/         manifests after successful run
+  <adapter>/         one directory per registered adapter
+    versions/<md5>/  adapter weights + adapter_config.json
+    deployed         symlink to the active version(s)
 ```
