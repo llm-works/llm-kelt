@@ -16,11 +16,13 @@ from llm_kelt.conversation import (
     SummarizingCompactor,
     TieredCompactor,
     AsyncTieredCompactor,
+    ContextOverflowError,
+)
+from llm_kelt.conversation.compaction import (
     CompactionGuardError,
     max_summary_tokens,
     preserve_keywords,
     token_reduction,
-    ContextOverflowError,
 )
 from llm_kelt.conversation.storage import FileSessionStorage
 ```
@@ -162,7 +164,6 @@ from llm_infer.client import Factory as LLMFactory
 llm_client = LLMFactory(lg).from_config(config.llm.to_dict())
 
 compactor = SummarizingCompactor(
-    lg=lg,
     client=llm_client,
     guards=[
         token_reduction(min_ratio=0.5),  # summary must be ≤50% of input tokens
@@ -195,7 +196,10 @@ the tool names to shorten), then drop oldest turns if still over budget. Preserv
 message *structure* — no synthetic assistant message inserted.
 
 ```python
-compactor = TieredCompactor(trimmable_tools=["read_file", "grep", "list_dir"])
+compactor = TieredCompactor(
+    client=llm_client,
+    trimmable_tools=["read_file", "grep", "list_dir"],
+)
 conv = Conversation(lg, config=cfg, compactor=compactor)
 ```
 
