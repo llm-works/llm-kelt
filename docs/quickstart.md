@@ -4,13 +4,23 @@ Five minutes from install to a working RAG query.
 
 ## 1. Postgres
 
-The library needs Postgres 16+ with pgvector. Local docker:
+The library needs Postgres 16+ with pgvector. Three paths:
+
+**A. Cloned repo — `make pg.server.up`.** Uses the shipped `etc/pg.yaml`: pgvector:pg18 on
+port 7632, container name `kelt-pg`, database `kelt`. Works with docker or podman
+(`INFRA_CONTAINER_CMD` in `Makefile.local` selects the runtime). Stop with
+`make pg.server.down`. Recommended for local development.
+
+**B. Standalone docker.** No repo checkout required:
 
 ```bash
 docker run -d --name kelt-pg \
   -e POSTGRES_PASSWORD=kelt -e POSTGRES_DB=llm_kelt \
   -p 5432:5432 pgvector/pgvector:pg16
 ```
+
+**C. Existing Postgres.** Any Postgres 16+ with the `vector` extension installable
+(`CREATE EXTENSION vector`) works. Point the URL in step 3 at it.
 
 ## 2. Install
 
@@ -20,7 +30,9 @@ pip install llm-kelt
 
 ## 3. Config
 
-Create `etc/llm-kelt.yaml`:
+If path A: `etc/llm-kelt.yaml` and `etc/pg.yaml` are already in the repo. Skip to step 4.
+
+Otherwise create `etc/llm-kelt.yaml`:
 
 ```yaml
 dbs:
@@ -29,8 +41,12 @@ dbs:
     extensions: [vector]
 ```
 
-The `llm`, `embedding`, and `adapters` sections are added as you enable those subsystems
-(section 6 below, and the [Context & RAG](context-and-rag.md) / [Training](training.md) tutorials).
+(Adjust the URL to match your Postgres. Path B → port 5432, password `kelt`. Path C → your
+own.)
+
+The `llm`, `embedding`, and `kelt.adapters` sections are added as those subsystems are
+enabled (section 6 below, and the [Context & RAG](context-and-rag.md) /
+[Training](training.md) tutorials).
 
 ## 4. First client
 
