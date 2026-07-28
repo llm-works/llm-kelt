@@ -1,5 +1,7 @@
 # llm-kelt
 
+*Knowledge · Embedding · Learning · Training*
+
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![Type Hints](https://img.shields.io/badge/type%20hints-100%25-brightgreen.svg)
 [![Linting: Ruff](https://img.shields.io/badge/linting-ruff-yellowgreen)](https://github.com/astral-sh/ruff)

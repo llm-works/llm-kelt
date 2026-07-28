@@ -43,6 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before upgrading (`INSERT INTO schema.alembic_version_kelt (version_num) SELECT version_num
   FROM schema.alembic_version`). Auto-migration is unsafe due to possible prior collisions.
 
+### Documentation
+- Full rewrite under `docs/`: quickstart, concepts, atomic memory, context and RAG,
+  conversation, training, knowledge graph, multi-schema, CLI reference, glossary.
+  Every snippet grep-verified against the shipped API.
+- Removed `docs/spec/` (~3.7k lines of pre-1.0 design material misaligned with the
+  shipped API) and `docs/usage.md` (superseded by the split tutorials).
+- README rewritten around a minimal working example; corrected
+  `kelt.adapters.lora.base_path` YAML nesting.
+
 ## [0.3.0] - 2026-06-08
 
 ### Added
