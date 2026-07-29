@@ -42,12 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `'list' object has no attribute 'to_list'`).
 - Alembic bookkeeping moved from `alembic_version` to `alembic_version_kelt`,
   avoiding collision with neighbor libraries. **Existing installs:** stamp the
-  new table manually before upgrading; auto-migration is unsafe due to possible
-  prior collisions.
+  new table manually before upgrading with the specific Kelt revision you were
+  on — do not `SELECT` from `alembic_version`, which may hold a neighbor
+  library's revision if the table was shared. Installs coming from v0.3.x are
+  at revision `006`:
 
   ```sql
-  INSERT INTO schema.alembic_version_kelt (version_num)
-  SELECT version_num FROM schema.alembic_version;
+  INSERT INTO schema.alembic_version_kelt (version_num) VALUES ('006');
   ```
 
 ### Documentation
