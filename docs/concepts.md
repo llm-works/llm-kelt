@@ -92,7 +92,7 @@ kelt.atomic.feedback.record(signal="positive", content_id=cid, strength=0.9)
 
 ## Client hierarchy
 
-```
+```text
 ClientFactory        ← constructed once, holds the logger
   └── Client         ← constructed per (context_key, schema, config)
         ├── .atomic          → seven clients + relationships + embeddings

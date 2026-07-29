@@ -5,8 +5,7 @@ adapter, register it, deploy it to an inference server.
 
 Two paths:
 
-- **Direct** — call `train_lora(...)`, `train_dpo(...)`, or the method-specific
-  `kelt.train.{dpo,sft,prompt}.train(manifest)` from Python. Fast iteration.
+- **Direct** — call `train_lora(...)` or `train_dpo(...)` from Python. Fast iteration.
 - **Manifest** — write a YAML file describing the training run, submit it, run it with
   `kelt train run <manifest>`. Reproducible, file-based, works well from CI.
 
@@ -210,17 +209,17 @@ config overrides, deployment policy.
 ```python
 @dataclass
 class Manifest:
-    adapter: str                     # series name, e.g. "coding-v1"
+    adapter: str  # series name, e.g. "coding-v1"
     method: Literal["dpo", "sft", "prompt"]
-    data: Data                       # inline records or external path
-    version: str = "1"
-    created_at: datetime
-    source: Source | None = None
-    parent: Adapter | None = None    # continue-training from a prior adapter
-    lora: DotDict = <profile default>
-    training: DotDict = <profile default>
-    method_config: DotDict = {}      # {"beta": …} for DPO, {"num_virtual_tokens": …} for prompt
+    data: Data  # inline records or external path
     deployment: Deployment | None = None
+    version: str = "1"
+    created_at: datetime = now()  # auto-populated
+    source: Source | None = None
+    parent: Adapter | None = None  # continue-training from a prior adapter
+    lora: DotDict = {}  # profile-detected defaults
+    training: DotDict = {}  # profile-detected defaults
+    method_config: DotDict = {}  # {"beta": …} for DPO, {"num_virtual_tokens": …} for prompt
     output: RunResult | None = None  # populated after run
 ```
 

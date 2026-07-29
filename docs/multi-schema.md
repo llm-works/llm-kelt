@@ -18,11 +18,10 @@ Plus one control:
 ```python
 from llm_kelt import SchemaMode
 
-
-class SchemaMode(Enum):
-    ENSURE = "ensure"  # run migrations to head (default)
-    VERIFY = "verify"  # check schema is at head; raise SchemaVersionError otherwise
-    SKIP = "skip"  # don't touch alembic
+# SchemaMode values:
+# SchemaMode.ENSURE  — run migrations to head (default)
+# SchemaMode.VERIFY  — check schema is at head; raise SchemaVersionError otherwise
+# SchemaMode.SKIP    — don't touch alembic
 ```
 
 Pass at client construction:

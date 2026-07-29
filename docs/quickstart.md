@@ -97,7 +97,7 @@ print(system_prompt)
 
 Output:
 
-```
+```text
 You are a helpful assistant.
 
 ## About the user:

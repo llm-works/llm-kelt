@@ -2,11 +2,11 @@
 
 Getting stored facts into an LLM call. Two strategies:
 
-- **Static injection** — include every relevant fact in the system prompt on every call.
-  Zero infrastructure (no embeddings, no vector DB queries), cheap to reason about, but the
-  prompt grows with the fact set.
+- **Static injection** — include facts in the system prompt on every call (up to `max_facts`,
+  default 100). Zero infrastructure (no embeddings, no vector DB queries), cheap to reason
+  about, but the prompt grows with the fact set.
 - **RAG** — embed the facts once, embed the question at call time, include only the top-k
-  facts by cosine similarity. Constant-size prompt regardless of memory size.
+  facts by cosine similarity. Prompt size bounded by `top_k`, not memory size.
 
 Both use the same `ContextBuilder` and `ContextQuery` — RAG is an argument to `.ask()`.
 
@@ -71,7 +71,7 @@ prompt = builder.build_system_prompt("You are a helpful assistant.")
 
 Produces:
 
-```
+```text
 You are a helpful assistant.
 
 ## About the user:

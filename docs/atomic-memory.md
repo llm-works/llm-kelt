@@ -6,6 +6,8 @@ off `kelt.atomic`. Every method here writes or reads under the current `context_
 Setup used throughout this doc:
 
 ```python
+from datetime import datetime, UTC
+
 from appinfra.config import Config
 from appinfra.log import LogConfig, LoggerFactory
 from llm_kelt import ClientContext, ClientFactory

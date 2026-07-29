@@ -12,5 +12,5 @@ Start here → [Quickstart](quickstart.md).
 | [Training](training.md) | Manifest workflow, LoRA/DPO/SFT/Prompt, exports, adapter registry. |
 | [Knowledge graph](knowledge-graph.md) | Entities and relationships across a scope hierarchy. |
 | [Multi-schema](multi-schema.md) | `SchemaMode`, `with_schema()`, `with_isolation()`. |
-| [CLI reference](cli.md) | `kelt atomic|proxy|train|session`. |
+| [CLI reference](cli.md) | `kelt atomic`, `proxy`, `train`, `session`. |
 | [Glossary](glossary.md) | Project-specific terms. |

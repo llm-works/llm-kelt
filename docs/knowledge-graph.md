@@ -16,7 +16,7 @@ kg = kelt.kg  # KGStore instance
 Every KG record has a `scope_key: str`. Reads resolve *up* the hierarchy; writes always land
 in the exact scope you specified.
 
-```
+```text
 "org:acme:user:alice"
        ↓ read visibility
 "org:acme:user:alice"   ← the record
@@ -167,6 +167,8 @@ def add(
 Example:
 
 ```python
+from datetime import datetime, UTC
+
 kg.refs.add(
     entity_id=tesla.id,
     scope_key="org:acme:analyst:bob",

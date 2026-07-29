@@ -1,11 +1,11 @@
 # CLI reference
 
-Entry point: `kelt`. Config file: `llm-kelt.yaml` (searched in current directory, then
-`$KELT_CONFIG_FILE`). All subcommands accept `--help`.
+Entry point: `kelt`. Config file: `llm-kelt.yaml` (searched via `$KELT_CONFIG_FILE` first,
+then `./etc/llm-kelt.yaml`, then `./llm-kelt.yaml`). All subcommands accept `--help`.
 
 Top-level structure:
 
-```
+```text
 kelt atomic   (a)    Atomic memory maintenance
 kelt proxy    (p)    OpenAI-compatible chat proxy
 kelt train    (t)    Training and adapter management
@@ -210,7 +210,7 @@ kelt:
 
 The registry directory layout:
 
-```
+```text
 <base_path>/
   pending/           manifests waiting to run
   completed/         manifests after successful run
