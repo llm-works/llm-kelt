@@ -163,6 +163,29 @@ class StoreClient:
         self._ensure_table()
         return self._store.get(entity_type, entity_id, model)
 
+    def get_many(
+        self,
+        entity_type: str,
+        entity_ids: list[str],
+        model: str,
+    ) -> dict[str, list[float]]:
+        """Get embeddings for multiple entities in one query (dequantized to float32).
+
+        Args:
+            entity_type: Type prefix.
+            entity_ids: Entity identifiers.
+            model: Embedding model name.
+
+        Returns:
+            Mapping of entity_id to float32 embedding. IDs without a stored
+            embedding are absent from the result. Empty input returns an
+            empty dict without touching the database.
+        """
+        if not entity_ids:
+            return {}
+        self._ensure_table()
+        return self._store.get_many(entity_type, entity_ids, model)
+
     def delete(
         self,
         entity_type: str,

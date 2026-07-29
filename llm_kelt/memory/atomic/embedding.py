@@ -136,6 +136,7 @@ class EmbeddingAdapter:
         format: QuantizationFormat,
         embedder: EmbeddingClient | None = None,
         default_dimensions: int | None = None,
+        schema: str | None = None,
     ) -> None:
         """
         Initialize EmbeddingAdapter with dynamic dimension routing.
@@ -147,6 +148,9 @@ class EmbeddingAdapter:
             format: Quantization format to use (F32, F16, I8, I4).
             embedder: Optional EmbeddingClient for generating embeddings via HTTP.
             default_dimensions: Default dimensions for embed_fact when not specified.
+            schema: Postgres schema for the embedding tables. When set, every
+                dimension-specific store is created with a schema-qualified ORM
+                model so reads and writes never fall back through search_path.
         """
         self._session_factory = session_factory
         self._context_key = context_key
@@ -154,6 +158,7 @@ class EmbeddingAdapter:
         self._format = format
         self._embedder = embedder
         self._default_dimensions = default_dimensions
+        self._schema = schema
         self._stores: dict[int, EmbeddingStoreClient] = {}
         self._stores_lock = threading.Lock()
 
@@ -167,6 +172,7 @@ class EmbeddingAdapter:
                     context_key=self._context_key or "_default",
                     format=self._format,
                     dimensions=dimensions,
+                    schema=self._schema,
                 )
                 self._stores[dimensions] = self._factory.create(self._session_factory, config)
             return self._stores[dimensions]
@@ -177,6 +183,8 @@ class EmbeddingAdapter:
         model: str | None = None,
         dimensions: int | None = None,
         session: Any | None = None,
+        *,
+        context: dict[str, Any] | None = None,
     ) -> None:
         """
         Generate and store embedding for a fact.
@@ -187,6 +195,9 @@ class EmbeddingAdapter:
             dimensions: Output dimensions. If None, uses adapter default or embedder config.
             session: Optional session to use. If None, creates new session and commits.
                      If provided, uses existing session without committing (caller controls).
+            context: Caller-owned metadata forwarded to the embedder for
+                cost tracking / tracing. Passed straight to
+                ``EmbeddingClient.embed``; see llm_infer.client.EmbeddingCallbacks.
 
         Raises:
             RuntimeError: If no embedder is configured.
@@ -200,7 +211,7 @@ class EmbeddingAdapter:
                 f"embedder model {self._embedder.model!r} does not match requested {model!r}"
             )
         dims = dimensions if dimensions is not None else self._default_dimensions
-        result = self._embedder.embed(fact.content, dimensions=dims)
+        result = self._embedder.embed(fact.content, dimensions=dims, context=context)
         store = self._get_store(len(result.embedding))
         store.store(
             entity_type=self.ENTITY_TYPE,
@@ -257,6 +268,37 @@ class EmbeddingAdapter:
             raise ValueError("dimensions required when no default_dimensions configured")
         store = self._get_store(dims)
         return store.get(self.ENTITY_TYPE, str(fact_id), model)
+
+    def get_embeddings(
+        self,
+        fact_ids: list[int],
+        model: str,
+        dimensions: int | None = None,
+    ) -> dict[int, list[float]]:
+        """
+        Get embeddings for multiple facts in a single query.
+
+        Args:
+            fact_ids: The fact IDs.
+            model: Embedding model name.
+            dimensions: Embedding dimensions (determines which table to query).
+                If None, uses default_dimensions.
+
+        Returns:
+            Mapping of fact_id to embedding vector. Facts without a stored
+            embedding for the model are absent from the result.
+
+        Raises:
+            ValueError: If dimensions is None and no default_dimensions configured.
+        """
+        dims = dimensions if dimensions is not None else self._default_dimensions
+        if dims is None:
+            raise ValueError("dimensions required when no default_dimensions configured")
+        if not fact_ids:
+            return {}
+        store = self._get_store(dims)
+        found = store.get_many(self.ENTITY_TYPE, [str(fid) for fid in fact_ids], model)
+        return {int(entity_id): embedding for entity_id, embedding in found.items()}
 
     def _build_entity_id_subquery(
         self,

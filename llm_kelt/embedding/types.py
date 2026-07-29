@@ -79,24 +79,40 @@ class Config:
         prefix: Optional table prefix for custom tables. Results in
             embeddings_{prefix}_{dimensions}_{format}. If None, uses
             embeddings_{dimensions}_{format}.
+        schema: Optional Postgres schema for the embedding table. When set,
+            the ORM model is bound to this schema so every read, write, and
+            CREATE names it explicitly instead of falling back through
+            search_path. Leave None only when the caller is intentionally
+            operating on the search_path's default schema.
     """
 
     context_key: str
     format: QuantizationFormat = QuantizationFormat.F16
     dimensions: int = 384
     prefix: str | None = None
+    schema: str | None = None
 
     _PREFIX_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_]+$")
+    _SCHEMA_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"^[a-zA-Z_][A-Za-z0-9_]*$")
 
     def __post_init__(self) -> None:
         if self.dimensions <= 0:
             raise ValueError(f"dimensions must be positive, got {self.dimensions}")
         if self.prefix is not None and not self._PREFIX_PATTERN.match(self.prefix):
             raise ValueError(f"prefix must be alphanumeric/underscore, got {self.prefix!r}")
+        if self.schema is not None and not self._SCHEMA_PATTERN.match(self.schema):
+            raise ValueError(f"schema must be a valid Postgres identifier, got {self.schema!r}")
 
     @property
     def table_name(self) -> str:
-        """Get table name for this config."""
+        """Get unqualified table name for this config."""
         if self.prefix:
             return f"embeddings_{self.prefix}_{self.dimensions}_{self.format.value}"
         return f"embeddings_{self.dimensions}_{self.format.value}"
+
+    @property
+    def qualified_table_name(self) -> str:
+        """Schema-qualified name when schema is set; otherwise bare table name."""
+        if self.schema:
+            return f"{self.schema}.{self.table_name}"
+        return self.table_name

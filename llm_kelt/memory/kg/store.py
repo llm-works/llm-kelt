@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from appinfra.db.utils import detach, detach_all
+from sqlalchemy import delete as sql_delete
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -21,6 +22,7 @@ from .models import Entity, EntityAlias, EntityRef, EntityRelationship, FactEnti
 if TYPE_CHECKING:
     from appinfra.log import Logger
     from llm_infer.client import EmbeddingClient
+    from sqlalchemy.engine import CursorResult
 
     from .embedding import EntityEmbeddingAdapter
 
@@ -197,6 +199,36 @@ class EntityStore:
                 return False
             s.delete(entity)
             return True
+
+    def delete_in_scope(
+        self,
+        scope_key: str,
+        *,
+        entity_type: str | None = None,
+        sa_session: SASession | None = None,
+    ) -> int:
+        """Delete entities whose scope_key matches exactly, in a single statement.
+
+        Deliberately unlike in_scope reads: no ancestor-scope resolution, so
+        entities in parent scopes (including global) are never touched.
+        Related data is removed via FK cascades, same as delete().
+
+        Args:
+            scope_key: Exact scope to delete from.
+            entity_type: Optional entity type filter. None deletes all types.
+            sa_session: Optional session for transaction participation.
+
+        Returns:
+            Number of entities deleted (excluding cascaded dependents).
+        """
+        with self._scope(sa_session) as s:
+            stmt = sql_delete(Entity).where(Entity.scope_key == scope_key)
+            if entity_type is not None:
+                stmt = stmt.where(Entity.entity_type == entity_type)
+            result = cast(
+                "CursorResult[Any]", s.execute(stmt.execution_options(synchronize_session=False))
+            )
+            return int(result.rowcount)
 
     def resolve(
         self,
@@ -785,12 +817,14 @@ class KGStore:
         embedding_factory: EmbeddingFactory | None = None,
         embedding_format: QuantizationFormat | None = None,
         embedding_dimensions: int | None = None,
+        embedding_schema: str | None = None,
     ) -> None:
         self._lg = lg
         self._session_factory = session_factory
         self._embedder = embedder
         self._embedding_factory = embedding_factory
         self._embedding_format = embedding_format or QuantizationFormat.F16
+        self._embedding_schema = embedding_schema
 
         self.entities = EntityStore(lg, session_factory)
         self.refs = EntityRefStore(lg, session_factory)
@@ -819,6 +853,7 @@ class KGStore:
             format=self._embedding_format,
             embedder=embedder,
             default_dimensions=dimensions,
+            schema=self._embedding_schema,
         )
 
     @property

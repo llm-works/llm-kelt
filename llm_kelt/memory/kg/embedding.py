@@ -56,6 +56,7 @@ class EntityEmbeddingAdapter:
         format: QuantizationFormat,
         embedder: EmbeddingClient | None = None,
         default_dimensions: int | None = None,
+        schema: str | None = None,
     ) -> None:
         """Initialize EntityEmbeddingAdapter with dynamic dimension routing.
 
@@ -65,12 +66,16 @@ class EntityEmbeddingAdapter:
             format: Quantization format to use (F32, F16, I8, I4).
             embedder: Optional EmbeddingClient for generating embeddings via HTTP.
             default_dimensions: Default dimensions for operations when not specified.
+            schema: Postgres schema for the embedding tables. Forwarded to each
+                dimension-specific store so ORM operations never rely on
+                search_path resolution.
         """
         self._session_factory = session_factory
         self._factory = factory
         self._format = format
         self._embedder = embedder
         self._default_dimensions = default_dimensions
+        self._schema = schema
         self._stores: dict[int, EmbeddingStoreClient] = {}
         self._stores_lock = threading.Lock()
 
@@ -84,6 +89,7 @@ class EntityEmbeddingAdapter:
                     context_key="_kg",
                     format=self._format,
                     dimensions=dimensions,
+                    schema=self._schema,
                 )
                 self._stores[dimensions] = self._factory.create(self._session_factory, config)
             return self._stores[dimensions]
@@ -96,7 +102,12 @@ class EntityEmbeddingAdapter:
         return " ".join(parts)
 
     def embed_entity(
-        self, entity: Entity, model: str | None = None, session: Any | None = None
+        self,
+        entity: Entity,
+        model: str | None = None,
+        session: Any | None = None,
+        *,
+        context: dict[str, Any] | None = None,
     ) -> None:
         """Generate and store embedding for an entity.
 
@@ -106,6 +117,9 @@ class EntityEmbeddingAdapter:
             entity: The entity to embed.
             model: Embedding model name. If None, uses embedder's default model.
             session: Optional session to use.
+            context: Caller-owned metadata forwarded to the embedder for
+                cost tracking / tracing. Passed straight to
+                ``EmbeddingClient.embed``.
 
         Raises:
             RuntimeError: If no embedder is configured.
@@ -120,7 +134,7 @@ class EntityEmbeddingAdapter:
             )
 
         text = self._entity_text(entity)
-        result = self._embedder.embed(text)
+        result = self._embedder.embed(text, context=context)
         store = self._get_store(len(result.embedding))
         store.store(
             entity_type=self.ENTITY_TYPE,
@@ -263,11 +277,13 @@ class EntityEmbeddingAdapter:
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:limit]
 
-    def embed_text(self, text: str) -> list[float]:
+    def embed_text(self, text: str, *, context: dict[str, Any] | None = None) -> list[float]:
         """Generate embedding for arbitrary text (for queries).
 
         Args:
             text: Text to embed.
+            context: Caller-owned metadata forwarded to the embedder for
+                cost tracking / tracing.
 
         Returns:
             Embedding vector.
@@ -277,4 +293,4 @@ class EntityEmbeddingAdapter:
         """
         if not self._embedder:
             raise RuntimeError("No embedder configured")
-        return self._embedder.embed(text).embedding
+        return self._embedder.embed(text, context=context).embedding

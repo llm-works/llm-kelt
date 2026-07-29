@@ -1,7 +1,7 @@
 """Assertions client for simple facts about the user."""
 
 from datetime import UTC, datetime
-from typing import cast
+from typing import Any, cast
 
 from appinfra.db.utils import detach, detach_all
 from sqlalchemy import func, select
@@ -50,6 +50,8 @@ class AssertionsClient(FactClient[None]):
         category: str | None = None,
         source: str = "user",
         confidence: float = 1.0,
+        *,
+        context: dict[str, Any] | None = None,
     ) -> int:
         """
         Add an assertion (simple fact).
@@ -59,6 +61,9 @@ class AssertionsClient(FactClient[None]):
             category: Optional category (preferences, background, rules, etc.).
             source: Source of the assertion (user, inferred, conversation, system).
             confidence: Confidence level 0.0-1.0.
+            context: Caller-owned metadata forwarded to the embedder for cost
+                tracking / tracing on the auto-embed path. See
+                ``llm_infer.client.EmbeddingCallbacks``.
 
         Returns:
             Created fact ID.
@@ -88,7 +93,7 @@ class AssertionsClient(FactClient[None]):
             session.flush()
 
             # Auto-embed if embedder configured
-            self._auto_embed_fact(fact, session)
+            self._auto_embed_fact(fact, session, context=context)
 
             return fact.id
 

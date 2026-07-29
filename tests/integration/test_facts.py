@@ -327,6 +327,57 @@ class TestAssertionsEmbeddings:
         without_c = kelt_client.atomic.embeddings.list_without_embeddings("model-c", 3)
         assert any(f.id == fact_id for f in without_c)
 
+    def test_get_embeddings(self, kelt_client, clean_tables):
+        """Test batch retrieving embeddings for multiple facts."""
+        vectors = {
+            kelt_client.atomic.assertions.add("First assertion"): [0.1, 0.2, 0.3],
+            kelt_client.atomic.assertions.add("Second assertion"): [0.4, 0.5, 0.6],
+            kelt_client.atomic.assertions.add("Third assertion"): [0.7, 0.8, 0.9],
+        }
+        for fact_id, embedding in vectors.items():
+            kelt_client.atomic.embeddings.set_embedding(fact_id, embedding, "test-model")
+
+        result = kelt_client.atomic.embeddings.get_embeddings(
+            list(vectors), "test-model", dimensions=3
+        )
+
+        assert set(result) == set(vectors)
+        for fact_id, embedding in vectors.items():
+            assert result[fact_id] == pytest.approx(embedding, abs=1e-2)
+
+    def test_get_embeddings_partial_results(self, kelt_client, clean_tables):
+        """Test get_embeddings omits facts without a stored embedding."""
+        with_emb = kelt_client.atomic.assertions.add("Has embedding")
+        without_emb = kelt_client.atomic.assertions.add("No embedding")
+        missing_id = 999999
+
+        kelt_client.atomic.embeddings.set_embedding(with_emb, [0.1, 0.2, 0.3], "test-model")
+
+        result = kelt_client.atomic.embeddings.get_embeddings(
+            [with_emb, without_emb, missing_id], "test-model", dimensions=3
+        )
+
+        assert set(result) == {with_emb}
+
+    def test_get_embeddings_respects_model(self, kelt_client, clean_tables):
+        """Test get_embeddings only returns embeddings for the requested model."""
+        fact_id = kelt_client.atomic.assertions.add("Model-scoped assertion")
+        kelt_client.atomic.embeddings.set_embedding(fact_id, [0.1, 0.2, 0.3], "model-a")
+
+        result = kelt_client.atomic.embeddings.get_embeddings([fact_id], "model-b", dimensions=3)
+
+        assert result == {}
+
+    def test_get_embeddings_empty_input(self, kelt_client, clean_tables):
+        """Test get_embeddings with empty list returns empty dict."""
+        result = kelt_client.atomic.embeddings.get_embeddings([], "test-model", dimensions=3)
+        assert result == {}
+
+    def test_get_embeddings_requires_dimensions(self, kelt_client, clean_tables):
+        """Test get_embeddings raises without dimensions or default_dimensions."""
+        with pytest.raises(ValueError, match="dimensions required"):
+            kelt_client.atomic.embeddings.get_embeddings([1], "test-model")
+
     def test_list_without_embeddings(self, kelt_client, clean_tables):
         """Test listing assertions without embeddings for a model."""
         fact1_id = kelt_client.atomic.assertions.add("Assertion with embedding")
