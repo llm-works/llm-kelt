@@ -7,48 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-28
+
 ### Added
 - `SchemaMode` enum exported from `llm_kelt` (`ENSURE` / `VERIFY` / `SKIP`); `SKIP`
-  lets read-only consumers construct a `Client` without pulling `pgvector`/`numpy`
-- `EmbeddingAdapter.get_embeddings(fact_ids, model)` for batch embedding retrieval in a
-  single query (eliminates N+1 query patterns); plumbed through `StoreClient.get_many()`
-  and all storage formats with format-specific dequantization
-- `EntityStore.delete_in_scope(scope_key, entity_type=None)` for bulk entity deletion in a
-  single statement; matches scope_key exactly (no ancestor-scope resolution, unlike
-  `in_scope` reads) and removes related data via FK cascades
-- `context=` kwarg on the atomic write methods (`assertions.add`, `solutions.record`,
-  `predictions.record`, `directives.record`), the embedding adapters, `embed_missing_facts`,
-  and (as `embedder_context=`) `ContextQuery.ask`; forwarded to `EmbeddingClient` callbacks
+  lets read-only consumers construct a `Client` without pulling `pgvector`/`numpy`.
+- `EmbeddingAdapter.get_embeddings(fact_ids, model)` for batch embedding retrieval
+  in a single query (eliminates N+1 patterns).
+- `EntityStore.delete_in_scope(scope_key, entity_type=None)` for bulk entity
+  deletion in a single statement; matches `scope_key` exactly and cascades to
+  related data via FKs.
+- `context=` kwarg on atomic write methods (`assertions.add`, `solutions.record`,
+  `predictions.record`, `directives.record`), embedding adapters,
+  `embed_missing_facts`, and (as `embedder_context=`) `ContextQuery.ask`, for
+  embedder cost/usage tracking.
 
 ### Changed
-- **Breaking:** `Client`, `ClientFactory`, and `ScopedClient` take `schema_mode: SchemaMode`
-  in place of `ensure_schema: bool`. `True` → `SchemaMode.ENSURE`; `False` → `SchemaMode.VERIFY`.
+- **Breaking:** `Client`, `ClientFactory`, and `ScopedClient` take
+  `schema_mode: SchemaMode` in place of `ensure_schema: bool`.
+  `True` → `SchemaMode.ENSURE`; `False` → `SchemaMode.VERIFY`.
 
 ### Fixed
-- Embedding tables now bind to the configured Postgres schema via ORM `__table_args__`,
-  so DDL and DML name the schema explicitly instead of relying on `search_path` fallback.
-  `Client` / `atomic.Protocol` / `KGStore` forward the schema automatically; `Config.schema`
-  exposes the same on the factory-level API.
-- `ModelCache.get_or_create` is now thread-safe. Concurrent first-touch from multiple
-  threads racing on the same `(schema, table)` no longer raced to redefine the ORM Table
-  on `EmbeddingBase.metadata` (raised `InvalidRequestError: Table ... is already defined`).
-- `ensure_table()` is now race-safe and schema-aware: concurrent first-touch from multiple
-  workers no longer collides on `pg_type_typname_nsp_index`; tables in non-default schemas
-  are detected correctly
+- Embedding tables are now bound to the configured Postgres schema explicitly,
+  instead of relying on `search_path` fallback. Schemas other than the connection
+  default now work end-to-end.
+- `ModelCache.get_or_create` is now thread-safe; concurrent first-touch no longer
+  raises `InvalidRequestError: Table ... is already defined`.
+- `ensure_table()` is now race-safe and schema-aware; concurrent first-touch from
+  multiple workers no longer collides, and tables in non-default schemas are
+  detected correctly.
 - `Float16Store` row decoding accepts both `pgvector.HalfVector` and `list[float]`,
-  fixing a silent "no embeddings found" degradation when a same-session upsert-then-read
-  hit the ORM identity map (raised `'list' object has no attribute 'to_list'`)
-- Alembic bookkeeping moved from `alembic_version` to `alembic_version_kelt`, avoiding
-  collision with neighbor libraries. **Existing installs:** stamp the new table manually
-  before upgrading (`INSERT INTO schema.alembic_version_kelt (version_num) SELECT version_num
-  FROM schema.alembic_version`). Auto-migration is unsafe due to possible prior collisions.
+  fixing a silent "no embeddings found" degradation when a same-session
+  upsert-then-read hit the ORM identity map (raised
+  `'list' object has no attribute 'to_list'`).
+- Alembic bookkeeping moved from `alembic_version` to `alembic_version_kelt`,
+  avoiding collision with neighbor libraries. **Existing installs:** stamp the
+  new table manually before upgrading; auto-migration is unsafe due to possible
+  prior collisions.
+
+  ```sql
+  INSERT INTO schema.alembic_version_kelt (version_num)
+  SELECT version_num FROM schema.alembic_version;
+  ```
 
 ### Documentation
-- Full rewrite under `docs/`: quickstart, concepts, atomic memory, context and RAG,
-  conversation, training, knowledge graph, multi-schema, CLI reference, glossary.
-  Every snippet grep-verified against the shipped API.
-- Removed `docs/spec/` (~3.7k lines of pre-1.0 design material misaligned with the
-  shipped API) and `docs/usage.md` (superseded by the split tutorials).
+- Full rewrite under `docs/`: quickstart, concepts, atomic memory, context and
+  RAG, conversation, training, knowledge graph, multi-schema, CLI reference,
+  glossary. Every snippet grep-verified against the shipped API.
+- Removed `docs/spec/` (pre-1.0 design material misaligned with the shipped API)
+  and `docs/usage.md` (superseded by the split tutorials).
 - README rewritten around a minimal working example; corrected
   `kelt.adapters.lora.base_path` YAML nesting.
 
@@ -261,7 +268,8 @@ Config keys: `model_name` → `model`, added `type` (provider: "openai"/"google"
 - Example scripts for common workflows
 - API reference documentation in README
 
-[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/llm-works/llm-kelt/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/llm-works/llm-kelt/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/llm-works/llm-kelt/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/llm-works/llm-kelt/releases/tag/v0.1.0
