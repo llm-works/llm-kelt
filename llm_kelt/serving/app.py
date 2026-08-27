@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """FastAPI application factory for llm-kelt proxy server using appinfra."""
 
 from appinfra.app.fastapi import Server, ServerBuilder

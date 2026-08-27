@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Atomic memory model - fact-based knowledge storage.
 
 All knowledge is stored as facts with type-specific detail tables.

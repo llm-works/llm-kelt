@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Summarizing compaction strategy.
 
 Uses an LLM to summarize older messages before discarding them.

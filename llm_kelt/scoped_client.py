@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Client operations scoped to a specific PostgreSQL schema."""
 
 from __future__ import annotations

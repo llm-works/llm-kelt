@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Manifest runner - execute training from manifest files.
 
 Thin dispatcher that loads a manifest and delegates to the appropriate

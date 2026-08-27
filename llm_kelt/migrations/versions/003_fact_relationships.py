@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Add fact relationships table for graph-like edges between atomic facts.
 
 Revision ID: 003

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Add Knowledge Graph tables and rename metadata columns.
 
 Renames metadata → extra in existing tables:

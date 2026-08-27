@@ -14,3 +14,7 @@ Start here → [Quickstart](quickstart.md).
 | [Multi-schema](multi-schema.md) | `SchemaMode`, `with_schema()`, `with_isolation()`. |
 | [CLI reference](cli.md) | `kelt atomic`, `proxy`, `train`, `session`. |
 | [Glossary](glossary.md) | Project-specific terms. |
+
+---
+
+Maintained by [LLM Works LLC](https://llm-works.ai) and contributors.

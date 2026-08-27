@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Unit tests for isolation context utilities."""
 
 from llm_kelt.memory.isolation import ClientContext, build_context_filter, glob_to_like

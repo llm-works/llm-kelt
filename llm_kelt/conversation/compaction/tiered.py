@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Tiered compaction strategy.
 
 Implements a two-phase compaction approach that preserves conversation

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Atomic memory embedding adapter - uses embedding.StoreClient."""
 
 from __future__ import annotations

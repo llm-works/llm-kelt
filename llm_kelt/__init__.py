@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+#
+# Maintained by LLM Works LLC (https://llm-works.ai) and contributors.
+
 """llm-kelt: Framework for collecting and managing LLM memory.
 
 Provides tools for storing facts, feedback, preferences, solutions, and other

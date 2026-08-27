@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Storage abstraction for training artifacts.
 
 Provides abstract Storage interface and FileStorage implementation.

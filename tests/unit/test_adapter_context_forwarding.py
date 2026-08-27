@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Verify that context= is threaded to the embedder from the atomic + kg adapters."""
 
 from __future__ import annotations

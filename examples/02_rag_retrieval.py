@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Example: RAG (Retrieval-Augmented Generation) with Semantic Search.
 
 This example demonstrates:

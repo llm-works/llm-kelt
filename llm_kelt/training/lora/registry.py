@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Adapter registry for llm-infer integration.
 
 Thin wrapper around Storage that provides llm-infer API integration.

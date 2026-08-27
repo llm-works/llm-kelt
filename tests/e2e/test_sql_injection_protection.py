@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Tests for SQL injection protection in context_key filtering.
 
 Verifies that context keys with SQL wildcard characters (_, %) are properly

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Conversation layer — stateful dialogue with compaction and persistence.
 
 Provides the primitives for multi-turn, context-aware conversations:
