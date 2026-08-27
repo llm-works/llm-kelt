@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Prompt tuning using supervised fine-tuning (SFT).
 
 Uses TRL's SFTTrainer with PEFT PromptTuning for extremely parameter-efficient

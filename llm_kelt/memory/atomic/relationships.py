@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Fact relationships client — graph-like edges between atomic facts.
 
 Requires PostgreSQL 14+ for recursive CTE CYCLE detection in get_chain().

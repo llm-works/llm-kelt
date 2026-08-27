@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Regression test for schema-qualified embedding tables.
 
 Reproduces the failure mode observed on llm-xray's

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Integration test for concurrent ensure_table() first-touch.
 
 Verifies that advisory-lock serialization in ensure_table() handles

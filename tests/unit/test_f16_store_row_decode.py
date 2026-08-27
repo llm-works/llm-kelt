@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Unit tests for Float16Store row decoding.
 
 Guards the halfvec store against AttributeError when a row's embedding

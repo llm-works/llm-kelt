@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Serving layer for llm-kelt proxy server.
 
 Provides an OpenAI-compatible API that injects kelt context

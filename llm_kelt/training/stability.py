@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Training stability detection and warnings.
 
 Analyzes training metrics to detect instability patterns like gradient explosion,

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Knowledge Graph store - CRUD and query operations with scoped subgraphs."""
 
 from __future__ import annotations

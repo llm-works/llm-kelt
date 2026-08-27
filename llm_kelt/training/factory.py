@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Training client - aggregator for training sub-clients.
 
 Provides unified access to manifest lifecycle and training methods.

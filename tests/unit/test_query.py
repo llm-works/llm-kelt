@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Unit tests for ContextQuery and RAG functionality."""
 
 from unittest.mock import AsyncMock, MagicMock

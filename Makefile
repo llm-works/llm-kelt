@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 local := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 infra := $(shell appinfra scripts-path)
 
@@ -14,6 +17,9 @@ export KELT_TEST_CONFIG_FILE := $(local)etc/llm-kelt.yaml
 # - true: Fail on any code quality violations (CI mode)
 # - false: Report violations but don't fail (development mode)
 INFRA_DEV_CQ_STRICT := true
+
+# Enforce SPDX license headers on all source files
+INFRA_DEV_CQ_SPDX := true
 
 # Exclude examples from function size checks (demo scripts have longer functions)
 INFRA_DEV_CQ_EXCLUDE := examples/*

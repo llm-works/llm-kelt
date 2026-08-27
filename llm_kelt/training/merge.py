@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Layer-by-layer LoRA merge for memory-constrained environments.
 
 For large BNB 4-bit models (e.g., 72B), the standard merge_and_unload() requires

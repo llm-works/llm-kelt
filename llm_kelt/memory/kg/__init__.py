@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Knowledge Graph layer for entity-centric knowledge management.
 
 Extends kelt's atomic facts with:

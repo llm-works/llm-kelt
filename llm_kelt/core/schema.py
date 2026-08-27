@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Schema management for programmatic database initialization.
 
 Provides SchemaManager for safe, concurrent schema initialization

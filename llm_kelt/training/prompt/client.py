@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Prompt tuning client - executes prompt tuning training from manifests.
 
 Provides methods to train adapters using Prompt Tuning (extremely parameter-efficient).
