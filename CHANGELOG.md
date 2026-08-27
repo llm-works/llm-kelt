@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-27
+
 ### Added
 - `CONTRIBUTING.md` with DCO sign-off requirements for external contributions.
 
@@ -272,7 +274,8 @@ Config keys: `model_name` → `model`, added `type` (provider: "openai"/"google"
 - Example scripts for common workflows
 - API reference documentation in README
 
-[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/llm-works/llm-kelt/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/llm-works/llm-kelt/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/llm-works/llm-kelt/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/llm-works/llm-kelt/compare/v0.1.0...v0.2.0
