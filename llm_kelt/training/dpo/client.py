@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """DPO training client - executes DPO training from manifests.
 
 Provides methods to train adapters using Direct Preference Optimization.

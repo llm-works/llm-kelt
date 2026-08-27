@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Verify context= is threaded from atomic write methods to the embedding adapter."""
 
 from __future__ import annotations

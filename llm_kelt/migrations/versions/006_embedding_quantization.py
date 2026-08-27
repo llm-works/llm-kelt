@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Drop legacy fact_embeddings table in favor of quantized format-specific tables.
 
 Revision ID: 006

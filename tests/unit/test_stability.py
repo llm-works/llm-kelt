@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Tests for training stability detection."""
 
 from llm_kelt.training.stability import check_training_stability

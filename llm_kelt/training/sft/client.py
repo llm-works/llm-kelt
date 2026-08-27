@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """SFT training client - executes SFT training from manifests.
 
 Provides methods to train adapters using Supervised Fine-Tuning.

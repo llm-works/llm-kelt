@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Guards for validating compaction results with retry capability.
 
 Adopts the guard pattern from saia for compaction quality assurance.

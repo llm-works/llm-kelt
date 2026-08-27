@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """E2E tests for LoRA and DPO training.
 
 These tests verify that training produces valid adapters with expected outputs.

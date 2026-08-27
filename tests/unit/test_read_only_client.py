@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Tests for the read-only Client construction path.
 
 Ticket: lightweight consumers that only issue SELECTs (no vectors, no

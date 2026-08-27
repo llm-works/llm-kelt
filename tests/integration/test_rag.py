@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Integration tests for RAG functionality."""
 
 from unittest.mock import AsyncMock, MagicMock

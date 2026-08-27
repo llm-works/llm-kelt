@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """LoRA training using supervised fine-tuning (SFT).
 
 Uses TRL's SFTTrainer with PEFT for parameter-efficient fine-tuning.

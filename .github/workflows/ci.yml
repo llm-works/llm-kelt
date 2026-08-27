@@ -31,6 +31,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install ruff mypy types-PyYAML
+          python -m pip install "appinfra @ git+https://github.com/llm-works/appinfra.git@develop"
           # Install minimal deps for type checking (avoid heavy ML deps)
           python -m pip install sqlalchemy pydantic fastapi httpx
           # Install llm-infer and llm-saia from develop branch (policy: use @develop during
@@ -47,6 +48,9 @@ jobs:
 
       - name: Type check
         run: python -m mypy llm_kelt/ --ignore-missing-imports
+
+      - name: Check SPDX headers
+        run: python -m appinfra cq spdx
 
   test:
     name: Test

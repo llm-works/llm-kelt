@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Abstract base class for session storage.
 
 Defines the interface for persisting and retrieving conversation sessions,

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """High-level setup helpers for embedding kelt into a foreign database.
 
 Most consumers want a single call: "given my PG instance, make sure kelt's

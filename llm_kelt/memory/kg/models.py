@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
+
 """Knowledge Graph models - entity-centric knowledge with scoped subgraphs.
 
 All KG objects live in a single graph. Scope keys define subgraphs:
