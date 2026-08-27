@@ -114,3 +114,5 @@ Runnable scripts in [`examples/`](examples/):
 ## License
 
 Apache 2.0
+
+Maintained by [LLM Works LLC](https://llm-works.ai) and contributors.
