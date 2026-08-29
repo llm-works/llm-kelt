@@ -48,9 +48,7 @@ from llm_kelt import ClientContext, ClientFactory
 from llm_kelt.inference import ContextBuilder
 
 lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
-config = DotDict({
-    "dbs": {"main": {"url": os.environ["DATABASE_URL"], "create_db": True}},
-})
+config = DotDict({"dbs": {"main": {"url": os.environ["DATABASE_URL"], "create_db": True}}})
 
 kelt = ClientFactory(lg).create_from_config(
     context=ClientContext(context_key="my-agent"),

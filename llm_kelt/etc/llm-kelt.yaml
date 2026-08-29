@@ -22,11 +22,11 @@ proxy:
   model_name: "llm-kelt-proxy"
 
 # Adapter settings (for training integration with llm-infer).
-# .env.yaml is per-developer and gitignored — include optionally so the
-# config loads on fresh checkouts before .env.yaml.example is copied over.
+# Default cache lives under XDG-style ~/.cache; override in your own
+# config to point at a shared adapter store.
 adapters:
   lora:
-    base_path: !include? "../.env.yaml#paths.adapters"
+    base_path: !path ~/.cache/llm-kelt/adapters
 
 # Kelt-specific settings (runtime behavior)
 kelt:

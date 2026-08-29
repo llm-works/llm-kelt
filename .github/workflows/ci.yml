@@ -85,9 +85,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up environment config
-        run: cp .env.yaml.example .env.yaml
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -205,6 +202,9 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/llm_kelt_smoke
         run: /tmp/smoke/bin/python examples/quickstart.py
 
+      - name: CLI entry point resolves bundled etc/
+        run: /tmp/smoke/bin/llm-kelt --help
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
@@ -229,9 +229,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Set up environment config
-        run: cp .env.yaml.example .env.yaml
 
       - name: Set up Python
         uses: actions/setup-python@v5

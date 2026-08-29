@@ -1,0 +1,30 @@
+# Model locations for training and inference.
+# Consumed by llm-infer's ModelResolver to find local models.
+#
+# Default cache lives under HuggingFace's own snapshot layout at
+# ~/.cache/huggingface/hub (matches llm-infer's default; override with
+# $HF_HOME or add additional paths in your local config).
+
+locations:
+  - !path ~/.cache/huggingface/hub
+
+# Model selection defaults
+selection:
+  generate:
+    default: qwen2.5-0.5b-instruct  # Small model for training tests
+  embed:
+    default: bge-small-en-v1.5
+
+defaults:
+  system_prompt: null
+
+# Model-specific configurations.
+# Matched by model name (from selected.yaml or --model). Add entries in
+# your local config as needed, e.g.:
+#
+#   models:
+#     qwen2.5-3b-instruct-bnb-4bit: {}
+#     my-lora-target:
+#       trust_remote_code: true
+
+models: {}

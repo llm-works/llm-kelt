@@ -127,6 +127,7 @@ exclude_lines = [
 [tool.setuptools.package-data]
 llm_kelt = [
     "py.typed",
+    "etc/*.yaml",
     "migrations/alembic.ini",
     "migrations/env.py",
     "migrations/script.py.mako",
@@ -136,7 +137,7 @@ llm_kelt = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["llm_kelt*"]
-exclude = ["tests*", "docs*", "etc*"]
+exclude = ["tests*", "docs*"]
 
 [tool.setuptools_scm]
 fallback_version = "0.0.0.dev0"
