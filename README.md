@@ -40,13 +40,17 @@ pip install llm-kelt[training]    # + torch / transformers / peft / trl
 ## Minimal example
 
 ```python
-from appinfra.config import Config
+import os
+
+from appinfra.dot_dict import DotDict
 from appinfra.log import LogConfig, LoggerFactory
 from llm_kelt import ClientContext, ClientFactory
 from llm_kelt.inference import ContextBuilder
 
-config = Config("etc/llm-kelt.yaml")
 lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+config = DotDict({
+    "dbs": {"main": {"url": os.environ["DATABASE_URL"], "create_db": True}},
+})
 
 kelt = ClientFactory(lg).create_from_config(
     context=ClientContext(context_key="my-agent"),
@@ -82,7 +86,9 @@ model.
 
 ## Configuration
 
-The library reads its config from `etc/llm-kelt.yaml`. Key sections:
+`ClientFactory.create_from_config` accepts any dict-like config (a `DotDict`, a
+plain dict, or the object returned by appinfra's `Config` after loading a yaml
+file). For a yaml-backed setup, the shape is:
 
 ```yaml
 dbs:
