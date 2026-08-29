@@ -20,6 +20,16 @@ DPO/SFT/classifier datasets. Train LoRA/DPO/Prompt adapters from the exported da
 - PostgreSQL 16+ with the `vector` extension (pgvector)
 - For training: CUDA GPU (or MPS on Apple Silicon)
 
+## Supported Python versions
+
+CI tests every push against the full test suite:
+
+- **Linux (Ubuntu):** Python 3.11, 3.12, 3.13, 3.14
+
+`requires-python = ">=3.11"` is declared in package metadata; newer Python
+versions are opt-in and validated against the full test suite before being
+added to the CI matrix.
+
 ## Install
 
 ```bash

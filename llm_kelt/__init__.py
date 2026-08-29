@@ -55,8 +55,15 @@ Usage:
     result = kelt.train.dpo.train(manifest)
 """
 
+from importlib.metadata import PackageNotFoundError, version
+
 from .bootstrap import ensure_schema
 from .client import Client
+
+try:
+    __version__ = version("llm-kelt")
+except PackageNotFoundError:
+    __version__ = "0.0.0.dev0"
 from .core.errors import (
     ConfigError,
     ConflictError,
@@ -75,6 +82,7 @@ from .memory import ClientContext
 from .memory.kg import KGStore
 
 __all__ = [
+    "__version__",
     "Client",
     "ClientFactory",
     "EmbeddingStoreClient",
