@@ -79,7 +79,7 @@ model.
 - [Training](docs/training.md) — manifest workflow, LoRA/DPO/SFT/Prompt, exports, adapter registry.
 - [Knowledge graph](docs/knowledge-graph.md) — entities, aliases, hierarchical scopes.
 - [Multi-schema](docs/multi-schema.md) — `SchemaMode`, `with_schema()`, isolation.
-- [CLI reference](docs/cli.md) — `kelt atomic|proxy|train|session`.
+- [CLI reference](docs/cli.md) — `llm-kelt atomic|proxy|train|session`.
 - [Glossary](docs/glossary.md) — project-specific terms.
 
 ## Configuration
@@ -95,7 +95,7 @@ dbs:
     extensions: [vector]
 
 llm:
-  default_backend: local
+  default: local
   backends:
     local:
       base_url: http://localhost:8000/v1
