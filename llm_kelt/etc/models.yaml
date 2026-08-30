@@ -1,12 +1,11 @@
 # Model locations for training and inference.
 # Consumed by llm-infer's ModelResolver to find local models.
 #
-# Default cache lives under HuggingFace's own snapshot layout at
-# ~/.cache/huggingface/hub (matches llm-infer's default; override with
-# $HF_HOME or add additional paths in your local config).
+# Default location follows XDG conventions. Symlink this to your actual
+# model directory, e.g.: ln -s /path/to/models ~/.local/share/llm-kelt/models
 
 locations:
-  - !path ~/.cache/huggingface/hub
+  - !path ~/.local/share/llm-kelt/models
 
 # Model selection defaults
 selection:

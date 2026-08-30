@@ -22,11 +22,10 @@ proxy:
   model_name: "llm-kelt-proxy"
 
 # Adapter settings (for training integration with llm-infer).
-# Default cache lives under XDG-style ~/.cache; override in your own
-# config to point at a shared adapter store.
+# Default location follows XDG conventions. Symlink to your adapter store.
 adapters:
   lora:
-    base_path: !path ~/.cache/llm-kelt/adapters
+    base_path: !path ~/.local/share/llm-kelt/adapters
 
 # Kelt-specific settings (runtime behavior)
 kelt:

@@ -22,13 +22,12 @@ DPO/SFT/classifier datasets. Train LoRA/DPO/Prompt adapters from the exported da
 
 ## Supported Python versions
 
-CI tests every push against the full test suite:
+CI tests every push on:
 
 - **Linux (Ubuntu):** Python 3.11, 3.12, 3.13, 3.14
 
 `requires-python = ">=3.11"` is declared in package metadata; newer Python
-versions are opt-in and validated against the full test suite before being
-added to the CI matrix.
+versions are validated in CI before being added to the matrix.
 
 ## Install
 
@@ -48,7 +47,8 @@ from llm_kelt import ClientContext, ClientFactory
 from llm_kelt.inference import ContextBuilder
 
 lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
-config = DotDict({"dbs": {"main": {"url": os.environ["DATABASE_URL"], "create_db": True}}})
+database_url = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:5432/kelt")
+config = DotDict({"dbs": {"main": {"url": database_url, "create_db": True}}})
 
 kelt = ClientFactory(lg).create_from_config(
     context=ClientContext(context_key="my-agent"),

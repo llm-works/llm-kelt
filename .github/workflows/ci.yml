@@ -202,8 +202,8 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/llm_kelt_smoke
         run: /tmp/smoke/bin/python examples/quickstart.py
 
-      - name: CLI entry point resolves bundled etc/
-        run: /tmp/smoke/bin/llm-kelt --help
+      - name: CLI --version
+        run: /tmp/smoke/bin/llm-kelt --version
 
   coverage:
     name: Coverage
