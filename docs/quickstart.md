@@ -122,7 +122,7 @@ Add an LLM section to your config:
 
 ```yaml
 llm:
-  default_backend: local
+  default: local
   backends:
     local:
       base_url: http://localhost:8000/v1

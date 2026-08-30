@@ -165,6 +165,11 @@ class EmbeddingAdapter:
         self._stores: dict[int, EmbeddingStoreClient] = {}
         self._stores_lock = threading.Lock()
 
+    @property
+    def can_embed(self) -> bool:
+        """Return True if an embedder is configured for generating embeddings."""
+        return self._embedder is not None
+
     def _get_store(self, dimensions: int) -> EmbeddingStoreClient:
         """Get or create a store for the given dimensions (thread-safe)."""
         if dimensions in self._stores:

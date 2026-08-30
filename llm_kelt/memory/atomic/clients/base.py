@@ -308,7 +308,7 @@ class FactClient(Generic[T]):
                 can bill against the caller's context. See
                 ``llm_infer.client.EmbeddingCallbacks``.
         """
-        if self._embedding_adapter is not None:
+        if self._embedding_adapter is not None and self._embedding_adapter.can_embed:
             try:
                 self._embedding_adapter.embed_fact(fact, session=session, context=context)
             except Exception as e:
