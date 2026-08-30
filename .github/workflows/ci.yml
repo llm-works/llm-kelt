@@ -113,6 +113,26 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/llm_kelt_test
         run: python -m pytest tests/ -m "not llm and not training" -v --tb=short
 
+  # Accumulator job for branch protection — reports a single "Test" status
+  # that passes only when all test and smoke jobs pass.
+  test-summary:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: [test, smoke-wheel]
+    if: always()
+    steps:
+      - name: Check test results
+        run: |
+          if [[ "${{ needs.test.result }}" != "success" ]]; then
+            echo "Test matrix failed"
+            exit 1
+          fi
+          if [[ "${{ needs.smoke-wheel.result }}" != "success" ]]; then
+            echo "Smoke tests failed"
+            exit 1
+          fi
+          echo "All tests passed"
+
   # Smoke test the PyPI-user path: build sdist+wheel with `python -m build`,
   # install into a fresh venv OUTSIDE the source tree (so imports resolve from
   # the wheel, not ./llm_kelt/), and exercise the surface a first-time user
