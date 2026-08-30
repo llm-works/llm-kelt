@@ -20,6 +20,15 @@ DPO/SFT/classifier datasets. Train LoRA/DPO/Prompt adapters from the exported da
 - PostgreSQL 16+ with the `vector` extension (pgvector)
 - For training: CUDA GPU (or MPS on Apple Silicon)
 
+## Supported Python versions
+
+CI tests every push on:
+
+- **Linux (Ubuntu):** Python 3.11, 3.12, 3.13, 3.14
+
+`requires-python = ">=3.11"` is declared in package metadata; newer Python
+versions are validated in CI before being added to the matrix.
+
 ## Install
 
 ```bash
@@ -30,13 +39,16 @@ pip install llm-kelt[training]    # + torch / transformers / peft / trl
 ## Minimal example
 
 ```python
-from appinfra.config import Config
+import os
+
+from appinfra.dot_dict import DotDict
 from appinfra.log import LogConfig, LoggerFactory
 from llm_kelt import ClientContext, ClientFactory
 from llm_kelt.inference import ContextBuilder
 
-config = Config("etc/llm-kelt.yaml")
 lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+database_url = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:5432/kelt")
+config = DotDict({"dbs": {"main": {"url": database_url, "create_db": True}}})
 
 kelt = ClientFactory(lg).create_from_config(
     context=ClientContext(context_key="my-agent"),
@@ -67,12 +79,14 @@ model.
 - [Training](docs/training.md) — manifest workflow, LoRA/DPO/SFT/Prompt, exports, adapter registry.
 - [Knowledge graph](docs/knowledge-graph.md) — entities, aliases, hierarchical scopes.
 - [Multi-schema](docs/multi-schema.md) — `SchemaMode`, `with_schema()`, isolation.
-- [CLI reference](docs/cli.md) — `kelt atomic|proxy|train|session`.
+- [CLI reference](docs/cli.md) — `llm-kelt atomic|proxy|train|session`.
 - [Glossary](docs/glossary.md) — project-specific terms.
 
 ## Configuration
 
-The library reads its config from `etc/llm-kelt.yaml`. Key sections:
+`ClientFactory.create_from_config` accepts any dict-like config (a `DotDict`, a
+plain dict, or the object returned by appinfra's `Config` after loading a yaml
+file). For a yaml-backed setup, the shape is:
 
 ```yaml
 dbs:
@@ -81,7 +95,7 @@ dbs:
     extensions: [vector]
 
 llm:
-  default_backend: local
+  default: local
   backends:
     local:
       base_url: http://localhost:8000/v1

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Python 3.14 support: CI matrix covers 3.11–3.14 and package metadata declares
+  the tested range.
+
+### Fixed
+- `llm-kelt` CLI now runs after `pip install llm-kelt`: bundled etc/ ships
+  inside the wheel so config resolution no longer fails on a fresh install.
+
 ## [0.4.1] - 2026-08-27
 
 ### Added

@@ -3,9 +3,16 @@
 
 """CLI entry point for llm-kelt."""
 
+from pathlib import Path
+
 from appinfra.app import AppBuilder
 
+from .. import __version__
 from .tools import AtomicTool, ProxyTool, SessionTool, TrainTool
+
+# Bundled etc/ ships inside the wheel. Used as the default --etc-dir so
+# `pip install llm-kelt && llm-kelt <tool>` works without local setup.
+_BUNDLED_ETC_DIR = str(Path(__file__).parent.parent / "etc")
 
 
 def main() -> int:
@@ -14,8 +21,11 @@ def main() -> int:
         AppBuilder("llm-kelt")
         .with_description("LLM kelt framework - collect and manage LLM context")
         .with_config_file("llm-kelt.yaml")
+        .with_standard_arg("etc_dir", default=_BUNDLED_ETC_DIR)
         .logging.with_level("info")
         .with_location(1)
+        .done()
+        .advanced.with_argument("-v", "--version", action="version", version=__version__)
         .done()
         .tools.with_tool(AtomicTool())
         .with_tool(ProxyTool())

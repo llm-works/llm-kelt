@@ -55,6 +55,10 @@ Usage:
     result = kelt.train.dpo.train(manifest)
 """
 
+from importlib.metadata import version as _meta_version
+
+__version__ = _meta_version("llm-kelt")
+
 from .bootstrap import ensure_schema
 from .client import Client
 from .core.errors import (
@@ -75,6 +79,7 @@ from .memory import ClientContext
 from .memory.kg import KGStore
 
 __all__ = [
+    "__version__",
     "Client",
     "ClientFactory",
     "EmbeddingStoreClient",

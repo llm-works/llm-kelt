@@ -1,0 +1,29 @@
+# Model locations for training and inference.
+# Consumed by llm-infer's ModelResolver to find local models.
+#
+# Default location follows XDG conventions. Symlink this to your actual
+# model directory, e.g.: ln -s /path/to/models ~/.local/share/llm-kelt/models
+
+locations:
+  - !path ~/.local/share/llm-kelt/models
+
+# Model selection defaults
+selection:
+  generate:
+    default: qwen2.5-0.5b-instruct  # Small model for training tests
+  embed:
+    default: bge-small-en-v1.5
+
+defaults:
+  system_prompt: null
+
+# Model-specific configurations.
+# Matched by model name (from selected.yaml or --model). Add entries in
+# your local config as needed, e.g.:
+#
+#   models:
+#     qwen2.5-3b-instruct-bnb-4bit: {}
+#     my-lora-target:
+#       trust_remote_code: true
+
+models: {}
