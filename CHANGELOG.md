@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-08-31
+
 ### Fixed
 - `examples/` bundled in the wheel; `python -m llm_kelt.examples.quickstart`
   runs after `pip install llm-kelt`.
@@ -308,7 +310,8 @@ Config keys: `model_name` → `model`, added `type` (provider: "openai"/"google"
 - Example scripts for common workflows
 - API reference documentation in README
 
-[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/llm-works/llm-kelt/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/llm-works/llm-kelt/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/llm-works/llm-kelt/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/llm-works/llm-kelt/compare/v0.3.0...v0.4.0
