@@ -87,8 +87,9 @@ def find_training_model(lg: Logger, config: Config, running_model: str) -> Path:
 
 
 def get_infer_url(config: Config) -> str:
-    """Get inference URL from config."""
-    return str(config.llm.infer.base_url)
+    """Get inference URL from the currently-default LLM backend."""
+    default = config.llm.default
+    return str(config.llm.backends[default].base_url)
 
 
 def get_running_model(infer_url: str) -> str:
