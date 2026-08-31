@@ -578,7 +578,8 @@ kelt train merge coding-v1 --model … --output ./merged
 [`examples/lora_training.py`](../examples/lora_training.py) trains a small LoRA adapter
 against a running llm-infer instance:
 
-1. Reads the currently-loaded model from `/v1/models`.
+1. Reads the currently-loaded model from `{base_url}/models` (the default config's
+   `base_url` ends in `/v1`, so this hits `/v1/models`).
 2. Resolves matching local HF weights via `ModelResolver`.
 3. Writes a small SFT dataset to JSONL.
 4. Trains with `train_lora`, `r=8`, 3 epochs.

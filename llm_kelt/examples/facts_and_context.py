@@ -26,20 +26,36 @@ from pathlib import Path
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _helpers import (
-    CMD,
-    H1,
-    H2,
-    INFO,
-    LLM_A,
-    LLM_Q,
-    MUTED,
-    OK,
-    RESET,
-    WARN,
-    get_demo_context_key,
-    psql_cmd,
-)
+try:
+    from ._helpers import (
+        CMD,
+        H1,
+        H2,
+        INFO,
+        LLM_A,
+        LLM_Q,
+        MUTED,
+        OK,
+        RESET,
+        WARN,
+        get_demo_context_key,
+        psql_cmd,
+    )
+except ImportError:
+    from _helpers import (  # type: ignore[no-redef]
+        CMD,
+        H1,
+        H2,
+        INFO,
+        LLM_A,
+        LLM_Q,
+        MUTED,
+        OK,
+        RESET,
+        WARN,
+        get_demo_context_key,
+        psql_cmd,
+    )
 from llm_infer.client import Factory as LLMClientFactory
 
 from llm_kelt import Client, ClientFactory

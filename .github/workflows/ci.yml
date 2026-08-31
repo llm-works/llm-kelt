@@ -221,8 +221,9 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/llm_kelt_smoke
         # Invoke via packaged path so the test actually exercises the wheel's
-        # copy of quickstart.py, not the source-tree copy.
-        run: /tmp/smoke/bin/python -m llm_kelt.examples.quickstart
+        # copy of quickstart.py, not the source-tree copy. Run from /tmp to
+        # ensure Python doesn't pick up workspace source files.
+        run: cd /tmp && /tmp/smoke/bin/python -m llm_kelt.examples.quickstart
 
       - name: CLI --version
         run: /tmp/smoke/bin/llm-kelt --version

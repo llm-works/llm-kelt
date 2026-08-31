@@ -28,7 +28,10 @@ from tempfile import TemporaryDirectory
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, psql_cmd
+try:
+    from ._helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, psql_cmd
+except ImportError:
+    from _helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, psql_cmd  # type: ignore[no-redef]
 
 from llm_kelt import Client, ClientContext, ClientFactory
 from llm_kelt.training import ExportResult, export_feedback_classifier, export_feedback_sft

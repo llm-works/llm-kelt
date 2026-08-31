@@ -239,7 +239,7 @@ class FileSessionStorage(SessionStorage):
     def delete(self, session_id: str) -> bool
 ```
 
-`StoredSession` fields: `session_id`, `messages`, `created_at`, `updated_at`, `metadata`.
+`StoredSession` fields: `session_id`, `messages`, `created_at`, `updated_at`, `extra`.
 `SessionSummary`: `session_id`, `message_count`, `token_count`, `preview`, `updated_at`.
 
 Example:

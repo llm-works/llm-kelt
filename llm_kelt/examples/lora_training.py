@@ -34,7 +34,10 @@ from tempfile import TemporaryDirectory
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _helpers import H1, H2, INFO, MUTED, OK, RESET, WARN
+try:
+    from ._helpers import H1, H2, INFO, MUTED, OK, RESET, WARN
+except ImportError:
+    from _helpers import H1, H2, INFO, MUTED, OK, RESET, WARN  # type: ignore[no-redef]
 from appinfra.config import Config
 from appinfra.log import LogConfig, Logger, LoggerFactory
 
@@ -146,6 +149,7 @@ def run_training(lg: Logger, data_path: Path, output_dir: Path, model_path: str)
             # Modern GPUs (Ampere+) load the model in bf16 by default; keep
             # trainer precision aligned so the fp16 grad scaler doesn't run
             # on bf16 tensors (torch's amp kernels don't support that combo).
+            # Pre-Ampere users: set bf16=False, fp16=True instead.
             "bf16": True,
             "fp16": False,
         },
