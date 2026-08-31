@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `examples/` bundled in the wheel; `python -m llm_kelt.examples.quickstart`
+  runs after `pip install llm-kelt`.
+- `__version__` falls back to `0.0.0.dev0` on uninstalled source checkouts
+  instead of raising `PackageNotFoundError`.
+
+### Changed
+- Example scripts renamed to descriptive names (`facts_and_context.py`,
+  `rag_retrieval.py`, `training_export.py`, `lora_training.py`,
+  `conversation.py`); reading order now in README.
+
 ## [0.4.2] - 2026-08-29
 
 ### Added
