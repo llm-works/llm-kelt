@@ -22,7 +22,7 @@ INFRA_DEV_CQ_STRICT := true
 INFRA_DEV_CQ_SPDX := true
 
 # Exclude examples from function size checks (demo scripts have longer functions)
-INFRA_DEV_CQ_EXCLUDE := examples/*
+INFRA_DEV_CQ_EXCLUDE := llm_kelt/examples/*
 
 # Skip built-in targets (we define custom ones below)
 # - type: examples import torch/transformers which cause mypy to hang

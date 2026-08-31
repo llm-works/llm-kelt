@@ -327,7 +327,7 @@ package for `F32`, `F16`, `I8`, `I4` and their trade-offs.
 
 ## Full working script
 
-See [`examples/02_rag_retrieval.py`](../examples/02_rag_retrieval.py) — populates 12 facts
+See [`examples/rag_retrieval.py`](../examples/rag_retrieval.py) — populates 12 facts
 across four categories, embeds them, runs three demos (raw similarity search, RAG vs static
 prompt, full RAG query with LLM), and falls back to synthetic embeddings if no embedding
 backend is running so the script still runs end-to-end.

@@ -19,7 +19,7 @@ Prerequisites:
     - Local model weights in HuggingFace format
 
 Usage:
-    python examples/04_lora_training.py [output_dir]
+    python examples/lora_training.py [output_dir]
 
 If output_dir is not provided, a temporary directory is used and
 the adapter will be deleted after the script exits.
@@ -34,7 +34,10 @@ from tempfile import TemporaryDirectory
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _helpers import H1, H2, INFO, MUTED, OK, RESET, WARN
+try:
+    from ._helpers import H1, H2, INFO, MUTED, OK, RESET, WARN
+except ImportError:
+    from _helpers import H1, H2, INFO, MUTED, OK, RESET, WARN  # type: ignore[no-redef]
 from appinfra.config import Config
 from appinfra.log import LogConfig, Logger, LoggerFactory
 
@@ -87,15 +90,16 @@ def find_training_model(lg: Logger, config: Config, running_model: str) -> Path:
 
 
 def get_infer_url(config: Config) -> str:
-    """Get inference URL from config."""
-    return str(config.llm.infer.base_url)
+    """Get inference URL from the currently-default LLM backend."""
+    default = config.llm.default
+    return str(config.llm.backends[default].base_url)
 
 
 def get_running_model(infer_url: str) -> str:
     """Get the model currently loaded in llm-infer."""
     import httpx
 
-    response = httpx.get(f"{infer_url}/v1/models", timeout=10)
+    response = httpx.get(f"{infer_url}/models", timeout=10)
     response.raise_for_status()
     models = response.json()["data"]
     if not models:
@@ -142,6 +146,12 @@ def run_training(lg: Logger, data_path: Path, output_dir: Path, model_path: str)
             "learning_rate": 2e-4,
             "max_seq_length": 512,
             "logging_steps": 10,
+            # Modern GPUs (Ampere+) load the model in bf16 by default; keep
+            # trainer precision aligned so the fp16 grad scaler doesn't run
+            # on bf16 tensors (torch's amp kernels don't support that combo).
+            # Pre-Ampere users: set bf16=False, fp16=True instead.
+            "bf16": True,
+            "fp16": False,
         },
     )
 

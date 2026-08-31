@@ -17,6 +17,7 @@ from .dpo import Client as DpoClient
 from .export import ExportResult, export_feedback_classifier, export_feedback_sft
 from .factory import Factory
 from .lora import AdapterInfo, AdapterRegistry
+from .lora import Config as LoraConfig
 from .manifest import Client, Data, Manifest, Source
 from .profiles import (
     ProfileDetectionError,
@@ -45,6 +46,7 @@ __all__ = [
     # Adapter registry
     "AdapterRegistry",
     "AdapterInfo",
+    "LoraConfig",
     # Clients
     "Factory",
     "Client",

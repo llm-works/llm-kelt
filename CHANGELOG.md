@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `examples/` bundled in the wheel; `python -m llm_kelt.examples.quickstart`
+  runs after `pip install llm-kelt`.
+- `__version__` falls back to `0.0.0.dev0` on uninstalled source checkouts
+  instead of raising `PackageNotFoundError`.
+- `LoraConfig` re-exported from `llm_kelt.training` so `lora_training.py`
+  imports run after `pip install`.
+- `conversation.py` uses the `extra=` kwarg for `FileSessionStorage.save()`
+  (was calling the removed `metadata=` name).
+- `lora_training.py` resolves the llm-infer URL from the default backend
+  and no longer double-appends `/v1` when hitting `/models`.
+- `lora_training.py` overrides `bf16=True, fp16=False` in its training
+  config so the trainer's precision matches how modern GPUs load the
+  base model (avoids a torch AMP grad-scaler crash on bf16 tensors).
+
+### Changed
+- Example scripts renamed to descriptive names (`facts_and_context.py`,
+  `rag_retrieval.py`, `training_export.py`, `lora_training.py`,
+  `conversation.py`); reading order now in README.
+- Default `etc/llm.yaml` ships only the `local` backend; `anthropic` and
+  `openai` blocks retained as commented reference (uncomment + install the
+  matching SDK to enable).
+
 ## [0.4.2] - 2026-08-29
 
 ### Added

@@ -16,7 +16,7 @@ Prerequisites:
     - LLM backend configured (local or OpenAI)
 
 Usage:
-    python examples/01_facts_and_context.py
+    python examples/facts_and_context.py
 """
 
 import asyncio
@@ -26,20 +26,36 @@ from pathlib import Path
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _helpers import (
-    CMD,
-    H1,
-    H2,
-    INFO,
-    LLM_A,
-    LLM_Q,
-    MUTED,
-    OK,
-    RESET,
-    WARN,
-    get_demo_context_key,
-    psql_cmd,
-)
+try:
+    from ._helpers import (
+        CMD,
+        H1,
+        H2,
+        INFO,
+        LLM_A,
+        LLM_Q,
+        MUTED,
+        OK,
+        RESET,
+        WARN,
+        get_demo_context_key,
+        psql_cmd,
+    )
+except ImportError:
+    from _helpers import (  # type: ignore[no-redef]
+        CMD,
+        H1,
+        H2,
+        INFO,
+        LLM_A,
+        LLM_Q,
+        MUTED,
+        OK,
+        RESET,
+        WARN,
+        get_demo_context_key,
+        psql_cmd,
+    )
 from llm_infer.client import Factory as LLMClientFactory
 
 from llm_kelt import Client, ClientFactory
@@ -236,7 +252,7 @@ async def main():
     demo_fact_management(kelt)
 
     print(f"\n{H1}{'━' * 50}{RESET}")
-    print(f"{OK}✓ Done!{RESET} Next: {CMD}python examples/02_rag_retrieval.py{RESET}")
+    print(f"{OK}✓ Done!{RESET} Next: {CMD}python examples/rag_retrieval.py{RESET}")
 
 
 if __name__ == "__main__":

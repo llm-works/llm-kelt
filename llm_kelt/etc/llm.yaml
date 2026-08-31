@@ -1,4 +1,4 @@
-default: local  # Options: local, anthropic, openai
+default: local
 
 backends:
   local:
@@ -7,13 +7,20 @@ backends:
     model: "qwen2.5-0.5b"
     # No API key needed for local
 
-  anthropic:
-    type: anthropic
-    model: "claude-sonnet-4-20250514"
-    # API key via ANTHROPIC_API_KEY environment variable
-
-  openai:
-    type: openai
-    base_url: "https://api.openai.com/v1"
-    model: "gpt-4o"
-    # API key via OPENAI_API_KEY environment variable
+  # Additional backends are commented out because llm-infer's factory
+  # eagerly instantiates every backend listed here, which requires the
+  # corresponding SDK to be importable. Uncomment a block and install
+  # its extra to enable it:
+  #   pip install anthropic          # for the anthropic backend
+  #   pip install openai             # for the openai backend
+  #
+  # anthropic:
+  #   type: anthropic
+  #   model: "claude-sonnet-4-20250514"
+  #   # API key via ANTHROPIC_API_KEY environment variable
+  #
+  # openai:
+  #   type: openai
+  #   base_url: "https://api.openai.com/v1"
+  #   model: "gpt-4o"
+  #   # API key via OPENAI_API_KEY environment variable
