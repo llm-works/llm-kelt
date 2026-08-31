@@ -5,7 +5,7 @@
 
 """Minimal quick-start smoke that mirrors the README example.
 
-Runs against an installed wheel via `python examples/quickstart.py`. Exercised
+Runs against an installed wheel via `python -m llm_kelt.examples.quickstart`. Exercised
 by the smoke-wheel CI job to catch README-vs-installed API drift, broken
 top-level exports, and missing wheel resources.
 
