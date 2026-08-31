@@ -143,6 +143,11 @@ def run_training(lg: Logger, data_path: Path, output_dir: Path, model_path: str)
             "learning_rate": 2e-4,
             "max_seq_length": 512,
             "logging_steps": 10,
+            # Modern GPUs (Ampere+) load the model in bf16 by default; keep
+            # trainer precision aligned so the fp16 grad scaler doesn't run
+            # on bf16 tensors (torch's amp kernels don't support that combo).
+            "bf16": True,
+            "fp16": False,
         },
     )
 
