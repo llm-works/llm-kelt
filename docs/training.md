@@ -476,6 +476,10 @@ TRAINING_DEFAULTS = DotDict(
 Merged in this order: `TRAINING_DEFAULTS` ← profile ← manifest `training` ← CLI/keyword
 overrides. Later values win.
 
+> **Note:** On Ampere+ GPUs (RTX 30xx, A100, etc.), models typically load in bf16. Pass
+> `bf16=True, fp16=False` to keep trainer precision aligned — the default `fp16=True` can
+> trigger a grad-scaler error when the model weights are bf16.
+
 ## Adapter registry
 
 Track versions, deploy to inference server, roll back.
