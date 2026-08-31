@@ -55,9 +55,13 @@ Usage:
     result = kelt.train.dpo.train(manifest)
 """
 
+from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _meta_version
 
-__version__ = _meta_version("llm-kelt")
+try:
+    __version__ = _meta_version("llm-kelt")
+except PackageNotFoundError:
+    __version__ = "0.0.0.dev0"
 
 from .bootstrap import ensure_schema
 from .client import Client
