@@ -16,7 +16,7 @@ Prerequisites:
     - Config file at etc/llm-kelt.yaml
 
 Usage:
-    python examples/03_training_export.py
+    python examples/training_export.py
 """
 
 import json
@@ -294,7 +294,7 @@ def main():
     print_summary()
 
     print(f"\n{H1}{'━' * 50}{RESET}")
-    print(f"{OK}✓ Done!{RESET} Next: {CMD}python examples/04_lora_training.py{RESET}")
+    print(f"{OK}✓ Done!{RESET} Next: {CMD}python examples/lora_training.py{RESET}")
 
 
 if __name__ == "__main__":

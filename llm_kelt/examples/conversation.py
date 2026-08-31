@@ -16,7 +16,7 @@ Prerequisites:
     - LLM backend for demo 4 (configure in etc/llm-kelt.yaml)
 
 Usage:
-    python examples/05_conversation.py
+    python examples/conversation.py
 """
 
 import asyncio

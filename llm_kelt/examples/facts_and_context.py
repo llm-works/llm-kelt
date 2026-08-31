@@ -16,7 +16,7 @@ Prerequisites:
     - LLM backend configured (local or OpenAI)
 
 Usage:
-    python examples/01_facts_and_context.py
+    python examples/facts_and_context.py
 """
 
 import asyncio
@@ -236,7 +236,7 @@ async def main():
     demo_fact_management(kelt)
 
     print(f"\n{H1}{'━' * 50}{RESET}")
-    print(f"{OK}✓ Done!{RESET} Next: {CMD}python examples/02_rag_retrieval.py{RESET}")
+    print(f"{OK}✓ Done!{RESET} Next: {CMD}python examples/rag_retrieval.py{RESET}")
 
 
 if __name__ == "__main__":

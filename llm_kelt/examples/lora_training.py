@@ -19,7 +19,7 @@ Prerequisites:
     - Local model weights in HuggingFace format
 
 Usage:
-    python examples/04_lora_training.py [output_dir]
+    python examples/lora_training.py [output_dir]
 
 If output_dir is not provided, a temporary directory is used and
 the adapter will be deleted after the script exits.

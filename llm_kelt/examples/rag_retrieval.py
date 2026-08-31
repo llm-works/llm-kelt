@@ -18,7 +18,7 @@ Prerequisites:
     - LLM backend for chat (optional)
 
 Usage:
-    python examples/02_rag_retrieval.py
+    python examples/rag_retrieval.py
 """
 
 import asyncio
@@ -306,7 +306,7 @@ async def main():
         await embedder.aclose()
 
     print(f"\n{H1}{'━' * 50}{RESET}")
-    print(f"{OK}✓ Done!{RESET} Next: {CMD}python examples/03_training_export.py{RESET}")
+    print(f"{OK}✓ Done!{RESET} Next: {CMD}python examples/training_export.py{RESET}")
 
 
 if __name__ == "__main__":

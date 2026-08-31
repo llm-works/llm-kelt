@@ -571,7 +571,7 @@ kelt train merge coding-v1 --model … --output ./merged
 
 ## End-to-end example
 
-[`examples/04_lora_training.py`](../examples/04_lora_training.py) trains a small LoRA adapter
+[`examples/lora_training.py`](../examples/lora_training.py) trains a small LoRA adapter
 against a running llm-infer instance:
 
 1. Reads the currently-loaded model from `/v1/models`.
@@ -580,5 +580,5 @@ against a running llm-infer instance:
 4. Trains with `train_lora`, `r=8`, 3 epochs.
 5. Prints the adapter path and deployment instructions.
 
-For the export-only side, [`examples/03_training_export.py`](../examples/03_training_export.py)
+For the export-only side, [`examples/training_export.py`](../examples/training_export.py)
 records synthetic feedback and preferences, then emits DPO / SFT / classifier JSONL.
