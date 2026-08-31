@@ -16,7 +16,7 @@ Prerequisites:
     - LLM backend for demo 4 (configure in etc/llm-kelt.yaml)
 
 Usage:
-    python examples/05_conversation.py
+    python examples/conversation.py
 """
 
 import asyncio
@@ -27,7 +27,20 @@ from pathlib import Path
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _helpers import H1, H2, INFO, LLM_A, LLM_Q, MUTED, OK, RESET, WARN
+try:
+    from ._helpers import H1, H2, INFO, LLM_A, LLM_Q, MUTED, OK, RESET, WARN
+except ImportError:
+    from _helpers import (  # type: ignore[no-redef]
+        H1,
+        H2,
+        INFO,
+        LLM_A,
+        LLM_Q,
+        MUTED,
+        OK,
+        RESET,
+        WARN,
+    )
 from appinfra.log import LogConfig, LoggerFactory
 
 from llm_kelt.conversation import (
@@ -153,7 +166,7 @@ def demo_storage():
             conv = Conversation(lg)
             conv.add(question)
             conv.add(answer, Role.ASSISTANT)
-            storage.save(f"session-{i}", conv, metadata={"model": "qwen2.5-7b"})
+            storage.save(f"session-{i}", conv, extra={"model": "qwen2.5-7b"})
             print(f"  {OK}Saved:{RESET} session-{i}")
 
         # List sessions
@@ -172,7 +185,7 @@ def demo_storage():
         print(f"    Session ID: {loaded.session_id}")
         print(f"    Messages: {len(loaded.messages)}")
         print(f"    Created: {loaded.created_at}")
-        print(f"    Metadata: {loaded.metadata}")
+        print(f"    Extra: {loaded.extra}")
 
         # Delete
         storage.delete("session-2")
@@ -249,7 +262,7 @@ async def demo_llm_conversation():
                 print(f"  {LLM_A}Assistant:{RESET} {response}")
 
                 # Persist after each turn
-                storage.save("llm-demo", conv, metadata={"model": "local"})
+                storage.save("llm-demo", conv, extra={"model": "local"})
 
             print(f"\n  {INFO}Session stats:{RESET}")
             print(f"    Messages: {conv.message_count}")

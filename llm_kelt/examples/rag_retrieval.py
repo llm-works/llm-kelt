@@ -18,7 +18,7 @@ Prerequisites:
     - LLM backend for chat (optional)
 
 Usage:
-    python examples/02_rag_retrieval.py
+    python examples/rag_retrieval.py
 """
 
 import asyncio
@@ -28,20 +28,36 @@ from pathlib import Path
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from _helpers import (
-    CMD,
-    H1,
-    H2,
-    INFO,
-    LLM_A,
-    LLM_Q,
-    MUTED,
-    OK,
-    RESET,
-    WARN,
-    get_demo_context_key,
-    psql_cmd,
-)
+try:
+    from ._helpers import (
+        CMD,
+        H1,
+        H2,
+        INFO,
+        LLM_A,
+        LLM_Q,
+        MUTED,
+        OK,
+        RESET,
+        WARN,
+        get_demo_context_key,
+        psql_cmd,
+    )
+except ImportError:
+    from _helpers import (  # type: ignore[no-redef]
+        CMD,
+        H1,
+        H2,
+        INFO,
+        LLM_A,
+        LLM_Q,
+        MUTED,
+        OK,
+        RESET,
+        WARN,
+        get_demo_context_key,
+        psql_cmd,
+    )
 from appinfra.config import Config
 from appinfra.log import LogConfig, Logger, LoggerFactory
 from httpx import ConnectError, ConnectTimeout
@@ -306,7 +322,7 @@ async def main():
         await embedder.aclose()
 
     print(f"\n{H1}{'━' * 50}{RESET}")
-    print(f"{OK}✓ Done!{RESET} Next: {CMD}python examples/03_training_export.py{RESET}")
+    print(f"{OK}✓ Done!{RESET} Next: {CMD}python examples/training_export.py{RESET}")
 
 
 if __name__ == "__main__":

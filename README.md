@@ -119,11 +119,13 @@ kelt:
 
 Runnable scripts in [`examples/`](examples/):
 
-- `01_facts_and_context.py` — assertions + `ContextBuilder`.
-- `02_rag_retrieval.py` — embeddings, `search_similar`, `ContextQuery` with RAG.
-- `03_training_export.py` — feedback + preferences → DPO/SFT/classifier JSONL.
-- `04_lora_training.py` — end-to-end LoRA training.
-- `05_conversation.py` — `Conversation`, compaction, `FileSessionStorage`.
+Suggested reading order:
+
+1. `facts_and_context.py` — assertions + `ContextBuilder`.
+2. `rag_retrieval.py` — embeddings, `search_similar`, `ContextQuery` with RAG.
+3. `training_export.py` — feedback + preferences → DPO/SFT/classifier JSONL.
+4. `lora_training.py` — end-to-end LoRA training.
+5. `conversation.py` — `Conversation`, compaction, `FileSessionStorage`.
 
 ## License
 

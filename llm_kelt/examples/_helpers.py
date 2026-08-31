@@ -30,8 +30,19 @@ LLM_A = GREEN
 
 def psql_cmd(kelt: Client) -> str:
     """Build psql command from database config."""
+    import shlex
+
     url = kelt.database.engine.url
-    return f"psql -h {url.host} -p {url.port} -U {url.username} -d {url.database}"
+    args = ["psql"]
+    if url.host:
+        args += ["-h", str(url.host)]
+    if url.port:
+        args += ["-p", str(url.port)]
+    if url.username:
+        args += ["-U", str(url.username)]
+    if url.database:
+        args += ["-d", str(url.database)]
+    return shlex.join(args)
 
 
 def get_demo_context_key(name: str = "example") -> str:

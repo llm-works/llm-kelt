@@ -239,7 +239,7 @@ class FileSessionStorage(SessionStorage):
     def delete(self, session_id: str) -> bool
 ```
 
-`StoredSession` fields: `session_id`, `messages`, `created_at`, `updated_at`, `metadata`.
+`StoredSession` fields: `session_id`, `messages`, `created_at`, `updated_at`, `extra`.
 `SessionSummary`: `session_id`, `message_count`, `token_count`, `preview`, `updated_at`.
 
 Example:
@@ -302,6 +302,6 @@ Even with a compactor configured, this fires if the single new message alone exc
 
 ## Full working script
 
-See [`examples/05_conversation.py`](../examples/05_conversation.py) — covers messages, tool
+See [`examples/conversation.py`](../examples/conversation.py) — covers messages, tool
 calls, token accounting, sliding-window compaction, file storage (save/list/load/delete), and
 optionally a multi-turn LLM conversation with per-turn persistence.
