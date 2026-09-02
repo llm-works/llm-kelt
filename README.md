@@ -36,6 +36,25 @@ pip install llm-kelt              # runtime
 pip install llm-kelt[training]    # + torch / transformers / peft / trl
 ```
 
+## Database prerequisite
+
+`llm-kelt` is a database-backed substrate: the quickstart and all
+`examples/*.py` scripts need a running Postgres 16+ server with pgvector
+before they will do anything useful. Standing one up takes ~30 seconds:
+
+```bash
+docker run -d --rm --name kelt-quickstart-db \
+  -p 25432:5432 \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=learn_test \
+  pgvector/pgvector:pg16
+```
+
+Repo cloners can equivalently `make pg.server.up` (uses the shipped
+`etc/pg.yaml`). See [docs/quickstart.md § 1](docs/quickstart.md#1-postgres)
+for the full three-path menu (repo Makefile, standalone docker, existing
+Postgres).
+
 ## Minimal example
 
 ```python

@@ -7,17 +7,24 @@ Five minutes from install to a working RAG query.
 The library needs Postgres 16+ with pgvector. Three paths:
 
 **A. Cloned repo — `make pg.server.up`.** Uses the shipped `etc/pg.yaml`: pgvector:pg18 on
-port 7632, container name `kelt-pg`, database `kelt`. Works with docker or podman
+port 25432, container name `kelt-pg`, database `kelt`. Works with docker or podman
 (`INFRA_CONTAINER_CMD` in `Makefile.local` selects the runtime). Stop with
 `make pg.server.down`. Recommended for local development.
 
-**B. Standalone docker.** No repo checkout required:
+**B. Standalone docker.** No repo checkout required. This form matches the
+default URL that `python -m llm_kelt.examples.quickstart` tries — same port,
+credentials, and database name — so the smoke works with no extra config:
 
 ```bash
-docker run -d --name kelt-pg \
-  -e POSTGRES_PASSWORD=kelt -e POSTGRES_DB=llm_kelt \
-  -p 5432:5432 pgvector/pgvector:pg16
+docker run -d --rm --name kelt-quickstart-db \
+  -p 25432:5432 \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=learn_test \
+  pgvector/pgvector:pg16
 ```
+
+Stop with `docker stop kelt-quickstart-db` (the container is `--rm`, so it
+also deletes itself and its ephemeral state on stop).
 
 **C. Existing Postgres.** Any Postgres 16+ with the `vector` extension installable
 (`CREATE EXTENSION vector`) works. Point the URL in step 3 at it.
