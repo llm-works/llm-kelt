@@ -44,12 +44,12 @@ Otherwise create `etc/llm-kelt.yaml`:
 ```yaml
 dbs:
   main:
-    url: postgresql://postgres:kelt@localhost:5432/llm_kelt
+    url: postgresql://postgres:postgres@localhost:25432/learn_test
     extensions: [vector]
 ```
 
-(Adjust the URL to match your Postgres. Path B → port 5432, password `kelt`. Path C → your
-own.)
+(Adjust the URL to match your Postgres. Path B → port 25432, password `postgres`, database
+`learn_test`. Path C → your own.)
 
 The `llm`, `embedding`, and `kelt.adapters` sections are added as those subsystems are
 enabled (section 6 below, and the [Context & RAG](context-and-rag.md) /
