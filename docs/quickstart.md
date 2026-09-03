@@ -17,7 +17,7 @@ credentials, and database name — so the smoke works with no extra config:
 
 ```bash
 docker run -d --rm --name kelt-quickstart-db \
-  -p 25432:5432 \
+  -p 127.0.0.1:25432:5432 \
   -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=learn_test \
   pgvector/pgvector:pg16

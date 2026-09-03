@@ -18,7 +18,7 @@ running:
 .. code-block:: bash
 
     docker run -d --rm --name kelt-quickstart-db \\
-      -p 25432:5432 \\
+      -p 127.0.0.1:25432:5432 \\
       -e POSTGRES_PASSWORD=postgres \\
       -e POSTGRES_DB=learn_test \\
       pgvector/pgvector:pg16
@@ -59,7 +59,7 @@ Error:  {first_line}
 Quickest fix — start one with Docker (matches the default URL above):
 
   docker run -d --rm --name kelt-quickstart-db \\
-    -p 25432:5432 \\
+    -p 127.0.0.1:25432:5432 \\
     -e POSTGRES_PASSWORD=postgres \\
     -e POSTGRES_DB=learn_test \\
     pgvector/pgvector:pg16
