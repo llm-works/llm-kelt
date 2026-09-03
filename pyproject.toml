@@ -113,7 +113,7 @@ markers = [
 
 [tool.coverage.run]
 source = ["llm_kelt"]
-omit = ["*/test/*", "*/tests/*", "*_test.py"]
+omit = ["*/test/*", "*/tests/*", "*_test.py", "*/examples/*"]
 
 [tool.coverage.report]
 exclude_lines = [
