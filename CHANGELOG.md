@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `etc/pg.yaml` `pgserver.name` is now `llm-works-pg` (was `kelt-pg`), matching
+  the canonical shared name used by sibling llm-works packages so
+  `make pg.server.up` is idempotent across a shared local container.
+
 ## [0.4.4] - 2026-09-03
 
 ### Security
