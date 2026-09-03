@@ -66,7 +66,9 @@ from llm_kelt import ClientContext, ClientFactory
 from llm_kelt.inference import ContextBuilder
 
 lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
-database_url = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:5432/kelt")
+database_url = os.environ.get(
+    "DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:25432/learn_test"
+)
 config = DotDict({"dbs": {"main": {"url": database_url, "create_db": True}}})
 
 kelt = ClientFactory(lg).create_from_config(

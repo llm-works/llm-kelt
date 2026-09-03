@@ -48,13 +48,12 @@ from llm_kelt.inference import ContextBuilder
 DEFAULT_URL = "postgresql://postgres:postgres@127.0.0.1:25432/learn_test"
 
 
-def _print_db_prereq(url: str, err: Exception) -> None:
+def _print_db_prereq(err: Exception) -> None:
     first_line = str(err).splitlines()[0] if str(err) else type(err).__name__
     print(
         f"""
 llm-kelt quickstart requires a running Postgres+pgvector server.
 
-Tried:  {url}
 Error:  {first_line}
 
 Quickest fix — start one with Docker (matches the default URL above):
@@ -107,7 +106,7 @@ def main() -> int:
     try:
         return _run(database_url)
     except OperationalError as e:
-        _print_db_prereq(database_url, e)
+        _print_db_prereq(e)
         return 1
 
 

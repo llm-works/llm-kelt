@@ -1,7 +1,7 @@
 pgserver:
   # version: 18                # Ignored when image is specified
   name: kelt-pg               # Server identifier/name for logging and identification
-  port: 25432                  # Non-standard port so a local Postgres on 5432 doesn't collide; override with INFRA_PGSERVER_PORT or ~/.llm-works.yaml
+  port: 25432                  # Non-standard port so a local Postgres on 5432 doesn't collide; override with INFRA_PGSERVER_PORT
   # Fully qualified so podman resolves without unqualified-search-registries
   # config (docker accepts the qualified form transparently).
   image: docker.io/pgvector/pgvector:pg18
