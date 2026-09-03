@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `python -m llm_kelt.examples.quickstart` prints a prerequisite message
+  with a copy-pasteable docker command and exits 1 when Postgres+pgvector
+  is unreachable, instead of surfacing a raw `psycopg2.OperationalError`
+  traceback.
+
+### Changed
+- Default port for the shipped `etc/pg.yaml` is `25432` (was `7632`) so
+  the defaults don't silently collide with a local Postgres on `5432`;
+  override via `DATABASE_URL` or `INFRA_PGSERVER_PORT`.
+
+### Docs
+- README adds a "Database prerequisite" section for the quickstart and
+  example scripts; `docs/quickstart.md` Path B docker command aligned to
+  the shipped default so the copy-paste flow works with no extra config.
+
 ## [0.4.3] - 2026-08-31
 
 ### Fixed
