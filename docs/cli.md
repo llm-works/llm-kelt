@@ -1,7 +1,8 @@
 # CLI reference
 
-Entry point: `kelt`. Config file: `llm-kelt.yaml` (searched via `$KELT_CONFIG_FILE` first,
-then `./etc/llm-kelt.yaml`, then `./llm-kelt.yaml`). All subcommands accept `--help`.
+Entry point: `kelt`. Config is discovered via the llm-works config protocol v1: `--etc-dir` if
+given, else the first-existing XDG overlay, else the wheel-bundled `llm_kelt/etc/llm-kelt.yaml`.
+See [Config file lookup](#config-file-lookup) below. All subcommands accept `--help`.
 
 Top-level structure:
 
@@ -186,14 +187,38 @@ Deletes the session file. Idempotent — no error if the session doesn't exist.
 
 ## Config file lookup
 
-The CLI reads `llm-kelt.yaml` from (in order):
+The CLI follows the [llm-works config protocol v1][protocol]. Lookup order (first match wins):
 
-1. `$KELT_CONFIG_FILE` if set.
-2. `./etc/llm-kelt.yaml`.
-3. `./llm-kelt.yaml`.
+1. `--etc-dir <dir>` on the CLI → `<dir>/llm-kelt.yaml` (user-authoritative escape hatch).
+2. `$XDG_CONFIG_HOME/llm-works/llm-kelt.yaml` (per-package overlay; default
+   `~/.config/llm-works/llm-kelt.yaml`).
+3. `$XDG_CONFIG_HOME/llm-works/config.yaml` (unified overlay, sectioned by short package
+   name).
+4. `$XDG_CONFIG_DIRS/llm-works/...` (system-wide defaults; default `/etc/xdg`).
+5. Wheel-bundled `llm_kelt/etc/llm-kelt.yaml`.
 
-`--config <path>` on any subcommand overrides. Errors on missing config for subcommands that
-need it (`train`, `atomic`, `proxy`).
+XDG overlays typically compose the bundled base via YAML `!include`:
+
+```yaml
+# ~/.config/llm-works/llm-kelt.yaml
+!include /path/to/site-packages/llm_kelt/etc/llm-kelt.yaml
+
+dbs:
+  main:
+    url: postgresql://user:pass@my-host:5432/kelt   # override
+```
+
+Find the bundled base path with:
+
+```bash
+python -c "import llm_kelt, pathlib; print(pathlib.Path(llm_kelt.__file__).parent / 'etc' / 'llm-kelt.yaml')"
+```
+
+Config-field overrides via environment variables use the `INFRA_*` prefix (universal across
+llm-works packages).
+
+[protocol]:
+https://github.com/llm-works/appinfra/blob/develop/appinfra/docs/guides/config-protocol.md
 
 ## Registry path
 
