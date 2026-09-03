@@ -7,7 +7,7 @@ Five minutes from install to a working RAG query.
 The library needs Postgres 16+ with pgvector. Three paths:
 
 **A. Cloned repo — `make pg.server.up`.** Uses the shipped `etc/pg.yaml`: pgvector:pg18 on
-port 25432, container name `kelt-pg`, database `kelt`. Works with docker or podman
+port 25432, container name `llm-works-pg`, database `kelt`. Works with docker or podman
 (`INFRA_CONTAINER_CMD` in `Makefile.local` selects the runtime). Stop with
 `make pg.server.down`. Recommended for local development.
 
