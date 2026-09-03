@@ -44,7 +44,7 @@ before they will do anything useful. Standing one up takes ~30 seconds:
 
 ```bash
 docker run -d --rm --name kelt-quickstart-db \
-  -p 25432:5432 \
+  -p 127.0.0.1:25432:5432 \
   -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=learn_test \
   pgvector/pgvector:pg16

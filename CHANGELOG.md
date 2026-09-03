@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.4] - 2026-09-03
 
+### Security
+- Docker quickstart commands bind to loopback (`127.0.0.1:25432:5432`)
+  instead of all interfaces.
+
 ### Fixed
 - `python -m llm_kelt.examples.quickstart` prints a prerequisite message
   with a copy-pasteable docker command and exits 1 when Postgres+pgvector
