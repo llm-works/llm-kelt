@@ -13,9 +13,9 @@ are assumed background — see the HuggingFace, PEFT, or TRL docs for those.
 | **SchemaMode** | What the client does on startup: `ENSURE` runs migrations, `VERIFY` checks version, `SKIP` doesn't touch alembic (and skips the pgvector import). |
 | **manifest** | YAML file describing a training run: adapter, method, data source, LoRA/training config, deployment policy. Persisted to `<registry>/pending/` then `<registry>/completed/`. |
 | **adapter (registry)** | A named series of trained versions. Each version is identified by a 12-char md5. Deploys are per-version. |
-| **fact ID** | `int` returned from `add()` / `record()` methods. Primary key on `memv1_facts`. |
+| **fact ID** | `int` returned from `add()` / `record()` methods. Primary key on `atomic_facts`. |
 | **signal** | Feedback direction: `"positive"`, `"negative"`, `"dismiss"`. |
 | **strength** | Feedback intensity, `0.0`–`1.0`. Used as a filter on training exports (`min_strength=`). |
 | **margin** | Preference-pair confidence. Used as a filter on DPO exports (`min_margin=`). |
 | **quantized embedding** | Fact vector stored as `F32`, `F16` (halfvec, default), `I8`, or `I4`. Format picks the table (`embeddings_f16_384`, etc.). |
-| **details table** | Per-fact-type table joined to `memv1_facts` (`memv1_feedback_details`, `memv1_preference_details`, ...). Eagerly loaded when clients return `Fact` objects. |
+| **details table** | Per-fact-type table joined to `atomic_facts` (`atomic_feedback_details`, `atomic_preference_details`, ...). Eagerly loaded when clients return `Fact` objects. |

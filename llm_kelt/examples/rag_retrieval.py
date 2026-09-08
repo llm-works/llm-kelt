@@ -3,6 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
 
+# ci-skip: needs a reachable embedding backend (llm-infer with an
+# embedding model loaded) in addition to Postgres.
+
 """Example: RAG (Retrieval-Augmented Generation) with Semantic Search.
 
 This example demonstrates:
@@ -59,7 +62,7 @@ except ImportError:
         psql_cmd,
     )
 from appinfra.config import Config
-from appinfra.log import LogConfig, Logger, LoggerFactory
+from appinfra.log import Logger, create_root_lg
 from httpx import ConnectError, ConnectTimeout
 from llm_infer.client import EmbeddingClient
 from llm_infer.client import Factory as LLMClientFactory
@@ -298,8 +301,8 @@ async def main():
     from llm_kelt import ClientContext
 
     # Suppress logging noise
-    lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
-    config = Config("etc/llm-kelt.yaml")
+    lg = create_root_lg(level="warning")
+    config = Config.from_spec("llm-works", "llm-kelt")
     factory = ClientFactory(lg)
 
     # Create context for this example

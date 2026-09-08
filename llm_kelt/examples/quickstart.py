@@ -3,6 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
 
+# ci-requires: pg
+# ci-timeout: 15
+
 """Minimal quick-start smoke that mirrors the README example.
 
 Runs against an installed wheel via ``python -m llm_kelt.examples.quickstart``.
@@ -38,7 +41,7 @@ import sys
 import uuid
 
 from appinfra.dot_dict import DotDict
-from appinfra.log import LogConfig, LoggerFactory
+from appinfra.log import create_root_lg
 from sqlalchemy.exc import OperationalError
 
 from llm_kelt import ClientContext, ClientFactory
@@ -70,7 +73,7 @@ https://github.com/serendip-ml/llm-kelt/blob/main/docs/quickstart.md
 
 
 def _run(database_url: str) -> int:
-    lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+    lg = create_root_lg(level="warning")
     config = DotDict({"dbs": {"main": {"url": database_url, "create_db": True}}})
 
     # Unique key so repeated smoke runs don't accumulate rows for the same agent.

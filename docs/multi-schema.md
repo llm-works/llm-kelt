@@ -138,8 +138,8 @@ lock so concurrent first-uses converge.
 prod = kelt.with_schema("production")
 stage = kelt.with_schema("staging")
 
-prod.atomic.assertions.add("...", category="config")   # writes to production.memv1_facts
-stage.atomic.feedback.record(signal="positive", ...)   # writes to staging.memv1_feedback_details
+prod.atomic.assertions.add("...", category="config")   # writes to production.atomic_facts
+stage.atomic.feedback.record(signal="positive", ...)   # writes to staging.atomic_feedback_details
 ```
 
 Signature:
