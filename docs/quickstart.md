@@ -10,7 +10,7 @@ The library needs Postgres 16+ with pgvector. Three paths:
 lands on `PATH` after `pip install llm-kelt`. Starts pgvector:pg18 as container
 `llm-works-pg` on port 25432 with trust auth; podman preferred over docker. Matches the
 default URL that `python -m llm_kelt.examples.quickstart` connects to, so the smoke works
-with no extra config. Stop with `appinfra pg down`. Requires `appinfra>=0.10.6`.
+with no extra config. Stop with `appinfra pg down`. Requires `appinfra>=0.11.0`.
 
 **B. Cloned repo — `make pg.server.up`.** Same container and defaults as (A), via the
 shipped `etc/pg.yaml`. Works with docker or podman (`INFRA_CONTAINER_CMD` in
