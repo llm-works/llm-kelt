@@ -20,7 +20,7 @@ classifiers = [
 ]
 dependencies = [
     # Core infrastructure
-    "appinfra>=0.8",
+    "appinfra>=0.11.0",
 
     # Storage
     "sqlalchemy>=2.0,<3.0",

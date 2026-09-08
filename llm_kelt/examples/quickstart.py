@@ -24,7 +24,7 @@ running:
 
 (``appinfra`` is a runtime dep of ``llm-kelt``; the CLI lands on ``PATH``
 after ``pip install llm-kelt``. Starts pgvector:pg18 as container
-``llm-works-pg`` on 25432 with trust auth. Requires ``appinfra>=0.10.6``.)
+``llm-works-pg`` on 25432 with trust auth. Requires ``appinfra>=0.11.0``.)
 
 Repo cloners can equivalently ``make pg.server.up``. See
 ``docs/quickstart.md`` section 1 for the full menu.

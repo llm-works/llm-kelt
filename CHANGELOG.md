@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-09-07
+
 ### Changed
 - `etc/pg.yaml` `pgserver.name` is now `llm-works-pg` (was `kelt-pg`), matching
   the canonical shared name used by sibling llm-works packages so
   `make pg.server.up` is idempotent across a shared local container.
   **Existing local containers:** rename with `docker rename kelt-pg llm-works-pg`
   (or `podman rename kelt-pg llm-works-pg`), or delete and re-create.
+- Minimum `appinfra` dependency bumped to 0.11.0 (faceted AppBuilder API).
+
+### Docs
+- Quickstart and examples updated to appinfra v1 APIs.
 
 ## [0.4.4] - 2026-09-03
 
@@ -339,7 +345,8 @@ Config keys: `model_name` → `model`, added `type` (provider: "openai"/"google"
 - Example scripts for common workflows
 - API reference documentation in README
 
-[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/llm-works/llm-kelt/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/llm-works/llm-kelt/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/llm-works/llm-kelt/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/llm-works/llm-kelt/compare/v0.4.1...v0.4.2
