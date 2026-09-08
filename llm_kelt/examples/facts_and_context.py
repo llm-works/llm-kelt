@@ -3,6 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
 
+# ci-skip: makes real LLM inference calls (ContextQuery.ask); needs a
+# reachable llm-infer backend beyond what CI provisions.
+
 """Example: Facts and Context Injection.
 
 This example demonstrates:
@@ -92,7 +95,7 @@ def setup_facts(kelt: Client):
 
     print(
         f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(kelt)} -c "SELECT id, category, content '
-        f"FROM memv1_facts WHERE context_key='{kelt.context_key}' AND active=true;\""
+        f"FROM atomic_facts WHERE context_key='{kelt.context_key}' AND active=true;\""
     )
 
 
@@ -132,10 +135,10 @@ async def demo_context_query(context_builder: ContextBuilder):
 
     try:
         from appinfra.config import Config
-        from appinfra.log import LogConfig, LoggerFactory
+        from appinfra.log import create_root_lg
 
-        config = Config("etc/llm-kelt.yaml")
-        lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+        config = Config.from_spec("llm-works", "llm-kelt")
+        lg = create_root_lg(level="warning")
         llm_factory = LLMClientFactory(lg)
         llm_client = llm_factory.from_config(config.llm.to_dict())
 
@@ -219,7 +222,7 @@ def demo_fact_management(kelt: Client):
 
     print(
         f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(kelt)} -c "SELECT id, active, content '
-        f'FROM memv1_facts WHERE id={fact.id};"'
+        f'FROM atomic_facts WHERE id={fact.id};"'
     )
 
 
@@ -231,12 +234,12 @@ async def main():
 
     # Initialize
     from appinfra.config import Config
-    from appinfra.log import LogConfig, LoggerFactory
+    from appinfra.log import create_root_lg
 
     from llm_kelt import ClientContext
 
-    config = Config("etc/llm-kelt.yaml")
-    lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+    config = Config.from_spec("llm-works", "llm-kelt")
+    lg = create_root_lg(level="warning")
     factory = ClientFactory(lg)
 
     # Create context for this example

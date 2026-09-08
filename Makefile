@@ -21,6 +21,10 @@ INFRA_DEV_CQ_STRICT := true
 # Enforce SPDX license headers on all source files
 INFRA_DEV_CQ_SPDX := true
 
+# Run example scripts as a check subcheck (same as `make examples.check`)
+# Each example declares its invocation via `# ci-*` header markers.
+INFRA_DEV_CHECK_EXAMPLES := true
+
 # Exclude examples from function size checks (demo scripts have longer functions)
 INFRA_DEV_CQ_EXCLUDE := llm_kelt/examples/*
 

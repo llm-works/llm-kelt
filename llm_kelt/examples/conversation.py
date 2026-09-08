@@ -3,6 +3,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
 
+# ci-timeout: 30
+# Demos 1-3 are pure Python; demo 4's LLM call is guarded and prints a
+# skip message when the backend is unavailable, so no ci-requires is needed.
+
 """Example: Conversation Layer.
 
 This example demonstrates:
@@ -41,7 +45,7 @@ except ImportError:
         RESET,
         WARN,
     )
-from appinfra.log import LogConfig, LoggerFactory
+from appinfra.log import create_root_lg
 
 from llm_kelt.conversation import (
     Config,
@@ -89,7 +93,7 @@ def demo_conversation():
     """Demonstrate conversation management with token tracking."""
     print(f"\n{H2}▶ Conversation Management{RESET}")
 
-    lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+    lg = create_root_lg(level="warning")
     config = Config(max_tokens=200, compact_threshold=0.8, min_recent_messages=2)
     conv = Conversation(lg, config=config)
 
@@ -149,7 +153,7 @@ def demo_storage():
     """Demonstrate file-based session persistence."""
     print(f"\n{H2}▶ Session Storage (File Backend){RESET}")
 
-    lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+    lg = create_root_lg(level="warning")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         storage = FileSessionStorage(lg, tmpdir)
@@ -211,18 +215,18 @@ async def demo_llm_conversation():
         print(f"  {MUTED}(Skipped: llm-infer not installed){RESET}")
         return
 
-    config_path = Path(__file__).parent.parent / "etc" / "llm-kelt.yaml"
-    if not config_path.exists():
-        print(f"  {MUTED}(Skipped: {config_path} not found){RESET}")
+    try:
+        config = AppConfig.from_spec("llm-works", "llm-kelt")
+    except FileNotFoundError as e:
+        print(f"  {MUTED}(Skipped: config not found: {e}){RESET}")
         return
 
-    config = AppConfig(str(config_path))
     llm_config = getattr(config, "llm", None)
     if not llm_config:
         print(f"  {MUTED}(Skipped: no llm section in config){RESET}")
         return
 
-    lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+    lg = create_root_lg(level="warning")
 
     try:
         llm_factory = LLMClientFactory(lg)

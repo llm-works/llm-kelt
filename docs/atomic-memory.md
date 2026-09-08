@@ -22,7 +22,7 @@ kelt = ClientFactory(lg).create_from_config(
 
 ## The `Fact` row
 
-Every atomic write returns an `int` fact ID pointing at a row in `memv1_facts`:
+Every atomic write returns an `int` fact ID pointing at a row in `atomic_facts`:
 
 | Column | Type | Notes |
 |---|---|---|
@@ -36,8 +36,8 @@ Every atomic write returns an `int` fact ID pointing at a row in `memv1_facts`:
 | `active` | bool | `false` = soft-deleted |
 | `created_at`, `updated_at` | datetime | UTC |
 
-Type-specific fields live in a details table joined by `fact_id` (`memv1_feedback_details`,
-`memv1_preference_details`, ...). You rarely touch those directly — the client methods
+Type-specific fields live in a details table joined by `fact_id` (`atomic_feedback_details`,
+`atomic_preference_details`, ...). You rarely touch those directly — the client methods
 return `Fact` objects with the details eagerly loaded.
 
 ## Common methods

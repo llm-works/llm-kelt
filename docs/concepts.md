@@ -33,7 +33,7 @@ on the context, or by opening a `ScopedClient`:
 ```python
 prod = kelt.with_schema("production")
 stage = kelt.with_schema("staging")
-prod.atomic.assertions.add("...")  # writes to production.memv1_facts
+prod.atomic.assertions.add("...")  # writes to production.atomic_facts
 ```
 
 Schema-scoped clients are lazily initialised on first `.atomic` access. Use them when

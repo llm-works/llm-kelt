@@ -6,25 +6,15 @@ Five minutes from install to a working RAG query.
 
 The library needs Postgres 16+ with pgvector. Three paths:
 
-**A. Cloned repo — `make pg.server.up`.** Uses the shipped `etc/pg.yaml`: pgvector:pg18 on
-port 25432, container name `llm-works-pg`, database `kelt`. Works with docker or podman
-(`INFRA_CONTAINER_CMD` in `Makefile.local` selects the runtime). Stop with
-`make pg.server.down`. Recommended for local development.
+**A. `appinfra pg up`.** No repo checkout required. `appinfra` is a runtime dep, so the CLI
+lands on `PATH` after `pip install llm-kelt`. Starts pgvector:pg18 as container
+`llm-works-pg` on port 25432 with trust auth; podman preferred over docker. Matches the
+default URL that `python -m llm_kelt.examples.quickstart` connects to, so the smoke works
+with no extra config. Stop with `appinfra pg down`. Requires `appinfra>=0.10.6`.
 
-**B. Standalone docker.** No repo checkout required. This form matches the
-default URL that `python -m llm_kelt.examples.quickstart` tries — same port,
-credentials, and database name — so the smoke works with no extra config:
-
-```bash
-docker run -d --rm --name kelt-quickstart-db \
-  -p 127.0.0.1:25432:5432 \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=learn_test \
-  pgvector/pgvector:pg16
-```
-
-Stop with `docker stop kelt-quickstart-db` (the container is `--rm`, so it
-also deletes itself and its ephemeral state on stop).
+**B. Cloned repo — `make pg.server.up`.** Same container and defaults as (A), via the
+shipped `etc/pg.yaml`. Works with docker or podman (`INFRA_CONTAINER_CMD` in
+`Makefile.local` selects the runtime). Stop with `make pg.server.down`.
 
 **C. Existing Postgres.** Any Postgres 16+ with the `vector` extension installable
 (`CREATE EXTENSION vector`) works. Point the URL in step 3 at it.
@@ -37,42 +27,44 @@ pip install llm-kelt
 
 ## 3. Config
 
-If path A: `etc/llm-kelt.yaml` and `etc/pg.yaml` are already in the repo. Skip to step 4.
+kelt ships a packaged base config (`llm_kelt/etc/llm-kelt.yaml`) with defaults matching
+paths A and B — port 25432, trust auth, database `kelt` (auto-created). No local file
+needed for those paths.
 
-Otherwise create `etc/llm-kelt.yaml`:
+To override any setting — path C's URL, credentials, ports, adapter paths — drop a user
+overlay at `~/.config/llm-works/llm-kelt.yaml`. The v1 config protocol picks it up ahead
+of the packaged base:
 
 ```yaml
 dbs:
   main:
-    url: postgresql://postgres:postgres@localhost:25432/learn_test
+    url: postgresql://user:pass@your-host:5432/your-db
     extensions: [vector]
 ```
 
-(Adjust the URL to match your Postgres. Path B → port 25432, password `postgres`, database
-`learn_test`. Path C → your own.)
-
-The `llm`, `embedding`, and `kelt.adapters` sections are added as those subsystems are
-enabled (section 6 below, and the [Context & RAG](context-and-rag.md) /
+The `llm`, `embedding`, and `kelt.adapters` sections are added to the overlay as those
+subsystems are enabled (section 6 below, and the [Context & RAG](context-and-rag.md) /
 [Training](training.md) tutorials).
 
 ## 4. First client
 
 ```python
 from appinfra.config import Config
-from appinfra.log import LogConfig, LoggerFactory
+from appinfra.log import create_root_lg
 from llm_kelt import ClientContext, ClientFactory
 
-config = Config("etc/llm-kelt.yaml")
-lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
-
+config = Config.from_spec("llm-works", "llm-kelt")
+lg = create_root_lg(level="warning")
 kelt = ClientFactory(lg).create_from_config(
     context=ClientContext(context_key="quickstart"),
     config=config,
 )
 ```
 
-On first run this creates the `public` schema tables. The `context_key` scopes every read
-and write — nothing you record here is visible to a client using a different key.
+`Config.from_spec` walks the v1 precedence chain: user overlay (if any), then the
+packaged base. On first run this creates the `public` schema tables. The `context_key`
+scopes every read and write — nothing you record here is visible to a client using a
+different key.
 
 ## 5. Record and read a fact
 
