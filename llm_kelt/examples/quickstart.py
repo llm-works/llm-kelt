@@ -17,15 +17,14 @@ running:
 
 .. code-block:: bash
 
-    docker run -d --rm --name kelt-quickstart-db \\
-      -p 127.0.0.1:25432:5432 \\
-      -e POSTGRES_PASSWORD=postgres \\
-      -e POSTGRES_DB=learn_test \\
-      pgvector/pgvector:pg16
+    appinfra pg up
 
-Repo cloners can equivalently ``make pg.server.up`` (uses the shipped
-``etc/pg.yaml``). See ``docs/quickstart.md`` section 1 for the full menu
-(repo Makefile, standalone docker, existing Postgres).
+(``appinfra`` is a runtime dep of ``llm-kelt``; the CLI lands on ``PATH``
+after ``pip install llm-kelt``. Starts pgvector:pg18 as container
+``llm-works-pg`` on 25432 with trust auth. Requires ``appinfra>=0.10.6``.)
+
+Repo cloners can equivalently ``make pg.server.up``. See
+``docs/quickstart.md`` section 1 for the full menu.
 
 The LLM and embedding backends are not exercised — the goal is to prove the
 persistence surface is wired end-to-end (add fact → build system prompt),
@@ -56,18 +55,15 @@ llm-kelt quickstart requires a running Postgres+pgvector server.
 
 Error:  {first_line}
 
-Quickest fix — start one with Docker (matches the default URL above):
+Quickest fix (matches the default URL above):
 
-  docker run -d --rm --name kelt-quickstart-db \\
-    -p 127.0.0.1:25432:5432 \\
-    -e POSTGRES_PASSWORD=postgres \\
-    -e POSTGRES_DB=learn_test \\
-    pgvector/pgvector:pg16
+  appinfra pg up
 
 Then re-run: python -m llm_kelt.examples.quickstart
 
-Alternatives (repo Makefile target, existing Postgres, custom DATABASE_URL):
-see docs/quickstart.md section 1 — https://github.com/serendip-ml/llm-kelt/blob/main/docs/quickstart.md
+Stops with `appinfra pg down`. Alternatives (repo Makefile target, existing
+Postgres, custom DATABASE_URL): see docs/quickstart.md section 1 —
+https://github.com/serendip-ml/llm-kelt/blob/main/docs/quickstart.md
 """.rstrip(),
         file=sys.stderr,
     )
