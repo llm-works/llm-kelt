@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
 
+# ci-skip: LoRA training needs a CUDA GPU and local model weights.
+
 """Example: LoRA Fine-Tuning.
 
 This example demonstrates LoRA adapter training:
@@ -39,7 +41,7 @@ try:
 except ImportError:
     from _helpers import H1, H2, INFO, MUTED, OK, RESET, WARN  # type: ignore[no-redef]
 from appinfra.config import Config
-from appinfra.log import LogConfig, Logger, LoggerFactory
+from appinfra.log import Logger, create_root_lg
 
 from llm_kelt.training import LoraConfig, train_lora
 
@@ -200,9 +202,9 @@ def main() -> None:
     print(f"{H1}  Example 04: LoRA Fine-Tuning{RESET}")
     print(f"{H1}{'=' * 60}{RESET}")
 
-    lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+    lg = create_root_lg(level="warning")
 
-    config = Config("etc/llm-kelt.yaml")
+    config = Config.from_spec("llm-works", "llm-kelt")
 
     # Get inference URL and find matching training model
     infer_url = get_infer_url(config)

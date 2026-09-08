@@ -3,6 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
 
+# ci-requires: pg
+# ci-timeout: 20
+
 """Example: Exporting Data for Training.
 
 This example demonstrates:
@@ -165,13 +168,13 @@ def record_sample_data(kelt: Client):
 
     print(
         f'\n  {CMD}▸ Verify feedback:{RESET} {psql_cmd(kelt)} -c "SELECT f.id, d.signal, d.strength '
-        f"FROM memv1_facts f JOIN memv1_feedback_details d ON f.id = d.fact_id "
-        f'WHERE f.context_key={kelt.context_key} LIMIT 5;"'
+        f"FROM atomic_facts f JOIN atomic_feedback_details d ON f.id = d.fact_id "
+        f"WHERE f.context_key='{kelt.context_key}' LIMIT 5;\""
     )
     print(
         f'  {CMD}▸ Verify preferences:{RESET} {psql_cmd(kelt)} -c "SELECT f.id, f.category, d.margin '
-        f"FROM memv1_facts f JOIN memv1_preference_details d ON f.id = d.fact_id "
-        f'WHERE f.context_key={kelt.context_key} LIMIT 5;"'
+        f"FROM atomic_facts f JOIN atomic_preference_details d ON f.id = d.fact_id "
+        f"WHERE f.context_key='{kelt.context_key}' LIMIT 5;\""
     )
 
 
@@ -269,15 +272,15 @@ def print_summary():
 def main():
     """Run the training export demo."""
     from appinfra.config import Config
-    from appinfra.log import LogConfig, LoggerFactory
+    from appinfra.log import create_root_lg
 
     print(f"\n{H1}{'━' * 50}{RESET}")
     print(f"{H1}  Example 03: Training Data Export{RESET}")
     print(f"{H1}{'━' * 50}{RESET}")
 
     # Setup config, logger, and database
-    config = Config("etc/llm-kelt.yaml")
-    lg = LoggerFactory.create_root(LogConfig.from_params(level="warning"))
+    config = Config.from_spec("llm-works", "llm-kelt")
+    lg = create_root_lg(level="warning")
 
     # Create Client using factory
     context = ClientContext(context_key="demo:example")
