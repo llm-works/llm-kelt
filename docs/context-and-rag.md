@@ -296,7 +296,7 @@ for sf in scored:
 
 ## Batch retrieval — avoid N+1
 
-Reading many facts by ID? Use the batch method (added in #83):
+Reading many facts by ID? Use the batch method:
 
 ```python
 ids = [12, 34, 56, 78]

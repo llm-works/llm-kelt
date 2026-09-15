@@ -218,7 +218,7 @@ Config-field overrides via environment variables use the `INFRA_*` prefix (unive
 llm-works packages).
 
 [protocol]:
-https://github.com/llm-works/appinfra/blob/develop/appinfra/docs/guides/config-protocol.md
+https://github.com/llm-works/appinfra/blob/main/appinfra/docs/guides/config-protocol.md
 
 ## Registry path
 
