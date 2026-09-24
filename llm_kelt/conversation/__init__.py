@@ -41,6 +41,7 @@ from .compaction import (
     SummarizingCompactor,
     TieredCompactor,
 )
+from .factory import ConversationFactory
 from .session import Config, Conversation
 from .storage import FileSessionStorage, SessionStorage, SessionSummary, StoredSession
 from .tokens import Tokenizer, estimate_message_tokens, estimate_tokens
@@ -53,6 +54,7 @@ __all__ = [
     "ToolCall",
     # Session
     "Conversation",
+    "ConversationFactory",
     "Config",
     # Compaction
     "AsyncCompactor",
