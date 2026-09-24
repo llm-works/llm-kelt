@@ -16,6 +16,7 @@ from llm_kelt.conversation import (
     Config,
     ContextOverflowError,
     Conversation,
+    ConversationFactory,
     Message,
     Role,
     ToolCall,
@@ -921,6 +922,59 @@ class TestConversationSerialization:
 
         with pytest.raises(ValueError, match="Expected dict"):
             Conversation.from_dict("not a dict", lg)
+
+
+class TestConversationFactory:
+    """Tests for ConversationFactory (saia's ConversationFactory Protocol)."""
+
+    def test_create_fresh(self, lg):
+        factory = ConversationFactory(lg)
+        conv = factory.create()
+
+        assert isinstance(conv, Conversation)
+        assert conv.message_count == 0
+
+    def test_create_from_state_roundtrip(self, lg):
+        source = Conversation(lg)
+        source.add("You are helpful.", Role.SYSTEM)
+        source.add("Hello")
+        source.add("Hi!", Role.ASSISTANT)
+
+        factory = ConversationFactory(lg)
+        restored = factory.create_from_state(source.to_dict())
+
+        assert restored.message_count == 3
+        assert restored.messages[0].content == "You are helpful."
+        assert restored.messages[1].content == "Hello"
+        assert restored.messages[2].role == "assistant"
+
+    def test_bundled_config_and_compactor_applied(self, lg):
+        from llm_kelt.conversation import SlidingWindowCompactor
+
+        config = Config(max_tokens=5000, compact_threshold=0.6)
+        compactor = SlidingWindowCompactor()
+        factory = ConversationFactory(lg, config=config, compactor=compactor)
+
+        fresh = factory.create()
+        assert fresh.config.max_tokens == 5000
+        assert fresh.compactor is compactor
+
+        source = Conversation(lg)
+        source.add("test")
+        restored = factory.create_from_state(source.to_dict())
+        assert restored.config.max_tokens == 5000
+        assert restored.compactor is compactor
+
+    def test_conversation_satisfies_saia_protocols(self, lg):
+        """Structural conformance: Conversation isinstance of saia's Protocols."""
+        from llm_saia import ConversationFactory as SaiaConversationFactory
+        from llm_saia import SerializableConversationLike
+
+        conv = Conversation(lg)
+        assert isinstance(conv, SerializableConversationLike)
+
+        factory = ConversationFactory(lg)
+        assert isinstance(factory, SaiaConversationFactory)
 
         with pytest.raises(ValueError, match="Missing required key 'messages'"):
             Conversation.from_dict({}, lg)

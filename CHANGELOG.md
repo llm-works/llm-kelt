@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `llm_kelt.conversation.ConversationFactory`: bundles `lg`/`config`/`compactor`
+  and satisfies saia's `ConversationFactory` Protocol (`create()`,
+  `create_from_state()`). `Conversation` also inherits
+  `SerializableConversationLike`.
+
 ## [0.4.5] - 2026-09-07
 
 ### Changed

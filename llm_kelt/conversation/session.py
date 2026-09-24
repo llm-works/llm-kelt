@@ -20,7 +20,13 @@ from typing import Any, Self
 from appinfra import FieldDict
 from appinfra.log import Logger
 from appinfra.time import since, start
-from llm_saia import AsyncConversationLike, Message, Role, ToolCall
+from llm_saia import (
+    AsyncConversationLike,
+    Message,
+    Role,
+    SerializableConversationLike,
+    ToolCall,
+)
 
 from ..core.errors import ContextOverflowError
 from .compaction.base import AsyncCompactor, Compactor
@@ -59,7 +65,7 @@ class Config(FieldDict):
     tokenizer: Tokenizer | None = None
 
 
-class Conversation(AsyncConversationLike):
+class Conversation(AsyncConversationLike, SerializableConversationLike):
     """Manages conversation history with context window awareness.
 
     Tracks messages, estimates token usage, and signals when compaction is needed.
