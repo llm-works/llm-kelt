@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -84,6 +86,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -114,11 +118,11 @@ jobs:
         run: python -m pytest tests/ -m "not llm and not training" -v --tb=short
 
   # Accumulator job for branch protection — reports a single "Test" status
-  # that passes only when all test and smoke jobs pass.
+  # that passes only when all test, smoke and examples jobs pass.
   test-summary:
     name: Test
     runs-on: ubuntu-latest
-    needs: [test, smoke-wheel]
+    needs: [test, smoke-wheel, examples]
     if: always()
     steps:
       - name: Check test results
@@ -129,6 +133,10 @@ jobs:
           fi
           if [[ "${{ needs.smoke-wheel.result }}" != "success" ]]; then
             echo "Smoke tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.examples.result }}" != "success" ]]; then
+            echo "Examples failed"
             exit 1
           fi
           echo "All tests passed"
@@ -228,6 +236,48 @@ jobs:
       - name: CLI --version
         run: /tmp/smoke/bin/llm-kelt --version
 
+  # Runs every example via appinfra's runner (`make examples.check`), which
+  # reads each file's `# ci-*` header markers. Files marked `ci-skip` (GPU,
+  # live LLM, embedding backend) are skipped by design.
+  examples:
+    name: Examples
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install sqlalchemy psycopg2-binary pgvector alembic httpx fastapi uvicorn pydantic
+          python -m pip install "appinfra[all] @ git+https://github.com/llm-works/appinfra.git@develop"
+          python -m pip install "llm-infer @ git+https://github.com/llm-works/llm-infer.git@develop" --no-deps
+          python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop" --no-deps
+          python -m pip install -e . --no-deps
+
+      # Starts the server from the shipped etc/pg.yaml (127.0.0.1:25432, trust
+      # auth), which the runner's `ci-requires: pg` probe, quickstart's
+      # DEFAULT_URL and training_export's etc/ config all resolve to. Blocks
+      # until it answers a TCP query and fails on timeout, so an unreachable
+      # server fails the job here instead of the runner counting the pg
+      # examples as skipped.
+      - name: Start Postgres
+        run: make pg.server.up
+
+      - name: Run examples
+        run: make examples.check
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
@@ -252,6 +302,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
