@@ -272,11 +272,18 @@ jobs:
       # until it answers a TCP query and fails on timeout, so an unreachable
       # server fails the job here instead of the runner counting the pg
       # examples as skipped.
+      #
+      # PYTHON tells appinfra's Makefile to use the action's Python directly
+      # instead of requiring a virtualenv at ~/.venv.
       - name: Start Postgres
         run: make pg.server.up
+        env:
+          PYTHON: python
 
       - name: Run examples
         run: make examples.check
+        env:
+          PYTHON: python
 
   coverage:
     name: Coverage
