@@ -128,12 +128,12 @@ class TestComputeWarmupSteps:
             warmup_ratio=warmup_ratio,
         )
 
-    def test_ratio_of_total_steps(self):
-        # ceil(1000 / 16) = 63 steps/epoch * 3 epochs = 189; 189 * 0.1 = 18.9 -> 18
-        assert compute_warmup_steps(1000, self._tc(0.1)) == 18
+    def test_ratio_of_total_steps_rounds_up(self):
+        # ceil(1000 / 16) = 63 steps/epoch * 3 epochs = 189; ceil(189 * 0.1) = 19
+        assert compute_warmup_steps(1000, self._tc(0.1)) == 19
 
     def test_small_ratio_rounds_up_to_one_step(self):
-        # ceil(100 / 16) = 7 * 3 = 21; 21 * 0.03 = 0.63 -> 0, bumped to 1
+        # ceil(100 / 16) = 7 * 3 = 21; ceil(21 * 0.03) = ceil(0.63) = 1
         assert compute_warmup_steps(100, self._tc(0.03)) == 1
 
     def test_zero_ratio_means_no_warmup(self):
