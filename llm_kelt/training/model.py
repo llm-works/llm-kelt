@@ -168,11 +168,15 @@ def compute_warmup_steps(num_samples: int, tc: DotDict) -> int:
     if tc.batch_size <= 0 or tc.gradient_accumulation_steps <= 0:
         raise ValueError("batch_size and gradient_accumulation_steps must be positive")
 
+    ratio = float(tc.warmup_ratio)
+    if not 0 <= ratio <= 1:
+        raise ValueError("warmup_ratio must be in range [0, 1]")
+
     steps_per_epoch = max(
         1, math.ceil(num_samples / (tc.batch_size * tc.gradient_accumulation_steps))
     )
     total_steps: int = steps_per_epoch * tc.num_epochs
-    return math.ceil(total_steps * float(tc.warmup_ratio))
+    return math.ceil(total_steps * ratio)
 
 
 def build_training_config(

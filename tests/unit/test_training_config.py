@@ -144,6 +144,11 @@ class TestComputeWarmupSteps:
         with pytest.raises(ValueError, match="must be positive"):
             compute_warmup_steps(100, self._tc(0.1, batch_size, grad_accum))
 
+    @pytest.mark.parametrize("ratio", [-0.1, 1.5, 2.0])
+    def test_rejects_out_of_range_warmup_ratio(self, ratio):
+        with pytest.raises(ValueError, match=r"warmup_ratio must be in range \[0, 1\]"):
+            compute_warmup_steps(100, self._tc(ratio))
+
 
 class TestRunResult:
     """Test RunResult dataclass."""
