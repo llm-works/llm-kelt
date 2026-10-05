@@ -17,7 +17,7 @@ from typing import Any
 from appinfra import DotDict
 from appinfra.log import Logger
 
-from ..model import build_training_config
+from ..model import build_training_config, compute_warmup_steps
 from ..schema import TRAINING_CONFIG_KEYS, Adapter, RunResult
 from ..stability import check_training_stability, log_stability_warnings
 from .config import Config as PromptConfig
@@ -170,7 +170,7 @@ class Trainer:
             per_device_train_batch_size=tc.batch_size,
             gradient_accumulation_steps=tc.gradient_accumulation_steps,
             learning_rate=tc.learning_rate,
-            warmup_ratio=tc.warmup_ratio,
+            warmup_steps=compute_warmup_steps(len(self.train_dataset), tc),
             max_grad_norm=tc.max_grad_norm,
             logging_steps=tc.logging_steps,
             save_steps=tc.save_steps,

@@ -8,6 +8,7 @@ Provides model detection, quantization config, and training config helpers.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Any
 
 from appinfra import DotDict
@@ -154,6 +155,28 @@ def _apply_quantized_model_settings(
             )
     except (FileNotFoundError, ValueError):
         pass  # Can't detect, use config values as-is
+
+
+def compute_warmup_steps(num_samples: int, tc: DotDict) -> int:
+    """Convert ``tc.warmup_ratio`` into an absolute warmup step count.
+
+    Trainers pass the result as ``warmup_steps``: transformers 5 removed the
+    ``warmup_ratio`` argument, while an int step count means the same on every
+    supported transformers version. Rounds up like ``TrainingArguments.get_warmup_steps``,
+    so on a single device the count matches what HF derives from the ratio.
+    """
+    if tc.batch_size <= 0 or tc.gradient_accumulation_steps <= 0:
+        raise ValueError("batch_size and gradient_accumulation_steps must be positive")
+
+    ratio = float(tc.warmup_ratio)
+    if not 0 <= ratio <= 1:
+        raise ValueError("warmup_ratio must be in range [0, 1]")
+
+    steps_per_epoch = max(
+        1, math.ceil(num_samples / (tc.batch_size * tc.gradient_accumulation_steps))
+    )
+    total_steps: int = steps_per_epoch * tc.num_epochs
+    return math.ceil(total_steps * ratio)
 
 
 def build_training_config(

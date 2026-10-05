@@ -8,7 +8,6 @@ Trains the model to prefer "chosen" responses over "rejected" ones.
 """
 
 import json
-import math
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,7 +15,7 @@ from appinfra import DotDict
 from appinfra.log import Logger
 
 from ..lora import Config as LoraConfig
-from ..model import build_training_config
+from ..model import build_training_config, compute_warmup_steps
 from ..schema import TRAINING_CONFIG_KEYS, Adapter, RunResult
 from ..stability import check_training_stability, log_stability_warnings
 
@@ -194,22 +193,6 @@ class Trainer:
         if self.eval_dataset:
             self._lg.info(f"loaded {len(self.eval_dataset)} eval pairs")
 
-    def _calculate_warmup_steps(self) -> int:
-        """Calculate warmup steps from warmup ratio and training config."""
-        tc = self.training_config
-        if tc.batch_size <= 0 or tc.gradient_accumulation_steps <= 0:
-            raise ValueError("batch_size and gradient_accumulation_steps must be positive")
-
-        steps_per_epoch = max(
-            1, math.ceil(len(self.train_dataset) / (tc.batch_size * tc.gradient_accumulation_steps))
-        )
-        total_steps = steps_per_epoch * tc.num_epochs
-        warmup_steps = int(total_steps * tc.warmup_ratio)
-        # Ensure at least 1 warmup step when ratio > 0
-        if tc.warmup_ratio > 0 and warmup_steps == 0:
-            warmup_steps = 1
-        return warmup_steps
-
     def _base_training_args(self) -> dict:
         """Build base training arguments from config."""
         tc = self.training_config
@@ -219,7 +202,7 @@ class Trainer:
             per_device_train_batch_size=tc.batch_size,
             gradient_accumulation_steps=tc.gradient_accumulation_steps,
             learning_rate=tc.learning_rate,
-            warmup_steps=self._calculate_warmup_steps(),
+            warmup_steps=compute_warmup_steps(len(self.train_dataset), tc),
             max_grad_norm=tc.max_grad_norm,
             logging_steps=tc.logging_steps,
             save_steps=tc.save_steps,
