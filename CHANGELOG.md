@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `create_from_state()`). `Conversation` also inherits
   `SerializableConversationLike`.
 
+### Changed
+- `dev` extra allows pytest-asyncio 1.x (was `<1.0`).
+
+### Fixed
+- LoRA and prompt-tuning training work on transformers 5 (which removed
+  `warmup_ratio`); `warmup_ratio` is converted to warmup steps, rounded up as
+  transformers does, so DPO runs may get one more warmup step than before.
+
 ## [0.4.5] - 2026-09-07
 
 ### Changed
