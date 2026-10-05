@@ -6,9 +6,11 @@
 from datetime import datetime
 
 import pytest
+from appinfra import DotDict
 
 from llm_kelt.training import TRAINING_DEFAULTS, RunResult
 from llm_kelt.training.lora import Config as LoraConfig
+from llm_kelt.training.model import compute_warmup_steps
 
 
 class TestLoraConfig:
@@ -112,6 +114,35 @@ class TestTrainingDefaults:
         # Should work with both attribute and dict access
         assert TRAINING_DEFAULTS.num_epochs == TRAINING_DEFAULTS["num_epochs"]
         assert TRAINING_DEFAULTS.learning_rate == TRAINING_DEFAULTS["learning_rate"]
+
+
+class TestComputeWarmupSteps:
+    """Test warmup_ratio -> warmup_steps conversion."""
+
+    @staticmethod
+    def _tc(warmup_ratio: float, batch_size: int = 4, grad_accum: int = 4) -> DotDict:
+        return DotDict(
+            num_epochs=3,
+            batch_size=batch_size,
+            gradient_accumulation_steps=grad_accum,
+            warmup_ratio=warmup_ratio,
+        )
+
+    def test_ratio_of_total_steps(self):
+        # ceil(1000 / 16) = 63 steps/epoch * 3 epochs = 189; 189 * 0.1 = 18.9 -> 18
+        assert compute_warmup_steps(1000, self._tc(0.1)) == 18
+
+    def test_small_ratio_rounds_up_to_one_step(self):
+        # ceil(100 / 16) = 7 * 3 = 21; 21 * 0.03 = 0.63 -> 0, bumped to 1
+        assert compute_warmup_steps(100, self._tc(0.03)) == 1
+
+    def test_zero_ratio_means_no_warmup(self):
+        assert compute_warmup_steps(1000, self._tc(0.0)) == 0
+
+    @pytest.mark.parametrize("batch_size,grad_accum", [(0, 4), (4, 0)])
+    def test_rejects_non_positive_batching(self, batch_size, grad_accum):
+        with pytest.raises(ValueError, match="must be positive"):
+            compute_warmup_steps(100, self._tc(0.1, batch_size, grad_accum))
 
 
 class TestRunResult:

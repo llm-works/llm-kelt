@@ -15,7 +15,7 @@ from typing import Any
 from appinfra import DotDict
 from appinfra.log import Logger
 
-from ..model import build_training_config
+from ..model import build_training_config, compute_warmup_steps
 from ..schema import TRAINING_CONFIG_KEYS, Adapter, RunResult
 from ..stability import check_training_stability, log_stability_warnings
 from .config import Config as LoraConfig
@@ -179,7 +179,7 @@ class Trainer:
             per_device_train_batch_size=self.training_config.batch_size,
             gradient_accumulation_steps=self.training_config.gradient_accumulation_steps,
             learning_rate=self.training_config.learning_rate,
-            warmup_ratio=self.training_config.warmup_ratio,
+            warmup_steps=compute_warmup_steps(len(self.train_dataset), self.training_config),
             max_grad_norm=self.training_config.max_grad_norm,
             logging_steps=self.training_config.logging_steps,
             save_steps=self.training_config.save_steps,
