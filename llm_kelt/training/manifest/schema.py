@@ -39,6 +39,9 @@ class Data(FieldDict):
     records: list[dict[str, Any]] = field(default_factory=list)
     # Path to JSONL file, relative to manifest (for external format)
     path: str | None = None
+    # Shared prompt templates for SFT records, keyed by template id (see templates.py).
+    # Applies to inline and external records.
+    templates: dict[str, str] = field(default_factory=dict)
 
 
 class Deployment(FieldDict):

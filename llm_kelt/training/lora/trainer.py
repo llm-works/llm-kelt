@@ -7,7 +7,6 @@ Uses TRL's SFTTrainer with PEFT for parameter-efficient fine-tuning.
 Supports QLoRA (4-bit quantization) to reduce VRAM requirements.
 """
 
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -17,32 +16,11 @@ from appinfra.log import Logger
 
 from ..model import build_training_config, compute_warmup_steps
 from ..schema import TRAINING_CONFIG_KEYS, Adapter, RunResult
+from ..sft.dataset import load_sft_dataset, require_chat_template
 from ..stability import check_training_stability, log_stability_warnings
 from .config import Config as LoraConfig
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
-
-
-def _load_sft_dataset(data_path: Path, eval_split: float):
-    """Load and optionally split SFT dataset from JSONL file."""
-    from datasets import Dataset
-
-    records = []
-    with data_path.open("r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                records.append(json.loads(line))
-
-    if not records:
-        raise ValueError(f"No records found in {data_path}")
-
-    dataset = Dataset.from_list(records)
-
-    if eval_split > 0:
-        split = dataset.train_test_split(test_size=eval_split, seed=42)
-        return split["train"], split["test"]
-
-    return dataset, None
 
 
 class Trainer:
@@ -81,46 +59,6 @@ class Trainer:
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-
-    def _make_formatting_func(self):
-        """Create a formatting function using the tokenizer's chat template.
-
-        Uses the model's native chat template for proper EOS token learning.
-        Requires tokenizer to have chat_template - all modern instruct models do.
-
-        If supporting legacy models without chat_template is needed, a fallback
-        could use Alpaca format with explicit EOS:
-            eos = tokenizer.eos_token or ""
-            return f"### Instruction:\\n{user_content}\\n\\n### Response:\\n{output}{eos}"
-        """
-        if not getattr(self.tokenizer, "chat_template", None):
-            raise ValueError(
-                f"Tokenizer for {self.base_model} lacks chat_template. "
-                "SFT training requires a model with chat template support for proper EOS learning."
-            )
-
-        tokenizer = self.tokenizer  # capture for closure
-
-        def format_example(example: dict) -> str:
-            instruction = example.get("instruction", "")
-            input_text = example.get("input", "")
-            output = example.get("output", "")
-
-            if input_text:
-                user_content = f"{instruction}\n\n{input_text}"
-            else:
-                user_content = instruction
-
-            messages = [
-                {"role": "user", "content": user_content},
-                {"role": "assistant", "content": output},
-            ]
-            result: str = tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=False
-            )
-            return result
-
-        return format_example
 
     def _apply_lora(self):
         """Apply LoRA adapter to the loaded model."""
@@ -162,7 +100,7 @@ class Trainer:
 
     def _load_data(self):
         """Load training and eval datasets."""
-        self.train_dataset, self.eval_dataset = _load_sft_dataset(
+        self.train_dataset, self.eval_dataset = load_sft_dataset(
             self.data_path, self.training_config.eval_split
         )
         self._lg.info(f"loaded {len(self.train_dataset)} training samples")
@@ -195,19 +133,20 @@ class Trainer:
             optim="paged_adamw_8bit",
             max_length=self.training_config.max_seq_length,
             neftune_noise_alpha=self.training_config.neftune_noise_alpha,
+            completion_only_loss=self.training_config.completion_only_loss,
         )
 
     def _create_trainer(self):
         """Create the SFTTrainer."""
         from trl import SFTTrainer
 
+        require_chat_template(self.tokenizer, self.base_model)
         self.trainer = SFTTrainer(
             model=self.model,
             args=self._create_training_args(),
             train_dataset=self.train_dataset,
             eval_dataset=self.eval_dataset,
             processing_class=self.tokenizer,
-            formatting_func=self._make_formatting_func(),
         )
 
     def _collect_metrics(self) -> dict:
@@ -313,7 +252,8 @@ def train_lora(
 
     Args:
         lg: Logger instance.
-        data_path: Path to JSONL file with {"instruction", "output", "input"?} records.
+        data_path: Path to JSONL file with {"instruction", "output", "input"?} records
+            ("prompt" and "response" are accepted in place of "instruction" and "output").
         output_dir: Directory to save the trained adapter.
         base_model: HuggingFace model ID. Defaults to Qwen2.5-7B-Instruct.
         lora_config: LoRA hyperparameters. Uses sensible defaults if not provided.

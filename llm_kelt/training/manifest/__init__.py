@@ -11,6 +11,7 @@ Provides file-based training workflow:
 from .client import Client
 from .errors import CorruptedManifestError, ManifestError
 from .schema import Data, Deployment, Manifest, Source
+from .templates import template_id
 
 __all__ = [
     "Client",
@@ -20,4 +21,5 @@ __all__ = [
     "Manifest",
     "ManifestError",
     "Source",
+    "template_id",
 ]
