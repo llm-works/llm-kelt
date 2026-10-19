@@ -40,6 +40,14 @@ class TestToPromptCompletion:
         with pytest.raises(ValueError, match="was not rendered"):
             to_prompt_completion({"template": "abc", "slots": {}, "output": "bar"})
 
+    def test_missing_instruction_raises(self):
+        with pytest.raises(ValueError, match="missing 'instruction' or 'prompt'"):
+            to_prompt_completion({"output": "bar"})
+
+    def test_missing_output_raises(self):
+        with pytest.raises(ValueError, match="missing 'output' or 'response'"):
+            to_prompt_completion({"instruction": "foo"})
+
 
 class TestLoadSftDataset:
     @pytest.fixture(autouse=True)

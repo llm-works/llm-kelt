@@ -40,6 +40,8 @@ _TRAINING_KEYS = frozenset(
         "bf16",
         "gradient_checkpointing",
         "seed",
+        "neftune_noise_alpha",
+        "completion_only_loss",
     ]
 )
 

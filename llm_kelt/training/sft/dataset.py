@@ -21,7 +21,7 @@ def to_prompt_completion(record: dict[str, Any]) -> dict[str, list[dict[str, str
     line when present. The assistant turn is ``output`` (or ``response``).
 
     Raises:
-        ValueError: If the record still references a template (see manifest templates).
+        ValueError: If the record still references a template, or is missing required fields.
     """
     if "template" in record:
         raise ValueError(
@@ -29,8 +29,12 @@ def to_prompt_completion(record: dict[str, Any]) -> dict[str, list[dict[str, str
             "templated records must be rendered from the manifest's templates before training"
         )
     instruction = record.get("instruction") or record.get("prompt", "")
-    input_text = record.get("input", "")
+    if not instruction:
+        raise ValueError("SFT record missing 'instruction' or 'prompt' field")
     output = record.get("output") or record.get("response", "")
+    if not output:
+        raise ValueError("SFT record missing 'output' or 'response' field")
+    input_text = record.get("input", "")
     user_content = f"{instruction}\n\n{input_text}" if input_text else instruction
     return {
         "prompt": [{"role": "user", "content": user_content}],
