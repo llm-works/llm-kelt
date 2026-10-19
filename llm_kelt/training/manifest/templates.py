@@ -80,6 +80,8 @@ def render_record(templates: dict[str, str], record: dict[str, Any]) -> dict[str
             ``instruction`` or ``prompt``.
     """
     tid = record["template"]
+    if not isinstance(tid, str):
+        raise ValueError(f"template id must be a string, got {type(tid).__name__}")
     if tid not in templates:
         raise ValueError(f"unknown template {tid!r}")
     if "instruction" in record or "prompt" in record:

@@ -118,7 +118,7 @@ class TestLoraTraining:
 
 
 def _tokenized_train_dataset(logger, data_path: Path, model_path: Path, training_config, out: Path):
-    """Build the SFTTrainer for a dataset (no training) and return its tokenized train set."""
+    """Build the SFTTrainer for a dataset (no training) and return (train_dataset, data_collator)."""
     from llm_kelt.training.lora.trainer import Trainer
 
     trainer = Trainer(
@@ -132,7 +132,7 @@ def _tokenized_train_dataset(logger, data_path: Path, model_path: Path, training
     trainer._load_data()
     trainer._load_model()
     trainer._create_trainer()
-    return trainer.trainer.train_dataset
+    return trainer.trainer.train_dataset, trainer.trainer.data_collator
 
 
 def _write_records(path: Path, records: list[dict]) -> Path:
@@ -159,14 +159,15 @@ class TestSftDataPreparation:
 
         data_path = _write_records(tmp_path / "data.jsonl", self.RECORDS)
         config = {**fast_training_config, "completion_only_loss": True}
-        dataset = _tokenized_train_dataset(
+        dataset, collator = _tokenized_train_dataset(
             logger, data_path, local_model_path, config, tmp_path / "out"
         )
         tokenizer = AutoTokenizer.from_pretrained(str(local_model_path))
 
         for row, record in zip(dataset, self.RECORDS, strict=True):
+            labels = collator([row])["labels"][0].tolist()
             trained = [
-                t for t, label in zip(row["input_ids"], row["labels"], strict=True) if label != -100
+                t for t, label in zip(row["input_ids"], labels, strict=True) if label != -100
             ]
             assert tokenizer.decode(trained).startswith(record["output"])
             assert record["instruction"] not in tokenizer.decode(trained)
@@ -176,11 +177,12 @@ class TestSftDataPreparation:
     ):
         """Default config trains on every token, prompt included."""
         data_path = _write_records(tmp_path / "data.jsonl", self.RECORDS)
-        dataset = _tokenized_train_dataset(
+        dataset, collator = _tokenized_train_dataset(
             logger, data_path, local_model_path, fast_training_config, tmp_path / "out"
         )
         for row in dataset:
-            assert row["labels"] == row["input_ids"]
+            labels = collator([row])["labels"][0].tolist()
+            assert labels == row["input_ids"]
 
     def test_templated_records_tokenize_like_expanded(
         self, logger, local_model_path: Path, fast_training_config, tmp_path: Path
@@ -201,10 +203,10 @@ class TestSftDataPreparation:
             tmp_path / "rendered.jsonl", render_records({tid: template}, compact)
         )
         expanded_path = _write_records(tmp_path / "expanded.jsonl", expanded)
-        a = _tokenized_train_dataset(
+        a, _ = _tokenized_train_dataset(
             logger, rendered_path, local_model_path, fast_training_config, tmp_path / "a"
         )
-        b = _tokenized_train_dataset(
+        b, _ = _tokenized_train_dataset(
             logger, expanded_path, local_model_path, fast_training_config, tmp_path / "b"
         )
         assert a["input_ids"] == b["input_ids"]

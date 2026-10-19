@@ -108,6 +108,7 @@ class TestRenderRecord:
     @pytest.mark.parametrize(
         ("record", "message"),
         [
+            ({"template": ["not", "a", "string"], "slots": {}}, "must be a string"),
             ({"template": "f" * 64, "slots": {"text": "t"}}, "unknown template"),
             ({"template": TID, "slots": {}}, "missing slots ['text']"),
             ({"template": TID, "slots": {"text": "t", "other": "o"}}, "unknown slots ['other']"),
