@@ -117,6 +117,101 @@ class TestLoraTraining:
         assert "eval_loss" in result.metrics, "Should have eval_loss with eval_split > 0"
 
 
+def _tokenized_train_dataset(logger, data_path: Path, model_path: Path, training_config, out: Path):
+    """Build the SFTTrainer for a dataset (no training) and return (train_dataset, data_collator)."""
+    from llm_kelt.training.lora.trainer import Trainer
+
+    trainer = Trainer(
+        lg=logger,
+        data_path=data_path,
+        output_dir=out,
+        base_model=str(model_path),
+        training_config=training_config,
+        quantize=False,
+    )
+    trainer._load_data()
+    trainer._load_model()
+    trainer._create_trainer()
+    return trainer.trainer.train_dataset, trainer.trainer.data_collator
+
+
+def _write_records(path: Path, records: list[dict]) -> Path:
+    import json
+
+    path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+    return path
+
+
+@pytest.mark.training
+class TestSftDataPreparation:
+    """Token-level checks of SFT data preparation against a real tokenizer and TRL."""
+
+    RECORDS = [
+        {"instruction": "Summarize the text.", "input": "Foo bar baz.", "output": "Foo."},
+        {"instruction": "Answer briefly.", "output": '{"label": 3, "why": "bar"}'},
+    ]
+
+    def test_completion_only_loss_masks_prompt(
+        self, logger, local_model_path: Path, fast_training_config, tmp_path: Path
+    ):
+        """With completion_only_loss, only the assistant turn contributes to the loss."""
+        from transformers import AutoTokenizer
+
+        data_path = _write_records(tmp_path / "data.jsonl", self.RECORDS)
+        config = {**fast_training_config, "completion_only_loss": True}
+        dataset, collator = _tokenized_train_dataset(
+            logger, data_path, local_model_path, config, tmp_path / "out"
+        )
+        tokenizer = AutoTokenizer.from_pretrained(str(local_model_path))
+
+        for row, record in zip(dataset, self.RECORDS, strict=True):
+            labels = collator([row])["labels"][0].tolist()
+            trained = [
+                t for t, label in zip(row["input_ids"], labels, strict=True) if label != -100
+            ]
+            assert tokenizer.decode(trained).startswith(record["output"])
+            assert record["instruction"] not in tokenizer.decode(trained)
+
+    def test_whole_sequence_loss_by_default(
+        self, logger, local_model_path: Path, fast_training_config, tmp_path: Path
+    ):
+        """Default config trains on every token, prompt included."""
+        data_path = _write_records(tmp_path / "data.jsonl", self.RECORDS)
+        dataset, collator = _tokenized_train_dataset(
+            logger, data_path, local_model_path, fast_training_config, tmp_path / "out"
+        )
+        for row in dataset:
+            labels = collator([row])["labels"][0].tolist()
+            assert labels == row["input_ids"]
+
+    def test_templated_records_tokenize_like_expanded(
+        self, logger, local_model_path: Path, fast_training_config, tmp_path: Path
+    ):
+        """A compact templated set yields exactly the tokens of its expanded form."""
+        from llm_kelt.training.manifest import template_id
+        from llm_kelt.training.manifest.templates import render_records
+
+        template = "Classify the text below.\n\n{{text}}\n\nAnswer with one label."
+        tid = template_id(template)
+        texts = ["foo text", "bar text"]
+        compact = [{"template": tid, "slots": {"text": t}, "output": "foo"} for t in texts]
+        expanded = [
+            {"instruction": template.replace("{{text}}", t), "output": "foo"} for t in texts
+        ]
+
+        rendered_path = _write_records(
+            tmp_path / "rendered.jsonl", render_records({tid: template}, compact)
+        )
+        expanded_path = _write_records(tmp_path / "expanded.jsonl", expanded)
+        a, _ = _tokenized_train_dataset(
+            logger, rendered_path, local_model_path, fast_training_config, tmp_path / "a"
+        )
+        b, _ = _tokenized_train_dataset(
+            logger, expanded_path, local_model_path, fast_training_config, tmp_path / "b"
+        )
+        assert a["input_ids"] == b["input_ids"]
+
+
 @pytest.mark.training
 class TestPromptTuning:
     """E2E tests for Prompt Tuning training."""

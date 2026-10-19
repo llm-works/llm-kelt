@@ -19,6 +19,7 @@ from appinfra import DotDict
 from ..schema import Adapter, RunResult
 from .errors import CorruptedManifestError
 from .schema import Data, Deployment, Manifest, Source
+from .templates import render_records, validate_templates
 
 
 def _parse_datetime(value: str | datetime | None) -> datetime:
@@ -211,6 +212,9 @@ def _build_data_section(manifest: Manifest) -> dict[str, Any]:
     manifest_data = manifest.get("data") or Data()
     data_format = manifest_data.get("format", "inline")
     data_dict: dict[str, Any] = {"format": data_format}
+    templates = manifest_data.get("templates")
+    if templates:
+        data_dict["templates"] = dict(templates)
     if data_format == "inline":
         data_dict["records"] = manifest_data.get("records", [])
     else:
@@ -299,10 +303,22 @@ _FlowStyleDumper.add_representer(_FlowDict, _flow_style_dict)
 _FlowStyleDumper.add_representer(_QuotedStr, _quoted_str)
 
 
+def _to_plain(value: Any) -> Any:
+    """Convert nested dicts (DotDicts after loading) to plain dicts the YAML dumper accepts."""
+    if isinstance(value, dict):
+        return {k: _to_plain(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_plain(v) for v in value]
+    return value
+
+
 def _record_to_flow(record: dict) -> _FlowDict:
     """Convert record to FlowDict with quoted keys and string values."""
     return _FlowDict(
-        {_QuotedStr(k): _QuotedStr(v) if isinstance(v, str) else v for k, v in record.items()}
+        {
+            _QuotedStr(k): _QuotedStr(v) if isinstance(v, str) else _to_plain(v)
+            for k, v in record.items()
+        }
     )
 
 
@@ -322,6 +338,11 @@ def save_manifest(manifest: Manifest, path: Path, *, compress: bool = False) -> 
     # Use flow-style records for compact output
     if data["data"].get("format") == "inline":
         data["data"]["records"] = [_record_to_flow(r) for r in data["data"]["records"]]
+    # Double-quoted escapes keep template text byte-exact, so its id still matches on load
+    if "templates" in data["data"]:
+        data["data"]["templates"] = {
+            _QuotedStr(k): _QuotedStr(v) for k, v in data["data"]["templates"].items()
+        }
 
     yaml_content = yaml.dump(
         data, Dumper=_FlowStyleDumper, sort_keys=False, allow_unicode=True, width=10000
@@ -414,6 +435,26 @@ def _validate_core_fields(manifest: Manifest) -> list[str]:
     return errors
 
 
+def _validate_templates(manifest: Manifest) -> list[str]:
+    """Validate shared templates and, for inline data, the records that use them."""
+    data = manifest.get("data") or Data()
+    templates = data.get("templates")
+    if not templates:
+        return []
+    if manifest.get("method") != "sft":
+        return [
+            f"data.templates is only supported for method 'sft', got '{manifest.get('method')}'"
+        ]
+
+    errors = validate_templates(templates)
+    if not errors and data.get("format") == "inline":
+        try:
+            render_records(templates, data.get("records") or [])
+        except ValueError as e:
+            errors.append(str(e))
+    return errors
+
+
 def validate_manifest(manifest: Manifest) -> list[str]:
     """Validate a training manifest."""
     errors = _validate_core_fields(manifest)
@@ -425,6 +466,7 @@ def validate_manifest(manifest: Manifest) -> list[str]:
     if manifest.get("method") == "prompt":
         errors.extend(_validate_prompt_config(manifest.get("method_config") or {}))
 
+    errors.extend(_validate_templates(manifest))
     return errors
 
 

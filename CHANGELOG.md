@@ -12,11 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and satisfies saia's `ConversationFactory` Protocol (`create()`,
   `create_from_state()`). `Conversation` also inherits
   `SerializableConversationLike`.
+- SFT manifests can store shared prompt text once in `data.templates` (keyed by
+  `template_id(text)`, its SHA-256); records carry `{template, slots, output}`
+  and are rendered to plain instructions before training.
+- `completion_only_loss` training option (SFT and prompt tuning): excludes prompt
+  tokens from the loss. Default off.
 
 ### Changed
 - `dev` extra allows pytest-asyncio 1.x (was `<1.0`).
+- SFT and prompt-tuning data are tokenized from the chat template directly, which
+  drops a stray end-of-turn token TRL appended after templates ending in a newline
+  (e.g. Qwen). The LoRA trainer now also accepts `prompt`/`response` record fields.
 
 ### Fixed
+- Saving a manifest whose inline records contain nested objects no longer fails
+  after the manifest was loaded from YAML.
 - LoRA and prompt-tuning training work on transformers 5 (which removed
   `warmup_ratio`); `warmup_ratio` is converted to warmup steps, rounded up as
   transformers does, so DPO runs may get one more warmup step than before.

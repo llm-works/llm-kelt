@@ -40,6 +40,8 @@ _TRAINING_KEYS = frozenset(
         "bf16",
         "gradient_checkpointing",
         "seed",
+        "neftune_noise_alpha",
+        "completion_only_loss",
     ]
 )
 
@@ -165,6 +167,7 @@ class Client:
         description: str | None = None,
         config: dict[str, Any] | None = None,
         deployment_policy: Literal["skip", "add", "replace"] | None = None,
+        templates: dict[str, str] | None = None,
     ) -> Manifest:
         """Create a new training manifest with inline data.
 
@@ -182,6 +185,9 @@ class Client:
                 - "skip": Don't deploy the adapter.
                 - "add": Deploy as new version, keep existing versions.
                 - "replace": Deploy and remove existing versions (default).
+            templates: Shared prompt templates for SFT records, keyed by
+                ``template_id(text)``; records reference them as
+                ``{"template": id, "slots": {...}, "output": ...}``.
 
         Returns:
             Manifest instance.
@@ -197,7 +203,7 @@ class Client:
         manifest = Manifest(
             adapter=adapter,
             method=method,
-            data=Data(format="inline", records=data),
+            data=Data(format="inline", records=data, templates=dict(templates or {})),
             deployment=deployment,
             source=source,
             parent=parent,

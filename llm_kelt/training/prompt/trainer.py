@@ -19,39 +19,11 @@ from appinfra.log import Logger
 
 from ..model import build_training_config, compute_warmup_steps
 from ..schema import TRAINING_CONFIG_KEYS, Adapter, RunResult
+from ..sft.dataset import load_sft_dataset, require_chat_template
 from ..stability import check_training_stability, log_stability_warnings
 from .config import Config as PromptConfig
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
-
-
-def load_sft_dataset(data_path: Path, eval_split: float):
-    """Load and optionally split SFT dataset from JSONL file."""
-    import json
-
-    from datasets import Dataset
-
-    records = []
-    with data_path.open("r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                records.append(json.loads(line))
-
-    if not records:
-        raise ValueError(f"No records found in {data_path}")
-
-    dataset = Dataset.from_list(records)
-
-    if eval_split > 0:
-        num_records = len(dataset)
-        train_size = int(num_records * (1 - eval_split))
-        if train_size < 1:
-            # eval_split too large - would leave no training data
-            return dataset, None
-        split = dataset.train_test_split(test_size=eval_split, seed=42)
-        return split["train"], split["test"]
-
-    return dataset, None
 
 
 class Trainer:
@@ -89,33 +61,6 @@ class Trainer:
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-
-    def _make_formatting_func(self):
-        """Create a formatting function using the tokenizer's chat template."""
-        if not getattr(self.tokenizer, "chat_template", None):
-            raise ValueError(
-                f"Tokenizer for {self.base_model} lacks chat_template. "
-                "Training requires a model with chat template support."
-            )
-
-        tokenizer = self.tokenizer
-
-        def format_example(example: dict) -> str:
-            instruction = example.get("prompt") or example.get("instruction", "")
-            input_text = example.get("input", "")
-            output = example.get("response") or example.get("output", "")
-
-            user_content = f"{instruction}\n\n{input_text}" if input_text else instruction
-            messages = [
-                {"role": "user", "content": user_content},
-                {"role": "assistant", "content": output},
-            ]
-            result: str = tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=False
-            )
-            return result
-
-        return format_example
 
     def _load_model(self):
         """Load base model and apply prompt tuning."""
@@ -186,19 +131,20 @@ class Trainer:
             optim="paged_adamw_8bit",
             max_length=tc.max_seq_length,
             neftune_noise_alpha=tc.neftune_noise_alpha,
+            completion_only_loss=tc.completion_only_loss,
         )
 
     def _create_trainer(self):
         """Create the SFTTrainer."""
         from trl import SFTTrainer
 
+        require_chat_template(self.tokenizer, self.base_model)
         self.trainer = SFTTrainer(
             model=self.model,
             args=self._create_training_args(),
             train_dataset=self.train_dataset,
             eval_dataset=self.eval_dataset,
             processing_class=self.tokenizer,
-            formatting_func=self._make_formatting_func(),
         )
 
     def _collect_metrics(self) -> dict:

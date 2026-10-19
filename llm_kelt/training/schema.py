@@ -63,6 +63,9 @@ TRAINING_DEFAULTS = DotDict(
     # NEFTune: adds noise to embeddings during training. Improves instruction following
     # and helps prevent overfitting on small datasets. None = disabled. See arXiv:2310.05914.
     neftune_noise_alpha=None,
+    # SFT and prompt tuning: compute the loss on the completion only, excluding the prompt
+    # tokens. False = loss on the whole sequence (prompt and completion).
+    completion_only_loss=False,
 )
 
 # Keys to persist in completed manifests for reproducibility.
