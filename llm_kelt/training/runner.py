@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+import yaml
 from appinfra.log import Logger
 from llm_infer import compute_adapter_metadata
 from llm_infer.models import ModelResolver
@@ -234,6 +235,9 @@ class Runner:
         except FileExistsError as e:
             self._lg.warning("manifest already running, skipping", extra={"exception": e})
             return None
+        except (yaml.YAMLError, ValueError, TypeError) as e:
+            # Claim succeeded (file is in running/) but manifest is unreadable; fail it
+            return self._fail(adapter, started_at, e)
         except Exception as e:
             # Claim failed before the file was moved to running/; nothing to fail-record
             self._lg.warning("claim failed, skipping", extra={"adapter": adapter, "exception": e})
