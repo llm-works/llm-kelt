@@ -45,22 +45,20 @@ def _load_stored_quantization_config(base_model: str) -> Any | None:
     - compressed-tensors: CompressedTensorsConfig(dequantize=True). PEFT cannot attach LoRA
       to packed int4/int8 layers, so the weights are expanded to the model dtype at load.
 
-    Returns None for other formats (they load with the checkpoint's own config).
+    Reads the local checkpoint's config.json. Returns None when there is none (e.g. a hub ID)
+    and for other formats (they load with the checkpoint's own config).
     """
-    from transformers import AutoConfig, BitsAndBytesConfig
+    import json
+    from pathlib import Path
 
-    try:
-        config = AutoConfig.from_pretrained(base_model, trust_remote_code=True)
-    except (OSError, ValueError):
+    from transformers import BitsAndBytesConfig
+
+    config_path = Path(base_model) / "config.json"
+    if not config_path.exists():
         return None
 
-    quant_dict = getattr(config, "quantization_config", None)
-    if quant_dict is None:
-        return None
-    # AutoConfig returns a dict or a QuantizationConfig subclass depending on version
-    if hasattr(quant_dict, "to_dict"):
-        quant_dict = quant_dict.to_dict()
-
+    model_config = json.loads(config_path.read_text())
+    quant_dict = model_config.get("quantization_config") or {}
     quant_method = quant_dict.get("quant_method")
     if quant_method == "compressed-tensors":
         from transformers import CompressedTensorsConfig
@@ -172,9 +170,6 @@ def load_base_model(
     model_kwargs: dict[str, Any] = {"device_map": "auto", "trust_remote_code": True}
     if quant_config is not None:
         model_kwargs["quantization_config"] = quant_config
-        # compressed-tensors dequantization: also pass dtype so weights expand to bf16
-        if getattr(quant_config, "dequantize", False) and dtype is not None:
-            model_kwargs["torch_dtype"] = dtype
     elif dtype is not None:
         model_kwargs["torch_dtype"] = dtype
 

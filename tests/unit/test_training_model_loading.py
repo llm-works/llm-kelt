@@ -49,53 +49,32 @@ class TestResolveModelClass:
 
 
 class TestQuantizationConfig:
-    def _prequantized(self, monkeypatch, value: bool) -> None:
-        monkeypatch.setattr(model_mod, "is_model_quantized", lambda base_model: value)
-
-    def test_compressed_tensors_loads_dequantized(self, tmp_path: Path, lg, monkeypatch):
+    @pytest.mark.parametrize("override", [None, False, True])
+    def test_compressed_tensors_loads_dequantized_whatever_the_override(
+        self, tmp_path: Path, lg, override
+    ):
         path = _write_config(
             tmp_path / "m",
-            model_type="qwen2",
             quantization_config={"quant_method": "compressed-tensors", "format": "pack-quantized"},
         )
-        self._prequantized(monkeypatch, True)
-        config, applied = model_mod.get_quantization_config(lg, str(path), None)
+        config, applied = model_mod.get_quantization_config(lg, str(path), override)
         assert isinstance(config, transformers.CompressedTensorsConfig)
         assert config.dequantize is True
         assert applied is False
 
-    @pytest.mark.parametrize("override", [None, False, True])
-    def test_prequantized_uses_stored_config_whatever_the_override(
-        self, tmp_path: Path, lg, monkeypatch, override
-    ):
-        path = _write_config(
-            tmp_path / "m",
-            model_type="qwen2",
-            quantization_config={"quant_method": "compressed-tensors"},
-        )
-        self._prequantized(monkeypatch, True)
-        config, applied = model_mod.get_quantization_config(lg, str(path), override)
-        assert isinstance(config, transformers.CompressedTensorsConfig)
-        assert applied is False
-
-    def test_other_prequantized_formats_load_with_own_config(self, tmp_path: Path, lg, monkeypatch):
-        path = _write_config(
-            tmp_path / "m", model_type="qwen2", quantization_config={"quant_method": "gptq"}
-        )
-        self._prequantized(monkeypatch, True)
+    def test_other_prequantized_formats_load_with_own_config(self, tmp_path: Path, lg):
+        path = _write_config(tmp_path / "m", quantization_config={"quant_method": "gptq"})
         assert model_mod.get_quantization_config(lg, str(path), None) == (None, False)
 
-    def test_full_precision_quantized_by_default(self, tmp_path: Path, lg, monkeypatch):
+    def test_full_precision_quantized_by_default(self, tmp_path: Path, lg):
         pytest.importorskip("torch")
         path = _write_config(tmp_path / "m", model_type="qwen2")
-        self._prequantized(monkeypatch, False)
         config, applied = model_mod.get_quantization_config(lg, str(path), None)
         assert isinstance(config, transformers.BitsAndBytesConfig)
         assert applied is True
 
-    def test_full_precision_override_off(self, tmp_path: Path, lg, monkeypatch):
+    def test_full_precision_override_off(self, tmp_path: Path, lg):
         path = _write_config(tmp_path / "m", model_type="qwen2")
-        self._prequantized(monkeypatch, False)
         assert model_mod.get_quantization_config(lg, str(path), False) == (None, False)
 
 

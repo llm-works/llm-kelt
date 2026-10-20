@@ -438,7 +438,7 @@ Checkpoint formats:
 |---|---|
 | bf16 / fp16 | quantized to 4-bit with bitsandbytes (QLoRA) unless `quantize=False` |
 | bitsandbytes 4-bit | as stored |
-| compressed-tensors (e.g. llm-compressor W4A16) | dequantized to the model dtype at load; LoRA trains on dense weights, so memory is that of the unquantized model |
+| compressed-tensors (e.g. llm-compressor W4A16) | dequantized to the model dtype at load; LoRA trains on dense weights, so memory is that of the unquantized model. Needs the `compressed-tensors` package and a local checkpoint path |
 
 GPTQ and AWQ checkpoints are not supported for training. `kelt train merge` supports
 bitsandbytes 4-bit bases only.

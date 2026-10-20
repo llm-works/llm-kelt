@@ -60,7 +60,6 @@ training = [
     "datasets>=2.18",
     "accelerate>=0.28",
     "bitsandbytes>=0.43",
-    "compressed-tensors>=0.8",
 ]
 
 [tool.ruff]

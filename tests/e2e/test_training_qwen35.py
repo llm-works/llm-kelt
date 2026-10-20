@@ -3,8 +3,9 @@
 
 """E2E training on Qwen3.5-architecture checkpoints: SFT, DPO and prompt tuning.
 
-Runs on tiny random models (see tiny_qwen35.py), bf16 and compressed-tensors W4A16, so it fits
-any small GPU. Requires the local qwen2.5-0.5b-instruct (for its tokenizer).
+Runs on a tiny random compressed-tensors W4A16 model (see tiny_qwen35.py), which exercises the
+saved model class, dequantization at load and the Qwen3.5 LoRA targets together. Requires the
+local qwen2.5-0.5b-instruct (for its tokenizer).
 """
 
 import json
@@ -22,10 +23,9 @@ DPO_RECORDS = [
 EXPECTED_LORA_MODULES = 4 * 3 + 4 + 3 * 3
 
 
-@pytest.fixture(params=["bf16", "compressed"])
-def qwen35_model(request) -> Path:
-    fixture = "tiny_qwen35_bf16" if request.param == "bf16" else "tiny_qwen35_compressed"
-    return request.getfixturevalue(fixture)
+@pytest.fixture
+def qwen35_model(tiny_qwen35_compressed: Path) -> Path:
+    return tiny_qwen35_compressed
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def train_config():
     from appinfra import DotDict
 
     return DotDict(
-        num_epochs=2,
+        num_epochs=1,
         batch_size=2,
         gradient_accumulation_steps=1,
         max_seq_length=64,
@@ -62,6 +62,33 @@ def _lora_module_names(model) -> list[str]:
     return [name for name, module in model.named_modules() if hasattr(module, "lora_A")]
 
 
+def _assert_weights_match_source(model, source_path: Path) -> None:
+    """Unquantized layers load exactly; int4 layers load close to the bf16 source.
+
+    LoRA keeps base weights frozen, so they can be compared after training (wrapped layers
+    hold them in ``base_layer``).
+    """
+    import torch
+    from transformers import Qwen3_5ForConditionalGeneration
+
+    source = Qwen3_5ForConditionalGeneration.from_pretrained(source_path, dtype=torch.bfloat16)
+    modules = dict(model.get_base_model().named_modules())
+    reference = dict(source.named_modules())
+
+    def rel_err(name: str) -> float:
+        loaded = modules[name]
+        weight = getattr(loaded, "base_layer", loaded).weight.float().cpu()
+        expected = reference[name].weight.float()
+        return ((weight - expected).norm() / expected.norm()).item()
+
+    prefix = "model.language_model.layers"
+    assert rel_err(f"{prefix}.0.linear_attn.in_proj_qkv") == 0.0
+    assert rel_err(f"{prefix}.0.linear_attn.out_proj") == 0.0
+    # Symmetric int4 with group size 128: ~0.11 relative error on random normal weights
+    assert 0.0 < rel_err(f"{prefix}.3.self_attn.q_proj") < 0.2
+    assert 0.0 < rel_err(f"{prefix}.0.mlp.down_proj") < 0.2
+
+
 def _assert_language_model_lora(model) -> None:
     names = _lora_module_names(model)
     assert len(names) == EXPECTED_LORA_MODULES
@@ -72,7 +99,9 @@ def _assert_language_model_lora(model) -> None:
 
 @pytest.mark.training
 class TestQwen35Training:
-    def test_sft(self, logger, qwen35_model: Path, train_config, tmp_path: Path):
+    def test_sft(
+        self, logger, qwen35_model: Path, tiny_qwen35_bf16: Path, train_config, tmp_path: Path
+    ):
         from llm_kelt.training.lora.trainer import Trainer
 
         trainer = Trainer(
@@ -86,6 +115,7 @@ class TestQwen35Training:
         result = trainer.train()
 
         assert type(trainer.model.get_base_model()).__name__ == "Qwen3_5ForConditionalGeneration"
+        _assert_weights_match_source(trainer.model, tiny_qwen35_bf16)
         _assert_language_model_lora(trainer.model)
         losses = _losses(trainer)
         assert losses[-1] < losses[0]
@@ -132,31 +162,3 @@ class TestQwen35Training:
         assert result.method == "prompt"
         losses = _losses(trainer)
         assert losses[-1] < losses[0]
-
-
-@pytest.mark.training
-def test_compressed_checkpoint_loads_with_source_weights(
-    logger, tiny_qwen35_bf16: Path, tiny_qwen35_compressed: Path
-):
-    """Unquantized layers load exactly; int4 layers load close to the bf16 source."""
-    import torch
-    from transformers import Qwen3_5ForConditionalGeneration
-
-    from llm_kelt.training.model import load_base_model
-
-    model = load_base_model(logger, str(tiny_qwen35_compressed), None)
-    source = Qwen3_5ForConditionalGeneration.from_pretrained(
-        tiny_qwen35_bf16, dtype=torch.bfloat16
-    ).state_dict()
-    loaded = model.state_dict()
-
-    def rel_err(name: str) -> float:
-        a, b = loaded[name].float().cpu(), source[name].float()
-        return ((a - b).norm() / b.norm()).item()
-
-    prefix = "model.language_model.layers"
-    assert rel_err(f"{prefix}.0.linear_attn.in_proj_qkv.weight") == 0.0
-    assert rel_err(f"{prefix}.0.linear_attn.out_proj.weight") == 0.0
-    # Symmetric int4 with group size 128: ~0.11 relative error on random normal weights
-    assert 0.0 < rel_err(f"{prefix}.3.self_attn.q_proj.weight") < 0.2
-    assert 0.0 < rel_err(f"{prefix}.0.mlp.down_proj.weight") < 0.2

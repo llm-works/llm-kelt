@@ -85,3 +85,23 @@ class TestLoadSftDataset:
 
 def test_completion_only_loss_defaults_off():
     assert TRAINING_DEFAULTS.completion_only_loss is False
+
+
+@pytest.mark.parametrize("override", [None, True])
+def test_completion_only_loss_reaches_sft_config(lg, tmp_path: Path, override):
+    """The trainer passes the configured (default: off) completion_only_loss to TRL."""
+    pytest.importorskip("trl")
+    from llm_kelt.training.lora.trainer import Trainer
+
+    overrides = {"lora_profile": "small"}
+    if override is not None:
+        overrides["completion_only_loss"] = override
+    trainer = Trainer(
+        lg=lg,
+        data_path=tmp_path / "data.jsonl",
+        output_dir=tmp_path / "out",
+        base_model="org/model-7b",
+        training_config=overrides,
+    )
+    trainer.train_dataset = [{}] * 4
+    assert trainer._create_training_args().completion_only_loss is (override is True)
