@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `create_from_state()`). `Conversation` also inherits
   `SerializableConversationLike`.
 - SFT manifests can store shared prompt text once in `data.templates` (keyed by
-  `template_id(text)`, its SHA-256); records carry `{template, slots, output}`
-  and are rendered to plain instructions before training.
+  `template_id(text)`, its SHA-256, in full or as the first 32 hex characters); records
+  carry `{template, slots, output}` and are rendered to plain instructions before training.
 - `completion_only_loss` training option (SFT and prompt tuning): excludes prompt
   tokens from the loss. Default off.
 - `kelt train run --pending` trains the whole manifest queue without prompting; manifests
