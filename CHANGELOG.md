@@ -25,8 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (dequantized at load). Models load with their saved class; LoRA targets default per family.
 
 ### Changed
-- **Breaking:** the `training` extra requires `transformers>=5.2` (was `>=4.40`), the first
-  release with the Qwen3.5 model classes; transformers 4.x is no longer supported.
+- **Breaking:** the `training` extra requires current releases: `transformers>=5.18`,
+  `trl>=1.14`, `peft>=0.21`, `torch>=2.13`, `accelerate>=1.15`, `datasets>=5.0`,
+  `bitsandbytes>=0.50`. transformers 4.x is no longer supported.
 - LoRA `target_modules` defaults to the model family's set (resolved after loading) instead of
   a fixed Qwen2.5 list. A pre-quantized checkpoint always loads with its stored config, also
   with `quantize=False`.
