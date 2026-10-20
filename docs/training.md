@@ -417,22 +417,48 @@ training:
 Only `method_config` differs from an SFT manifest. Init from text vs random with
 `prompt_tuning_init`.
 
+## Supported models
+
+SFT (LoRA), DPO and prompt tuning are tested on these model families:
+
+| Family | `model_type` | Default LoRA targets |
+|---|---|---|
+| Qwen2.5 | `qwen2` | `q/k/v/o_proj`, `gate/up/down_proj` |
+| Qwen3.5, Qwen3.8 | `qwen3_5` | the above plus `in_proj_qkv`, `in_proj_z`, `out_proj` (linear-attention layers); vision tower and multi-token-prediction head excluded |
+
+Other families fall back to the Qwen2.5 targets; set `target_modules` for them.
+
+The model is loaded with the class its checkpoint was saved with (`config.architectures`), so a
+multimodal checkpoint such as `Qwen3_5ForConditionalGeneration` keeps its layer names; the adapter
+then matches what an inference server loads for that checkpoint. Training uses text only.
+
+Checkpoint formats:
+
+| Format | How kelt loads it |
+|---|---|
+| bf16 / fp16 | quantized to 4-bit with bitsandbytes (QLoRA) unless `quantize=False` |
+| bitsandbytes 4-bit | as stored |
+| compressed-tensors (e.g. llm-compressor W4A16) | dequantized to the model dtype at load; LoRA trains on dense weights, so memory is that of the unquantized model |
+
+GPTQ and AWQ checkpoints are not supported for training. `kelt train merge` supports
+bitsandbytes 4-bit bases only.
+
 ## LoRA config
 
 ```python
 class Config:  # llm_kelt.training.lora.Config
-    r: int
-    lora_alpha: int
+    r: int = 16
+    lora_alpha: int = 32
     lora_dropout: float = 0.05
-    target_modules: list[str] | Literal["all-linear"] = "all-linear"
+    target_modules: list[str] | None = None  # None = model family default
+    exclude_modules: str | None = None  # regex; None = model family default
     bias: Literal["none", "all", "lora_only"] = "none"
     task_type: str = "CAUSAL_LM"
     use_rslora: bool = False  # rank-stabilized: alpha/sqrt(r) scaling
-    modules_to_save: list[str] | None = None
 ```
 
-`target_modules="all-linear"` lets PEFT auto-select every linear layer. Explicit lists (`["q_proj",
-"v_proj"]`) are still supported for older PEFT versions.
+Unset `target_modules` / `exclude_modules` are filled in from the loaded model's `model_type`
+(see Supported models); the resolved list is recorded in the run's `config.lora`.
 
 `use_rslora=True` (from Kalajdzievski 2023) makes higher-rank adapters trainable without
 needing to sqrt-scale `lora_alpha` yourself.

@@ -9,7 +9,6 @@ Supports QLoRA (4-bit quantization) to reduce VRAM requirements.
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from appinfra import DotDict
 from appinfra.log import Logger
@@ -64,6 +63,7 @@ class Trainer:
         """Apply LoRA adapter to the loaded model."""
         from peft import get_peft_model
 
+        self.lora_config = self.lora_config.resolve(self.model.config.model_type)
         peft_config = self.lora_config.to_peft_config()
         self.model = get_peft_model(self.model, peft_config)
         trainable, total = self.model.get_nb_trainable_parameters()
@@ -73,23 +73,14 @@ class Trainer:
     def _load_model(self):
         """Load base model with auto-detected quantization and apply LoRA."""
         from peft import prepare_model_for_kbit_training
-        from transformers import AutoModelForCausalLM
 
-        from ..model import get_quantization_config
+        from ..model import is_kbit_loaded, load_base_model
 
         self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
 
-        quant_config, _ = get_quantization_config(
-            self._lg, self.base_model, self._quantize_override
-        )
-        self._is_quantized = quant_config is not None
-        # Only pass quantization_config if we're applying it - passing None overwrites
-        # pre-quantized model configs and breaks transformers' to_dict() serialization
-        model_kwargs: dict[str, Any] = {"device_map": "auto", "trust_remote_code": True}
-        if quant_config is not None:
-            model_kwargs["quantization_config"] = quant_config
-        self.model = AutoModelForCausalLM.from_pretrained(self.base_model, **model_kwargs)
+        self.model = load_base_model(self._lg, self.base_model, self._quantize_override)
+        self._is_quantized = is_kbit_loaded(self.model)
 
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
@@ -204,6 +195,7 @@ class Trainer:
                     "lora_alpha": self.lora_config.lora_alpha,
                     "lora_dropout": self.lora_config.lora_dropout,
                     "target_modules": self.lora_config.target_modules,
+                    "exclude_modules": self.lora_config.exclude_modules,
                     "use_rslora": self.lora_config.use_rslora,
                 },
                 "training": {k: self.training_config[k] for k in TRAINING_CONFIG_KEYS},

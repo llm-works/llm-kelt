@@ -25,8 +25,9 @@ class TestLoraConfig:
         assert config.lora_dropout == 0.05
         assert config.bias == "none"
         assert config.task_type == "CAUSAL_LM"
-        assert "q_proj" in config.target_modules
-        assert "v_proj" in config.target_modules
+        # Targets come from the model family once the model is loaded
+        assert config.target_modules is None
+        assert config.exclude_modules is None
 
     def test_custom_values(self):
         """Test creating config with custom values."""
@@ -69,6 +70,55 @@ class TestLoraConfig:
         """Test that empty target_modules raises ValueError."""
         with pytest.raises(ValueError, match="target_modules cannot be empty"):
             LoraConfig(target_modules=[])
+
+
+class TestLoraFamilyDefaults:
+    """Model-family LoRA targets resolved from the loaded model's model_type."""
+
+    def test_qwen2_keeps_attention_and_mlp_targets(self):
+        config = LoraConfig().resolve("qwen2")
+        assert config.target_modules == [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ]
+        assert config.exclude_modules is None
+
+    @pytest.mark.parametrize("model_type", ["qwen3_5", "qwen3_5_text"])
+    def test_qwen3_5_adds_linear_attention_and_excludes_vision_and_mtp(self, model_type: str):
+        config = LoraConfig().resolve(model_type)
+        assert {"in_proj_qkv", "in_proj_z", "out_proj", "q_proj", "down_proj"} <= set(
+            config.target_modules
+        )
+        assert "in_proj_a" not in config.target_modules
+
+        import re
+
+        exclude = re.compile(config.exclude_modules)
+        assert exclude.fullmatch("model.visual.blocks.0.attn.qkv")
+        assert exclude.fullmatch("mtp.layers.0.mlp.down_proj")
+        assert not exclude.fullmatch("model.language_model.layers.0.linear_attn.in_proj_qkv")
+        assert not exclude.fullmatch("model.layers.3.self_attn.q_proj")
+
+    def test_unknown_family_falls_back_to_qwen2_targets(self):
+        assert (
+            LoraConfig().resolve("llama").target_modules
+            == LoraConfig().resolve("qwen2").target_modules
+        )
+
+    def test_explicit_settings_win(self):
+        config = LoraConfig(target_modules=["q_proj"], exclude_modules="none").resolve("qwen3_5")
+        assert config.target_modules == ["q_proj"]
+        assert config.exclude_modules == "none"
+
+    def test_unresolved_config_cannot_build_peft_config(self):
+        pytest.importorskip("peft")
+        with pytest.raises(ValueError, match="resolve"):
+            LoraConfig().to_peft_config()
 
     def test_invalid_bias(self):
         """Test that invalid bias raises ValueError."""

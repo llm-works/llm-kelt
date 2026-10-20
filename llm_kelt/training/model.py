@@ -37,24 +37,31 @@ def is_model_quantized(base_model: str) -> bool:
 
 
 def _load_stored_quantization_config(base_model: str) -> Any | None:
-    """Load BitsAndBytesConfig from a pre-quantized model's config.json.
+    """Build the quantization config to load a pre-quantized model with for training.
 
-    Transformers has a bug where loading pre-quantized models without explicitly
-    passing the quantization_config causes 'NoneType has no attribute to_dict'.
-    This reconstructs the config from the stored JSON.
+    - bitsandbytes: reconstructs BitsAndBytesConfig from config.json. Transformers has a bug
+      where loading pre-quantized models without explicitly passing the quantization_config
+      causes 'NoneType has no attribute to_dict'.
+    - compressed-tensors: CompressedTensorsConfig(dequantize=True). PEFT cannot attach LoRA
+      to packed int4/int8 layers, so the weights are expanded to the model dtype at load.
+
+    Returns None for other formats (they load with the checkpoint's own config).
     """
     import json
     from pathlib import Path
 
-    from transformers import BitsAndBytesConfig
+    from transformers import BitsAndBytesConfig, CompressedTensorsConfig
 
     config_path = Path(base_model) / "config.json"
     if not config_path.exists():
         return None
 
     model_config = json.loads(config_path.read_text())
-    quant_dict = model_config.get("quantization_config")
-    if not quant_dict or quant_dict.get("quant_method") != "bitsandbytes":
+    quant_dict = model_config.get("quantization_config") or {}
+    quant_method = quant_dict.get("quant_method")
+    if quant_method == "compressed-tensors":
+        return CompressedTensorsConfig(dequantize=True)
+    if quant_method != "bitsandbytes":
         return None
 
     # Filter out private keys (start with _) that aren't BitsAndBytesConfig params
@@ -67,31 +74,28 @@ def get_quantization_config(
     base_model: str,
     quantize_override: bool | None = None,
 ) -> tuple[Any, bool]:
-    """Get BitsAndBytes quantization config based on model and override.
+    """Get the quantization config to load a model for training with.
 
-    Auto-detects: quantizes full-precision models, loads stored config if pre-quantized.
+    A pre-quantized model always loads with its stored config (see
+    _load_stored_quantization_config). For a full-precision model, quantize_override decides
+    whether bitsandbytes 4-bit is applied; None = apply it.
 
     Args:
         lg: Logger instance.
         base_model: Path or HuggingFace ID of model.
-        quantize_override: Force quantization on/off. None = auto-detect.
+        quantize_override: Force new quantization on/off. None = auto (on).
 
     Returns:
-        Tuple of (BitsAndBytesConfig or None, whether NEW quantization was applied).
+        Tuple of (quantization config or None, whether NEW quantization was applied).
         For pre-quantized models, returns (stored_config, False).
     """
-    if quantize_override is not None:
-        apply_quantization = quantize_override
-    else:
-        # Auto: quantize full-precision models, load stored config if already quantized
-        is_prequantized = is_model_quantized(base_model)
-        if is_prequantized:
-            lg.info("model already quantized, loading stored config")
-            stored_config = _load_stored_quantization_config(base_model)
-            return stored_config, False  # Config loaded, but no new quantization applied
-        apply_quantization = True
+    if is_model_quantized(base_model):
+        if quantize_override:
+            lg.info("model already quantized, ignoring quantize override")
+        lg.info("model already quantized, loading stored config")
+        return _load_stored_quantization_config(base_model), False
 
-    if not apply_quantization:
+    if quantize_override is False:
         return None, False
 
     import torch
@@ -104,6 +108,70 @@ def get_quantization_config(
         bnb_4bit_use_double_quant=True,
     )
     return config, True
+
+
+# Class-name suffixes of language-model heads kelt can train. Any other class listed in a
+# checkpoint's config (e.g. a classification head) falls back to AutoModelForCausalLM.
+_TRAINABLE_ARCH_SUFFIXES = ("ForCausalLM", "ForConditionalGeneration")
+
+
+def resolve_model_class(base_model: str) -> Any:
+    """Return the transformers class a checkpoint was saved with, else AutoModelForCausalLM.
+
+    Multimodal checkpoints (e.g. Qwen3.5 ``*ForConditionalGeneration``) name their language
+    layers ``model.language_model.*``. Loaded through the text-only CausalLM class they become
+    ``model.*``, so name-based settings stored in the checkpoint, such as a quantization
+    ignore list, no longer match. Loading the saved class keeps the names, and the trained
+    adapter's module names match what an inference server loads for the same checkpoint.
+    """
+    import transformers
+    from transformers import AutoConfig, AutoModelForCausalLM
+
+    config = AutoConfig.from_pretrained(base_model, trust_remote_code=True)
+    for arch in getattr(config, "architectures", None) or []:
+        cls = getattr(transformers, arch, None)
+        if cls is not None and arch.endswith(_TRAINABLE_ARCH_SUFFIXES):
+            return cls
+    return AutoModelForCausalLM
+
+
+def is_kbit_loaded(model: Any) -> bool:
+    """True if bitsandbytes holds the model's weights in 4 or 8 bit (needs k-bit prep)."""
+    return bool(
+        getattr(model, "is_loaded_in_4bit", False) or getattr(model, "is_loaded_in_8bit", False)
+    )
+
+
+def load_base_model(
+    lg: Logger,
+    base_model: str,
+    quantize_override: bool | None,
+    dtype: Any = None,
+) -> Any:
+    """Load a base model for training with auto-detected quantization.
+
+    Args:
+        lg: Logger instance.
+        base_model: Path or HuggingFace ID of model.
+        quantize_override: Force bitsandbytes quantization on/off. None = auto-detect.
+        dtype: Torch dtype to load an unquantized model in; None keeps transformers'
+            default. Ignored when a quantization config is used.
+
+    Returns:
+        The loaded model. Use is_kbit_loaded() to decide on k-bit training preparation.
+    """
+    quant_config, _ = get_quantization_config(lg, base_model, quantize_override)
+    model_cls = resolve_model_class(base_model)
+    # Only pass quantization_config if we're applying it - passing None overwrites
+    # pre-quantized model configs and breaks transformers' to_dict() serialization
+    model_kwargs: dict[str, Any] = {"device_map": "auto", "trust_remote_code": True}
+    if quant_config is not None:
+        model_kwargs["quantization_config"] = quant_config
+    elif dtype is not None:
+        model_kwargs["torch_dtype"] = dtype
+
+    lg.info("loading model", extra={"model": base_model, "class": model_cls.__name__})
+    return model_cls.from_pretrained(base_model, **model_kwargs)
 
 
 # Keys that should be integers
