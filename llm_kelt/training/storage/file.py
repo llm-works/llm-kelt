@@ -173,10 +173,12 @@ class FileStorage(Storage):
         self.validate_key(adapter)
         self.running_path.mkdir(parents=True, exist_ok=True)
         running_file = self.running_path / f"{adapter}.yaml"
-        if running_file.exists():
-            raise FileExistsError(f"Manifest already running for adapter: {adapter}")
-
-        (self.pending_path / f"{adapter}.yaml").rename(running_file)
+        pending_file = self.pending_path / f"{adapter}.yaml"
+        try:
+            os.link(pending_file, running_file)
+        except FileExistsError:
+            raise FileExistsError(f"Manifest already running for adapter: {adapter}") from None
+        pending_file.unlink()
         self._lg.info("claimed manifest", extra={"adapter": adapter})
 
         manifest = load_manifest(running_file)
@@ -199,7 +201,7 @@ class FileStorage(Storage):
 
         try:
             manifest = load_manifest(running_file)
-        except (yaml.YAMLError, ValueError) as e:
+        except (yaml.YAMLError, ValueError, TypeError) as e:
             self._lg.warning(
                 "failed manifest is unreadable, moving it unchanged",
                 extra={"adapter": adapter, "exception": e},

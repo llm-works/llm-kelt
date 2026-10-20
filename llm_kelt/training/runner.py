@@ -234,8 +234,10 @@ class Runner:
         except FileExistsError as e:
             self._lg.warning("manifest already running, skipping", extra={"exception": e})
             return None
-        except Exception as e:  # claimed, but unreadable
-            return self._fail(adapter, started_at, e)
+        except Exception as e:
+            # Claim failed before the file was moved to running/; nothing to fail-record
+            self._lg.warning("claim failed, skipping", extra={"adapter": adapter, "exception": e})
+            return None
 
         try:
             return self._train(manifest, skip_registration, model_override, lora_profile)
