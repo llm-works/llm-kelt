@@ -54,7 +54,7 @@ dev = [
 ]
 training = [
     "torch>=2.2",
-    "transformers>=4.40",
+    "transformers>=5.2",
     "peft>=0.10",
     "trl>=0.17",
     "datasets>=2.18",
