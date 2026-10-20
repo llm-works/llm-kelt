@@ -47,19 +47,24 @@ def _load_stored_quantization_config(base_model: str) -> Any | None:
 
     Returns None for other formats (they load with the checkpoint's own config).
     """
-    import json
-    from pathlib import Path
+    from transformers import AutoConfig, BitsAndBytesConfig
 
-    from transformers import BitsAndBytesConfig, CompressedTensorsConfig
-
-    config_path = Path(base_model) / "config.json"
-    if not config_path.exists():
+    try:
+        config = AutoConfig.from_pretrained(base_model, trust_remote_code=True)
+    except (OSError, ValueError):
         return None
 
-    model_config = json.loads(config_path.read_text())
-    quant_dict = model_config.get("quantization_config") or {}
+    quant_dict = getattr(config, "quantization_config", None)
+    if quant_dict is None:
+        return None
+    # AutoConfig returns a dict or a QuantizationConfig subclass depending on version
+    if hasattr(quant_dict, "to_dict"):
+        quant_dict = quant_dict.to_dict()
+
     quant_method = quant_dict.get("quant_method")
     if quant_method == "compressed-tensors":
+        from transformers import CompressedTensorsConfig
+
         return CompressedTensorsConfig(dequantize=True)
     if quant_method != "bitsandbytes":
         return None
@@ -167,6 +172,9 @@ def load_base_model(
     model_kwargs: dict[str, Any] = {"device_map": "auto", "trust_remote_code": True}
     if quant_config is not None:
         model_kwargs["quantization_config"] = quant_config
+        # compressed-tensors dequantization: also pass dtype so weights expand to bf16
+        if getattr(quant_config, "dequantize", False) and dtype is not None:
+            model_kwargs["torch_dtype"] = dtype
     elif dtype is not None:
         model_kwargs["torch_dtype"] = dtype
 

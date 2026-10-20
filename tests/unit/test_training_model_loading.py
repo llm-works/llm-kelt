@@ -55,6 +55,7 @@ class TestQuantizationConfig:
     def test_compressed_tensors_loads_dequantized(self, tmp_path: Path, lg, monkeypatch):
         path = _write_config(
             tmp_path / "m",
+            model_type="qwen2",
             quantization_config={"quant_method": "compressed-tensors", "format": "pack-quantized"},
         )
         self._prequantized(monkeypatch, True)
@@ -68,7 +69,9 @@ class TestQuantizationConfig:
         self, tmp_path: Path, lg, monkeypatch, override
     ):
         path = _write_config(
-            tmp_path / "m", quantization_config={"quant_method": "compressed-tensors"}
+            tmp_path / "m",
+            model_type="qwen2",
+            quantization_config={"quant_method": "compressed-tensors"},
         )
         self._prequantized(monkeypatch, True)
         config, applied = model_mod.get_quantization_config(lg, str(path), override)
@@ -76,7 +79,9 @@ class TestQuantizationConfig:
         assert applied is False
 
     def test_other_prequantized_formats_load_with_own_config(self, tmp_path: Path, lg, monkeypatch):
-        path = _write_config(tmp_path / "m", quantization_config={"quant_method": "gptq"})
+        path = _write_config(
+            tmp_path / "m", model_type="qwen2", quantization_config={"quant_method": "gptq"}
+        )
         self._prequantized(monkeypatch, True)
         assert model_mod.get_quantization_config(lg, str(path), None) == (None, False)
 

@@ -117,6 +117,10 @@ class Trainer:
             cfg = json.loads(cfg_path.read_text())
             self.lora_config = replace(
                 self.lora_config,
+                r=cfg.get("r", self.lora_config.r),
+                lora_alpha=cfg.get("lora_alpha", self.lora_config.lora_alpha),
+                lora_dropout=cfg.get("lora_dropout", self.lora_config.lora_dropout),
+                use_rslora=cfg.get("use_rslora", self.lora_config.use_rslora),
                 target_modules=cfg.get("target_modules"),
                 exclude_modules=cfg.get("exclude_modules"),
             )
