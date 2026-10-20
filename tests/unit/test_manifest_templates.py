@@ -51,6 +51,46 @@ class TestTemplateId:
     def test_changes_with_text(self):
         assert template_id(TEMPLATE + " ") != TID
 
+    def test_short_id_is_128_bit_prefix(self):
+        assert template_id(TEMPLATE, length=32) == TID[:32]
+
+    @pytest.mark.parametrize("length", [0, 16, 40, 65])
+    def test_other_lengths_rejected(self, length: int):
+        with pytest.raises(ValueError, match="must be one of"):
+            template_id(TEMPLATE, length=length)
+
+
+class TestShortIds:
+    SHORT = TID[:32]
+
+    def test_valid(self):
+        assert validate_templates({self.SHORT: TEMPLATE}) == []
+
+    def test_mismatch_rejected(self):
+        errors = validate_templates({"0" * 32: TEMPLATE})
+        assert len(errors) == 1
+        assert "does not match" in errors[0]
+
+    @pytest.mark.parametrize("tid", [TID[:31], TID[:33], TID[:40], 12345])
+    def test_other_lengths_and_non_strings_rejected(self, tid):
+        errors = validate_templates({tid: TEMPLATE})
+        assert len(errors) == 1
+        assert "hex characters" in errors[0]
+
+    def test_renders_like_full_id(self):
+        """A set keyed by the 32-char id renders to the same records as the full-id set."""
+        full = [_templated(t, "o") for t in ("foo", "bar")]
+        short = [{**r, "template": self.SHORT} for r in full]
+        assert render_records({self.SHORT: TEMPLATE}, short) == render_records(
+            {TID: TEMPLATE}, full
+        )
+
+    def test_manifest_round_trip(self, tmp_path: Path):
+        record = {"template": self.SHORT, "slots": {"text": "t"}, "output": "o"}
+        path = tmp_path / "manifest.yaml"
+        save_manifest(_sft_manifest([record], {self.SHORT: TEMPLATE}), path)
+        assert validate_manifest(load_manifest(path)) == []
+
 
 class TestSlotNames:
     def test_finds_named_slots(self):

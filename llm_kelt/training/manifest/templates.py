@@ -14,8 +14,8 @@ Rendering replaces ``template`` and ``slots`` with the plain ``instruction`` the
 reads, so a templated record trains exactly like its expanded form. Slot values are
 inserted verbatim and never scanned for placeholders themselves.
 
-The template id is the SHA-256 hex digest of the template text (UTF-8), so a changed
-template gets a new id.
+The template id is the SHA-256 hex digest of the template text (UTF-8), either in full
+(64 hex characters) or its first 32 (128 bits), so a changed template gets a new id.
 """
 
 import hashlib
@@ -24,13 +24,24 @@ from typing import Any
 
 _SLOT_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}")
 
+# Accepted template id lengths in hex characters: a 128-bit prefix or the full digest.
+ID_LENGTHS = (32, 64)
+
 # Rendering errors are collected per record; cap how many are reported in one message.
 _MAX_REPORTED_ERRORS = 10
 
 
-def template_id(text: str) -> str:
-    """Return the id of a template: the SHA-256 hex digest of its UTF-8 text."""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+def template_id(text: str, length: int = 64) -> str:
+    """Return the id of a template: the SHA-256 hex digest of its UTF-8 text.
+
+    Args:
+        text: Template text.
+        length: Id length in hex characters, one of ``ID_LENGTHS``: 64 for the full
+            digest, 32 for its 128-bit prefix.
+    """
+    if length not in ID_LENGTHS:
+        raise ValueError(f"template id length must be one of {ID_LENGTHS}, got {length}")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:length]
 
 
 def slot_names(text: str) -> set[str]:
@@ -39,15 +50,21 @@ def slot_names(text: str) -> set[str]:
 
 
 def validate_templates(templates: Any) -> list[str]:
-    """Check that templates is a mapping of id to text and every id matches its text."""
+    """Check that templates is a mapping of id to text and every id matches its text.
+
+    An id is valid if it equals the SHA-256 hex digest of its text, in full or as the
+    32-character prefix.
+    """
     if not isinstance(templates, dict):
         return [f"templates must be a mapping of id to text, got {type(templates).__name__}"]
 
     errors: list[str] = []
     for tid, text in templates.items():
-        if not isinstance(text, str):
+        if not isinstance(tid, str) or len(tid) not in ID_LENGTHS:
+            errors.append(f"template {tid}: id must be a string of {ID_LENGTHS} hex characters")
+        elif not isinstance(text, str):
             errors.append(f"template {tid}: text must be a string")
-        elif tid != template_id(text):
+        elif tid != template_id(text, len(tid)):
             errors.append(f"template {tid}: id does not match the SHA-256 of its text")
     return errors
 

@@ -35,7 +35,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ruff mypy types-PyYAML
+          python -m pip install ruff mypy types-PyYAML zizmor==1.31.1 actionlint-py==1.7.12.25
           python -m pip install "appinfra @ git+https://github.com/llm-works/appinfra.git@develop"
           # Install minimal deps for type checking (avoid heavy ML deps)
           python -m pip install sqlalchemy pydantic fastapi httpx
@@ -50,6 +50,12 @@ jobs:
 
       - name: Lint
         run: python -m ruff check .
+
+      - name: Lint workflows
+        # zizmor policy in .github/zizmor.yml; actionlint runs shellcheck on run: scripts
+        run: |
+          zizmor --offline .github/workflows/
+          actionlint
 
       - name: Type check
         run: python -m mypy llm_kelt/ --ignore-missing-imports

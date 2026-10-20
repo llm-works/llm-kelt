@@ -189,7 +189,7 @@ class Client:
                 - "add": Deploy as new version, keep existing versions.
                 - "replace": Deploy and remove existing versions (default).
             templates: Shared prompt templates for SFT records, keyed by
-                ``template_id(text)``; records reference them as
+                ``template_id(text)`` or ``template_id(text, length=32)``; records reference them as
                 ``{"template": id, "slots": {...}, "output": ...}``.
 
         Returns:
