@@ -235,13 +235,19 @@ class Runner:
         except FileExistsError as e:
             self._lg.warning("manifest already running, skipping", extra={"exception": e})
             return None
-        except (yaml.YAMLError, ValueError, TypeError) as e:
-            # Claim succeeded (file is in running/) but manifest is unreadable; fail it
-            return self._fail(adapter, started_at, e)
-        except Exception as e:
-            # Claim failed before the file was moved to running/; nothing to fail-record
-            self._lg.warning("claim failed, skipping", extra={"adapter": adapter, "exception": e})
-            return None
+        except (yaml.YAMLError, ValueError, TypeError, OSError) as e:
+            # Claim succeeded (file is in running/) but manifest is unreadable; fail it.
+            # OSError covers PermissionError and other read failures after the link.
+            try:
+                return self._fail(adapter, started_at, e)
+            except FileNotFoundError:
+                # Edge case: OSError was from os.link(), not load_manifest() - file never
+                # made it to running/. Log and skip rather than crash the batch.
+                self._lg.error(
+                    "claim error and no running file to fail",
+                    extra={"adapter": adapter, "exception": e},
+                )
+                return None
 
         try:
             return self._train(manifest, skip_registration, model_override, lora_profile)
