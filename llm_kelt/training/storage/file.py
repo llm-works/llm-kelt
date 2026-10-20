@@ -260,9 +260,13 @@ class FileStorage(Storage):
             return None
         except (yaml.YAMLError, ValueError, OSError) as e:
             self._lg.warning("unreadable queue manifest", extra={"path": str(path), "exception": e})
-            # A completed file is matched by name prefix only, so without its metadata it
-            # cannot be attributed to this key; any other state is keyed by exact name.
-            return QueueStatus(adapter=adapter, state=state) if state != "completed" else None
+            # Pending and running use exact names; completed and failed use prefix matching,
+            # so without their metadata they cannot be attributed to this key.
+            return (
+                QueueStatus(adapter=adapter, state=state)
+                if state in ("pending", "running")
+                else None
+            )
 
         if manifest.adapter != adapter:
             return None
