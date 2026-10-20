@@ -53,13 +53,13 @@ dev = [
     "pytest-xdist>=3.0.0,<4.0.0",
 ]
 training = [
-    "torch>=2.2",
-    "transformers>=4.40",
-    "peft>=0.10",
-    "trl>=0.17",
-    "datasets>=2.18",
-    "accelerate>=0.28",
-    "bitsandbytes>=0.43",
+    "torch>=2.13",
+    "transformers>=5.18",
+    "peft>=0.21",
+    "trl>=1.14",
+    "datasets>=5.0",
+    "accelerate>=1.15",
+    "bitsandbytes>=0.50",
 ]
 
 [tool.ruff]

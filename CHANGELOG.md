@@ -21,8 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   move through `running/` to `completed/` or `failed/` (error recorded), exit 1 on any failure.
 - `kelt.train.manifest.status(adapter)` returns the latest submission's state and result,
   reading manifest metadata only.
+- SFT, DPO and prompt tuning support Qwen3.5/Qwen3.8 and compressed-tensors checkpoints
+  (dequantized at load). Models load with their saved class; LoRA targets default per family.
 
 ### Changed
+- **Breaking:** the `training` extra requires current releases: `transformers>=5.18`,
+  `trl>=1.14`, `peft>=0.21`, `torch>=2.13`, `accelerate>=1.15`, `datasets>=5.0`,
+  `bitsandbytes>=0.50`. transformers 4.x is no longer supported.
+- LoRA `target_modules` defaults to the model family's set (resolved after loading) instead of
+  a fixed Qwen2.5 list. A pre-quantized checkpoint always loads with its stored config, also
+  with `quantize=False`.
 - `dev` extra allows pytest-asyncio 1.x (was `<1.0`).
 - Manifest submit is atomic: `pending/` never holds a partially written manifest, and a
   concurrent submit for the same key fails instead of overwriting.

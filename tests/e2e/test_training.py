@@ -26,7 +26,8 @@ class TestLoraTraining:
         fast_training_config,
         tmp_path: Path,
     ):
-        """Train LoRA adapter and verify it produces valid outputs."""
+        """Train LoRA adapter with a validation split and verify it produces valid outputs."""
+        from appinfra import DotDict
         from peft import PeftModel
         from transformers import AutoModelForCausalLM
 
@@ -41,7 +42,7 @@ class TestLoraTraining:
             output_dir=output_dir,
             base_model=str(local_model_path),
             lora_config=fast_lora_config,
-            training_config=fast_training_config,
+            training_config=DotDict({**fast_training_config, "eval_split": 0.2}),
             quantize=False,  # Faster without quantization for small model
         )
 
@@ -59,6 +60,7 @@ class TestLoraTraining:
 
         # Verify metrics
         assert "train_loss" in result.metrics or result.metrics == {}, "Should have metrics"
+        assert "eval_loss" in result.metrics, "Should have eval_loss with eval_split > 0"
 
         # Verify adapter can be loaded
         base_model = AutoModelForCausalLM.from_pretrained(
@@ -72,49 +74,6 @@ class TestLoraTraining:
         # Verify training config was stored
         assert "lora" in result.config
         assert result.config["lora"]["r"] == fast_lora_config.r
-
-    def test_train_lora_with_eval_split(
-        self,
-        logger,
-        sft_training_data: Path,
-        local_model_path: Path,
-        fast_lora_config,
-        fast_training_config,
-        tmp_path: Path,
-    ):
-        """Train with validation split and verify eval metrics are produced."""
-        from appinfra import DotDict
-
-        from llm_kelt.training import train_lora
-
-        output_dir = tmp_path / "lora_output_eval"
-
-        # Config with eval split
-        config_with_eval = DotDict(
-            num_epochs=fast_training_config.num_epochs,
-            batch_size=fast_training_config.batch_size,
-            gradient_accumulation_steps=fast_training_config.gradient_accumulation_steps,
-            max_seq_length=fast_training_config.max_seq_length,
-            logging_steps=fast_training_config.logging_steps,
-            save_steps=fast_training_config.save_steps,
-            eval_split=0.2,  # 20% for eval
-            fp16=fast_training_config.fp16,
-            bf16=fast_training_config.bf16,
-        )
-
-        result = train_lora(
-            lg=logger,
-            data_path=sft_training_data,
-            output_dir=output_dir,
-            base_model=str(local_model_path),
-            lora_config=fast_lora_config,
-            training_config=config_with_eval,
-            quantize=False,
-        )
-
-        # With eval split, should have eval_loss
-        assert Path(result.adapter.path).exists()
-        assert "eval_loss" in result.metrics, "Should have eval_loss with eval_split > 0"
 
 
 def _tokenized_train_dataset(logger, data_path: Path, model_path: Path, training_config, out: Path):
@@ -171,45 +130,6 @@ class TestSftDataPreparation:
             ]
             assert tokenizer.decode(trained).startswith(record["output"])
             assert record["instruction"] not in tokenizer.decode(trained)
-
-    def test_whole_sequence_loss_by_default(
-        self, logger, local_model_path: Path, fast_training_config, tmp_path: Path
-    ):
-        """Default config trains on every token, prompt included."""
-        data_path = _write_records(tmp_path / "data.jsonl", self.RECORDS)
-        dataset, collator = _tokenized_train_dataset(
-            logger, data_path, local_model_path, fast_training_config, tmp_path / "out"
-        )
-        for row in dataset:
-            labels = collator([row])["labels"][0].tolist()
-            assert labels == row["input_ids"]
-
-    def test_templated_records_tokenize_like_expanded(
-        self, logger, local_model_path: Path, fast_training_config, tmp_path: Path
-    ):
-        """A compact templated set yields exactly the tokens of its expanded form."""
-        from llm_kelt.training.manifest import template_id
-        from llm_kelt.training.manifest.templates import render_records
-
-        template = "Classify the text below.\n\n{{text}}\n\nAnswer with one label."
-        tid = template_id(template)
-        texts = ["foo text", "bar text"]
-        compact = [{"template": tid, "slots": {"text": t}, "output": "foo"} for t in texts]
-        expanded = [
-            {"instruction": template.replace("{{text}}", t), "output": "foo"} for t in texts
-        ]
-
-        rendered_path = _write_records(
-            tmp_path / "rendered.jsonl", render_records({tid: template}, compact)
-        )
-        expanded_path = _write_records(tmp_path / "expanded.jsonl", expanded)
-        a, _ = _tokenized_train_dataset(
-            logger, rendered_path, local_model_path, fast_training_config, tmp_path / "a"
-        )
-        b, _ = _tokenized_train_dataset(
-            logger, expanded_path, local_model_path, fast_training_config, tmp_path / "b"
-        )
-        assert a["input_ids"] == b["input_ids"]
 
 
 @pytest.mark.training

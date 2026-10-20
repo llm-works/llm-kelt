@@ -12,7 +12,6 @@ This is ideal for large models (32B+) with small datasets where LoRA is unstable
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from appinfra import DotDict
 from appinfra.log import Logger
@@ -65,21 +64,14 @@ class Trainer:
     def _load_model(self):
         """Load base model and apply prompt tuning."""
         from peft import get_peft_model
-        from transformers import AutoModelForCausalLM
 
-        from ..model import get_quantization_config
+        from ..model import is_kbit_loaded, load_base_model
 
         self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
 
-        quant_config, _ = get_quantization_config(
-            self._lg, self.base_model, self._quantize_override
-        )
-        self._is_quantized = quant_config is not None
-        model_kwargs: dict[str, Any] = {"device_map": "auto", "trust_remote_code": True}
-        if quant_config is not None:
-            model_kwargs["quantization_config"] = quant_config
-        self.model = AutoModelForCausalLM.from_pretrained(self.base_model, **model_kwargs)
+        self.model = load_base_model(self._lg, self.base_model, self._quantize_override)
+        self._is_quantized = is_kbit_loaded(self.model)
 
         if self._is_quantized:
             from peft import prepare_model_for_kbit_training
