@@ -8,6 +8,7 @@ Trains the model to prefer "chosen" responses over "rejected" ones.
 """
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -109,6 +110,17 @@ class Trainer:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+    def _read_parent_lora_config(self, parent_path: str) -> None:
+        """Read parent adapter's LoRA config for RunResult metadata."""
+        cfg_path = Path(parent_path) / "adapter_config.json"
+        if cfg_path.exists():
+            cfg = json.loads(cfg_path.read_text())
+            self.lora_config = replace(
+                self.lora_config,
+                target_modules=cfg.get("target_modules"),
+                exclude_modules=cfg.get("exclude_modules"),
+            )
+
     def _apply_lora_adapter(self):
         """Apply LoRA adapter - load existing or create new.
 
@@ -132,6 +144,7 @@ class Trainer:
             self.model.load_adapter(self.parent.path, adapter_name="ref", is_trainable=False)
             self._use_stacked_adapters = True
             self.model.set_adapter("default")  # Ensure default is active
+            self._read_parent_lora_config(self.parent.path)
         else:
             self.lora_config = self.lora_config.resolve(self.model.config.model_type)
             peft_config = self.lora_config.to_peft_config()
