@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from appinfra import DotDict
 from appinfra.log import Logger
 
-from ..schema import Adapter, SubmitResult
+from ..schema import Adapter, QueueStatus, SubmitResult
 from ..storage import Storage
 from .loader import load_manifest as _load_manifest
 from .loader import save_manifest as _save_manifest
@@ -71,6 +71,9 @@ class Client:
 
         # Submit to training queue
         kelt.train.manifest.submit(manifest)
+
+        # Check its state (pending, running, completed or failed)
+        kelt.train.manifest.status("coding-v1")
 
         # List pending manifests
         kelt.train.manifest.list_pending()
@@ -257,6 +260,21 @@ class Client:
         result = self._storage.submit_manifest(manifest)
         self._lg.info("submitted manifest", extra={"adapter": manifest.adapter})
         return result
+
+    def status(self, adapter: str) -> QueueStatus | None:
+        """Get the state of the latest submission for an adapter key.
+
+        Reads manifest metadata only, so it stays cheap with large training sets.
+
+        Args:
+            adapter: Adapter key.
+
+        Returns:
+            QueueStatus with state ("pending", "running", "completed" or "failed"), the
+            manifest's created_at, and for finished runs the output (adapter identity
+            or error); None if the key was never submitted.
+        """
+        return self._storage.get_queue_status(adapter)
 
     def list_pending(self) -> list[Manifest]:
         """List manifests waiting for training.

@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -27,7 +28,7 @@ _KEY_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
 
 if TYPE_CHECKING:
     from ..manifest.schema import Manifest
-    from ..schema import AdapterInfo, RunResult, SubmitResult
+    from ..schema import AdapterInfo, QueueStatus, RunResult, SubmitResult
 
 
 class FileStorage(Storage):
@@ -42,7 +43,9 @@ class FileStorage(Storage):
     Directory structure:
         base_path/
         ├── pending/       # Manifests waiting for training
+        ├── running/       # Manifests claimed by a runner, training in progress
         ├── completed/     # Finished manifests (archive)
+        ├── failed/        # Manifests whose training failed, with the error in output
         ├── adapters/      # All adapters stored here
         │   └── {key}/{version_id}/
         ├── deployed/      # Symlinks to enabled adapters
@@ -59,7 +62,9 @@ class FileStorage(Storage):
         self._lg = lg
         self.base_path = Path(base_path).expanduser()
         self.pending_path = self.base_path / "pending"
+        self.running_path = self.base_path / "running"
         self.completed_path = self.base_path / "completed"
+        self.failed_path = self.base_path / "failed"
         self.adapters_path = self.base_path / "adapters"
         self.deployed_path = self.base_path / "deployed"
         self.work_path = self.base_path / "work"
@@ -69,7 +74,12 @@ class FileStorage(Storage):
     # =========================================================================
 
     def submit_manifest(self, manifest: Manifest) -> SubmitResult:
-        """Submit a manifest to the pending queue."""
+        """Submit a manifest to the pending queue.
+
+        The manifest is written to a hidden temporary file and hard-linked into place, so
+        readers of pending/ never see a partial file and a concurrent submit for the same
+        key fails instead of overwriting.
+        """
         from ..manifest.loader import save_manifest
         from ..schema import SubmitResult
 
@@ -80,7 +90,17 @@ class FileStorage(Storage):
         if pending_file.exists():
             raise ValueError(f"Manifest already pending for adapter: {manifest.adapter}")
 
-        save_manifest(manifest, pending_file)
+        tmp_file = self.pending_path / f".{manifest.adapter}.{uuid.uuid4().hex}.tmp"
+        try:
+            save_manifest(manifest, tmp_file)
+            try:
+                os.link(tmp_file, pending_file)
+            except FileExistsError:
+                raise ValueError(
+                    f"Manifest already pending for adapter: {manifest.adapter}"
+                ) from None
+        finally:
+            tmp_file.unlink(missing_ok=True)
         self._lg.info("submitted manifest", extra={"adapter": manifest.adapter})
 
         return SubmitResult(
@@ -116,6 +136,18 @@ class FileStorage(Storage):
                 )
         return manifests
 
+    def list_pending_keys(self) -> list[str]:
+        """List adapter keys of pending manifests, oldest submission first."""
+        if not self.pending_path.exists():
+            return []
+        stamped = []
+        for path in self.pending_path.glob("*.yaml"):
+            try:
+                stamped.append((path.stat().st_mtime, path.stem))
+            except FileNotFoundError:
+                continue
+        return [key for _, key in sorted(stamped)]
+
     def remove_pending_manifest(self, adapter: str) -> None:
         """Remove a manifest from pending queue."""
         self.validate_key(adapter)
@@ -123,6 +155,126 @@ class FileStorage(Storage):
         if not pending_file.exists():
             raise FileNotFoundError(f"Manifest not found: {adapter}")
         pending_file.unlink()
+
+    def claim_pending_manifest(self, adapter: str) -> Manifest:
+        """Move a pending manifest to running/ and return it.
+
+        The rename is atomic, so two runners cannot claim the same manifest. A relative
+        external data path is anchored to pending/, where the producer wrote it.
+
+        Raises:
+            FileNotFoundError: No pending manifest for the key (or another runner took it).
+            FileExistsError: A manifest for the key is already running.
+            ValueError, yaml.YAMLError: The claimed manifest cannot be parsed; it stays in
+                running/.
+        """
+        from ..manifest.loader import load_manifest
+
+        self.validate_key(adapter)
+        self.running_path.mkdir(parents=True, exist_ok=True)
+        running_file = self.running_path / f"{adapter}.yaml"
+        pending_file = self.pending_path / f"{adapter}.yaml"
+        try:
+            os.link(pending_file, running_file)
+        except FileExistsError:
+            raise FileExistsError(f"Manifest already running for adapter: {adapter}") from None
+        pending_file.unlink()
+        self._lg.info("claimed manifest", extra={"adapter": adapter})
+
+        manifest = load_manifest(running_file)
+        data_path = manifest.data.get("path")
+        if manifest.data.format == "external" and data_path and not Path(data_path).is_absolute():
+            manifest.data.path = str(self.pending_path / data_path)
+        return manifest
+
+    def fail_running_manifest(self, adapter: str, result: RunResult) -> Path:
+        """Move a running manifest to failed/, recording the failed result as its output.
+
+        A manifest that cannot be parsed is moved unchanged.
+        """
+        from ..manifest.loader import load_manifest, save_manifest
+
+        self.validate_key(adapter)
+        self.failed_path.mkdir(parents=True, exist_ok=True)
+        running_file = self.running_path / f"{adapter}.yaml"
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+        try:
+            manifest = load_manifest(running_file)
+        except (yaml.YAMLError, ValueError, TypeError) as e:
+            self._lg.warning(
+                "failed manifest is unreadable, moving it unchanged",
+                extra={"adapter": adapter, "exception": e},
+            )
+            failed_file = self.failed_path / f"{adapter}-{stamp}.yaml"
+            running_file.rename(failed_file)
+            return failed_file
+
+        manifest.output = result
+        failed_file = self.failed_path / f"{adapter}-{stamp}.yaml.gz"
+        save_manifest(manifest, failed_file, compress=True)
+        running_file.unlink()
+        self._lg.info("failed manifest", extra={"adapter": adapter, "error": result.error})
+        return failed_file
+
+    def get_queue_status(self, adapter: str) -> QueueStatus | None:
+        """Return the state of the latest submission for an adapter key, or None.
+
+        Reads manifest metadata only (not training data). A submission still queued wins
+        over finished ones; among finished ones the most recently written file wins.
+        """
+        self.validate_key(adapter)
+        queued = [
+            ("pending", self.pending_path / f"{adapter}.yaml"),
+            ("running", self.running_path / f"{adapter}.yaml"),
+        ]
+        for state, path in queued + self._finished_by_recency(adapter):
+            status = self._read_queue_status(adapter, state, path)
+            if status is not None:
+                return status
+        return None
+
+    def _finished_by_recency(self, adapter: str) -> list[tuple[str, Path]]:
+        """Completed and failed manifest files whose name starts with the key, newest first."""
+        candidates = [("completed", p) for p in self.completed_path.glob(f"{adapter}-*.yaml*")]
+        candidates += [("failed", p) for p in self.failed_path.glob(f"{adapter}-*.yaml*")]
+        mtimes = {}
+        for state, path in candidates:
+            try:
+                mtimes[path] = path.stat().st_mtime
+            except FileNotFoundError:
+                continue
+        found = [(state, path) for state, path in candidates if path in mtimes]
+        return sorted(found, key=lambda c: mtimes[c[1]], reverse=True)
+
+    def _read_queue_status(self, adapter: str, state: str, path: Path) -> QueueStatus | None:
+        """Build a QueueStatus from a manifest file's metadata.
+
+        Returns None if the file is gone (moved by a runner meanwhile) or, for a finished
+        file found by name prefix, belongs to another adapter key.
+        """
+        from ..manifest.loader import load_manifest_metadata
+        from ..schema import QueueStatus
+
+        try:
+            manifest = load_manifest_metadata(path)
+        except FileNotFoundError:
+            return None
+        except (yaml.YAMLError, ValueError, OSError) as e:
+            self._lg.warning("unreadable queue manifest", extra={"path": str(path), "exception": e})
+            # Pending and running use exact names; completed and failed use prefix matching,
+            # so without their metadata they cannot be attributed to this key.
+            return (
+                QueueStatus(adapter=adapter, state=state)
+                if state in ("pending", "running")
+                else None
+            )
+
+        if manifest.adapter != adapter:
+            return None
+        return QueueStatus(
+            adapter=adapter, state=state, created_at=manifest.created_at, output=manifest.output
+        )
 
     def _link_manifest_to_adapter(self, key: str, md5: str, manifest_file: Path) -> None:
         """Create symlink from adapter directory to its completed manifest."""
@@ -157,12 +309,22 @@ class FileStorage(Storage):
         if md5:
             self._link_manifest_to_adapter(manifest.adapter, md5, completed_file)
 
-        # Remove from pending if it exists
-        pending_file = self.pending_path / f"{manifest.adapter}.yaml"
-        if pending_file.exists():
-            pending_file.unlink()
-
+        self._remove_queue_source(manifest)
         self._lg.info("completed manifest", extra={"adapter": manifest.adapter, "md5": md5})
+
+    def _remove_queue_source(self, manifest: Manifest) -> None:
+        """Remove the queue file the manifest was loaded from, if it is in pending/ or running/.
+
+        Only that file: a newer submission for the same key, pending while this one ran,
+        stays queued.
+        """
+        source = manifest.get("source_path")
+        if source is None:
+            return
+        source = Path(source).resolve()
+        queue_dirs = (self.pending_path.resolve(), self.running_path.resolve())
+        if source.parent in queue_dirs:
+            source.unlink(missing_ok=True)
 
     def list_completed_manifests(self) -> list[Manifest]:
         """List all completed manifests."""
@@ -769,7 +931,9 @@ class FileStorage(Storage):
         """Create all required registry directories."""
         for path in (
             self.pending_path,
+            self.running_path,
             self.completed_path,
+            self.failed_path,
             self.adapters_path,
             self.deployed_path,
             self.work_path,

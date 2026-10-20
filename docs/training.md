@@ -327,6 +327,28 @@ kelt train run manifests/coding-v1.yaml --model Qwen/Qwen2.5-14B-Instruct --lora
 
 `--skip-register` runs training but skips the registry write, useful for dry runs.
 
+### Train the queue
+
+`kelt train run --pending` (or `runner.run_pending()`) trains every manifest in
+`<registry>/pending/`, oldest submission first. Each one is claimed by an atomic move to
+`running/`, then lands in `completed/` or, on any error, in `failed/` with
+`output.status: failed` and `output.error`. One failure does not stop the batch; the
+command exits 1 if any manifest failed. Failed manifests stay in `failed/` until resubmitted.
+
+A producer submits with `kelt.train.manifest.submit(manifest)` and polls the result:
+
+```python
+status = kelt.train.manifest.status("coding-v1")  # → QueueStatus | None
+status.state  # "pending" | "running" | "completed" | "failed"
+status.created_at  # identifies the submission
+status.output.adapter.md5  # completed: the trained adapter's version id
+status.output.error  # failed: the reason
+```
+
+`status()` reads manifest metadata only, never the training data. A manifest still queued
+for the key wins over finished runs; among finished runs the newest wins. A manifest left in
+`running/` by a killed process stays there until removed by hand.
+
 ### Query the manifest store
 
 ```python

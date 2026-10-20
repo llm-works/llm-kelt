@@ -57,7 +57,7 @@ etc.) pass through unmodified.
 Run a manifest.
 
 ```bash
-kelt train run [MANIFEST] \
+kelt train run [MANIFEST | --pending] \
   [--model M] [--list-models] \
   [--skip-register] \
   [--lora-profile {small,medium,large,xlarge}]
@@ -65,8 +65,15 @@ kelt train run [MANIFEST] \
 
 Interactive picker if `MANIFEST` omitted — lists everything in `<registry>/pending/`.
 
+With `--pending`, trains every pending manifest without prompting, oldest submission first.
+Each manifest moves `pending/` → `running/` → `completed/`, or to `failed/` with the error
+recorded in its `output`; a failure does not stop the rest. Exits 1 if any manifest failed,
+0 otherwise (including when nothing is pending). Failed manifests are not retried; submit
+again to retry.
+
 | Flag | Notes |
 |---|---|
+| `--pending` | Train the whole pending queue, non-interactive. Not combined with `MANIFEST`. |
 | `--model`, `-m` | Override manifest's base model (path, HF ID, or name resolvable in `models.locations`). |
 | `--list-models` | Print resolvable model list and exit. |
 | `--skip-register` | Train and save output but don't write to the adapter registry. |
@@ -237,9 +244,13 @@ The registry directory layout:
 
 ```text
 <base_path>/
-  pending/           manifests waiting to run
-  completed/         manifests after successful run
-  <adapter>/         one directory per registered adapter
-    versions/<md5>/  adapter weights + adapter_config.json
-    deployed         symlink to the active version(s)
+  pending/           manifests waiting to run (written atomically by submit)
+  running/           manifests claimed by a runner, training in progress
+  completed/         manifests after successful run, with output (adapter md5, path)
+  failed/            manifests whose run failed, with the error in output
+  adapters/<key>/<version_id>/   adapter weights + adapter_config.json
+  deployed/          symlinks to the deployed version(s)
+  work/              temporary training directories
 ```
+
+Producers only write `pending/`; everything else is written by the runner.

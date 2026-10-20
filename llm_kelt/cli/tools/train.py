@@ -330,6 +330,11 @@ class RunTool(_ConfigMixin, Tool):
 
     def add_args(self, parser) -> None:
         parser.add_argument("manifest", nargs="?", help="Manifest path (interactive if omitted)")
+        parser.add_argument(
+            "--pending",
+            action="store_true",
+            help="Train all pending manifests, non-interactive; exit 1 if any failed",
+        )
         parser.add_argument("--model", "-m", help="Override model (path, HF ID, or name)")
         parser.add_argument(
             "--list-models", action="store_true", help="List available models and exit"
@@ -362,7 +367,7 @@ class RunTool(_ConfigMixin, Tool):
                 return None
             idx = int(choice) - 1
             return manifests[idx] if 0 <= idx < len(manifests) else None
-        except (ValueError, KeyboardInterrupt, IndexError):
+        except (ValueError, KeyboardInterrupt, IndexError, EOFError):
             return None
 
     def _get_manifest_path(self, registry_path: Path) -> Path | None:
@@ -375,6 +380,30 @@ class RunTool(_ConfigMixin, Tool):
             return path
         return self._select_interactive(registry_path / "pending")
 
+    def _run_pending(self, registry_path: Path) -> int:
+        """Train all pending manifests; 1 if any failed, 0 otherwise (also when none)."""
+        storage = FileStorage(self.lg, registry_path)
+        runner = Runner(self.lg, storage, model_locations=self._model_locations())
+        results = runner.run_pending(
+            skip_registration=self.args.skip_register,
+            model_override=getattr(self.args, "model", None),
+            lora_profile=getattr(self.args, "lora_profile", None),
+        )
+        if not results:
+            print("No pending manifests")
+            return 0
+
+        failed = 0
+        for adapter, result in results:
+            if result.status == "failed":
+                failed += 1
+                print(f"  FAILED  {adapter}: {result.error}")
+            else:
+                md5 = result.adapter.md5 if result.adapter else "unknown"
+                print(f"  OK      {adapter}: adapter {md5[:12]} ({result.duration_seconds:.0f}s)")
+        print(f"\n{len(results) - failed} trained, {failed} failed")
+        return 1 if failed else 0
+
     def run(self, **kwargs: Any) -> int:
         if self.args.list_models:
             return self._list_models()
@@ -385,6 +414,23 @@ class RunTool(_ConfigMixin, Tool):
             self.lg.error(str(e))
             return 1
 
+        if self.args.pending:
+            return self._run_queue(registry_path)
+        return self._run_manifest(registry_path)
+
+    def _run_queue(self, registry_path: Path) -> int:
+        """Handle --pending: train the queue, reporting errors that stop the whole batch."""
+        if self.args.manifest:
+            self.lg.error("--pending trains the queue; do not pass a manifest path")
+            return 1
+        try:
+            return self._run_pending(registry_path)
+        except Exception as e:
+            self.lg.error(f"Training queue failed: {e}")
+            return 1
+
+    def _run_manifest(self, registry_path: Path) -> int:
+        """Train one manifest, given as a path or picked interactively from pending/."""
         manifest_path = self._get_manifest_path(registry_path)
         if manifest_path is None:
             return 0 if not self.args.manifest else 1
