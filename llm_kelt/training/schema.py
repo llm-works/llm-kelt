@@ -114,3 +114,16 @@ class RunResult(FieldDict):
     def duration_seconds(self) -> float:
         """Calculate training duration in seconds."""
         return float((self.completed_at - self.started_at).total_seconds())
+
+
+class QueueStatus(FieldDict):
+    """State of the latest submission for an adapter key in the training queue."""
+
+    # Adapter key
+    adapter: str
+    # "pending", "running", "completed" or "failed"
+    state: str
+    # Manifest creation time; identifies which submission this status belongs to
+    created_at: datetime | None = None
+    # Training result (completed or failed), with adapter identity or error
+    output: RunResult | None = None

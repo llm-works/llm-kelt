@@ -26,13 +26,14 @@ from .profiles import (
     load_default_profile,
 )
 from .runner import Runner
-from .schema import TRAINING_DEFAULTS, Adapter, RunResult, SubmitResult
+from .schema import TRAINING_DEFAULTS, Adapter, QueueStatus, RunResult, SubmitResult
 from .sft import Client as SftClient
 
 __all__ = [
     # Schema
     "TRAINING_DEFAULTS",
     "Adapter",
+    "QueueStatus",
     "RunResult",
     "SubmitResult",
     "ProfileDetectionError",

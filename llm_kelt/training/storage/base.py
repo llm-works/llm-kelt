@@ -4,7 +4,7 @@
 """Abstract base class for training storage.
 
 Defines the interface for storing and retrieving training artifacts:
-- Manifests (pending and completed)
+- Manifests (pending, running, completed, failed)
 - Adapters (with versioning and deployment)
 - Training work areas (temporary, for HuggingFace)
 
@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from ..manifest.schema import Manifest
-    from ..schema import AdapterInfo, RunResult, SubmitResult
+    from ..schema import AdapterInfo, QueueStatus, RunResult, SubmitResult
 
 
 class DupAdapterError(ValueError):
@@ -105,6 +105,14 @@ class Storage(ABC):
         """
 
     @abstractmethod
+    def list_pending_keys(self) -> list[str]:
+        """List adapter keys of pending manifests, oldest submission first.
+
+        Returns:
+            Adapter keys.
+        """
+
+    @abstractmethod
     def remove_pending_manifest(self, adapter: str) -> None:
         """Remove a manifest from pending queue.
 
@@ -113,6 +121,46 @@ class Storage(ABC):
 
         Raises:
             FileNotFoundError: If manifest not found.
+        """
+
+    @abstractmethod
+    def claim_pending_manifest(self, adapter: str) -> Manifest:
+        """Atomically move a pending manifest to the running state and return it.
+
+        Args:
+            adapter: Adapter key.
+
+        Returns:
+            The claimed manifest.
+
+        Raises:
+            FileNotFoundError: If no manifest is pending for the key.
+            FileExistsError: If a manifest for the key is already running.
+            ValueError: If the claimed manifest cannot be parsed (it stays running).
+        """
+
+    @abstractmethod
+    def fail_running_manifest(self, adapter: str, result: RunResult) -> Path:
+        """Move a running manifest to failed storage, with result as its output.
+
+        Args:
+            adapter: Adapter key.
+            result: Failed RunResult (status "failed", error set).
+
+        Returns:
+            Location of the failed manifest.
+        """
+
+    @abstractmethod
+    def get_queue_status(self, adapter: str) -> QueueStatus | None:
+        """Return the state of the latest submission for an adapter key.
+
+        Args:
+            adapter: Adapter key.
+
+        Returns:
+            QueueStatus (pending, running, completed or failed), or None if the key was
+            never submitted.
         """
 
     @abstractmethod

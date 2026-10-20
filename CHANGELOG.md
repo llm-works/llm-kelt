@@ -17,9 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and are rendered to plain instructions before training.
 - `completion_only_loss` training option (SFT and prompt tuning): excludes prompt
   tokens from the loss. Default off.
+- `kelt train run --pending` trains the whole manifest queue without prompting; manifests
+  move through `running/` to `completed/` or `failed/` (error recorded), exit 1 on any failure.
+- `kelt.train.manifest.status(adapter)` returns the latest submission's state and result,
+  reading manifest metadata only.
 
 ### Changed
 - `dev` extra allows pytest-asyncio 1.x (was `<1.0`).
+- Manifest submit is atomic: `pending/` never holds a partially written manifest, and a
+  concurrent submit for the same key fails instead of overwriting.
 - SFT and prompt-tuning data are tokenized from the chat template directly, which
   drops a stray end-of-turn token TRL appended after templates ending in a newline
   (e.g. Qwen). The LoRA trainer now also accepts `prompt`/`response` record fields.

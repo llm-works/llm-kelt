@@ -11,7 +11,7 @@ are assumed background — see the HuggingFace, PEFT, or TRL docs for those.
 | **scope_key** | Hierarchical key on every KG record. Reads walk up the chain (`"org:acme:user:alice"` sees `"org:acme"` and `"global"`). Writes always land in the exact key. |
 | **schema_name** | Postgres schema hosting the tables. Different schemas = physical separation. Set via `ClientContext.schema_name` or `client.with_schema()`. |
 | **SchemaMode** | What the client does on startup: `ENSURE` runs migrations, `VERIFY` checks version, `SKIP` doesn't touch alembic (and skips the pgvector import). |
-| **manifest** | YAML file describing a training run: adapter, method, data source, LoRA/training config, deployment policy. Persisted to `<registry>/pending/` then `<registry>/completed/`. |
+| **manifest** | YAML file describing a training run: adapter, method, data source, LoRA/training config, deployment policy. Persisted to `<registry>/pending/`, then `running/` while training, then `completed/` or `failed/`. |
 | **adapter (registry)** | A named series of trained versions. Each version is identified by a 12-char md5. Deploys are per-version. |
 | **fact ID** | `int` returned from `add()` / `record()` methods. Primary key on `atomic_facts`. |
 | **signal** | Feedback direction: `"positive"`, `"negative"`, `"dismiss"`. |

@@ -9,6 +9,7 @@ training client (DPO, SFT, or Prompt Tuning) based on the manifest method.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from appinfra.log import Logger
@@ -138,6 +139,39 @@ class Runner:
 
         raise ValueError("No model specified. Use --model to specify the base model.")
 
+    def _prepare(
+        self, manifest: Manifest, model_override: str | None, lora_profile: str | None
+    ) -> None:
+        """Validate the manifest and store the resolved base model and LoRA profile in it."""
+        errors = validate_manifest(manifest)
+        if errors:
+            raise ValueError(f"Invalid manifest: {'; '.join(errors)}")
+
+        manifest.training["base_model"] = self._get_effective_model(manifest, model_override)
+        if lora_profile is not None:
+            from .profiles import MODEL_SIZE_PROFILES
+
+            if lora_profile not in MODEL_SIZE_PROFILES:
+                valid = ", ".join(sorted(MODEL_SIZE_PROFILES.keys()))
+                raise ValueError(f"Invalid lora_profile '{lora_profile}'. Valid values: {valid}")
+            manifest.training["lora_profile"] = lora_profile
+
+    def _train(
+        self,
+        manifest: Manifest,
+        skip_registration: bool,
+        model_override: str | None,
+        lora_profile: str | None,
+    ) -> RunResult:
+        """Train a loaded manifest and save it to completed storage."""
+        self._prepare(manifest, model_override, lora_profile)
+        result = self._dispatch_training(manifest, skip_registration)
+        result = self._enrich_adapter(result)
+        manifest.output = result
+
+        self._save_completed(manifest)
+        return result
+
     def run(
         self,
         manifest_path: Path,
@@ -159,25 +193,66 @@ class Runner:
         """
         self._lg.info("loading manifest", extra={"path": str(manifest_path)})
         manifest = load_manifest(manifest_path)
+        return self._train(manifest, skip_registration, model_override, lora_profile)
 
-        errors = validate_manifest(manifest)
-        if errors:
-            raise ValueError(f"Invalid manifest: {'; '.join(errors)}")
+    def run_pending(
+        self,
+        skip_registration: bool = False,
+        model_override: str | None = None,
+        lora_profile: str | None = None,
+    ) -> list[tuple[str, RunResult]]:
+        """Train every pending manifest, oldest submission first, one at a time.
 
-        # Resolve effective model and store in training config
-        base_model = self._get_effective_model(manifest, model_override)
-        manifest.training["base_model"] = base_model
-        if lora_profile is not None:
-            from .profiles import MODEL_SIZE_PROFILES
+        Each manifest is claimed (moved to running), trained, then moved to completed, or
+        to failed with the error in its output. A failure does not stop the remaining
+        manifests. Arguments are as for run().
 
-            if lora_profile not in MODEL_SIZE_PROFILES:
-                valid = ", ".join(sorted(MODEL_SIZE_PROFILES.keys()))
-                raise ValueError(f"Invalid lora_profile '{lora_profile}'. Valid values: {valid}")
-            manifest.training["lora_profile"] = lora_profile
+        Returns:
+            (adapter key, RunResult) per manifest trained or failed, in run order.
+        """
+        results: list[tuple[str, RunResult]] = []
+        for adapter in self._storage.list_pending_keys():
+            result = self._run_claimed(adapter, skip_registration, model_override, lora_profile)
+            if result is not None:
+                results.append((adapter, result))
+        return results
 
-        result = self._dispatch_training(manifest, skip_registration)
-        result = self._enrich_adapter(result)
-        manifest.output = result
+    def _run_claimed(
+        self,
+        adapter: str,
+        skip_registration: bool,
+        model_override: str | None,
+        lora_profile: str | None,
+    ) -> RunResult | None:
+        """Claim and train one pending manifest; None if it could not be claimed."""
+        started_at = datetime.now(UTC)
+        try:
+            manifest = self._storage.claim_pending_manifest(adapter)
+        except FileNotFoundError:
+            self._lg.info("manifest no longer pending, skipping", extra={"adapter": adapter})
+            return None
+        except FileExistsError as e:
+            self._lg.warning("manifest already running, skipping", extra={"exception": e})
+            return None
+        except Exception as e:  # claimed, but unreadable
+            return self._fail(adapter, started_at, e)
 
-        self._save_completed(manifest)
+        try:
+            return self._train(manifest, skip_registration, model_override, lora_profile)
+        except Exception as e:  # any training error fails this manifest, not the batch
+            return self._fail(adapter, started_at, e)
+
+    def _fail(self, adapter: str, started_at: datetime, error: Exception) -> RunResult:
+        """Record a failed run and move the running manifest to failed storage."""
+        result = RunResult(
+            status="failed",
+            started_at=started_at,
+            completed_at=datetime.now(UTC),
+            error=f"{type(error).__name__}: {error}",
+        )
+        location = self._storage.fail_running_manifest(adapter, result)
+        self._lg.error(
+            "training failed",
+            extra={"adapter": adapter, "exception": error, "location": str(location)},
+        )
         return result
