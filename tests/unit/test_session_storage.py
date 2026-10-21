@@ -8,18 +8,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from appinfra.log import LogConfig, LoggerFactory
 
 from llm_kelt.conversation import Config, Conversation, Role
 from llm_kelt.conversation.storage import FileSessionStorage, SessionSummary, StoredSession
 from llm_kelt.core.errors import NotFoundError
-
-
-@pytest.fixture
-def lg():
-    """Create a logger for testing."""
-    log_config = LogConfig.from_params(level="warning")
-    return LoggerFactory.create_root(log_config)
 
 
 @pytest.fixture

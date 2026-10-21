@@ -560,14 +560,6 @@ class TestManifestClient:
     """Test manifest Client class."""
 
     @pytest.fixture
-    def lg(self):
-        """Create a logger for testing."""
-        from appinfra.log import LogConfig, LoggerFactory
-
-        log_config = LogConfig.from_params(level="warning")
-        return LoggerFactory.create_root(log_config)
-
-    @pytest.fixture
     def storage(self, lg, tmp_path: Path):
         """Create FileStorage with temp directory."""
         from llm_kelt.training.storage import FileStorage
