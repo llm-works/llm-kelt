@@ -146,6 +146,10 @@ class Storage(ABC):
         """
 
     @abstractmethod
+    def list_running_keys(self) -> list[str]:
+        """List queue keys of running manifests."""
+
+    @abstractmethod
     def remove_pending_manifest(self, adapter: str) -> None:
         """Remove a manifest from pending queue.
 

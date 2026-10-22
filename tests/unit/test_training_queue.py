@@ -272,13 +272,17 @@ class TestRunPending:
         assert list(storage.running_path.iterdir()) == []
         assert [p.read_text() for p in storage.failed_path.iterdir()] == ["not: [valid"]
 
-    def test_already_running_key_skipped(self, runner: Runner, storage: FileStorage, monkeypatch):
+    def test_build_left_running_is_failed_then_key_trains(
+        self, runner: Runner, storage: FileStorage, monkeypatch
+    ):
+        """A registry has one runner: a build still running at start was left by a stop."""
         storage.submit_manifest(_manifest())
         storage.claim_pending_manifest("foo")
         storage.submit_manifest(_manifest())
         self._dispatch(monkeypatch, runner, failing=set())
-        assert runner.run_pending() == []
-        assert (storage.pending_path / "foo.yaml").exists()
+        results = runner.run_pending()
+        assert [(key, r.status) for key, r in results] == [("foo", "failed"), ("foo", "completed")]
+        assert not (storage.pending_path / "foo.yaml").exists()
 
     def test_nothing_pending(self, runner: Runner):
         assert runner.run_pending() == []

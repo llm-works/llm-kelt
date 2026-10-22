@@ -20,17 +20,15 @@ weights carry over between builds.
   id: a set's (``<records>/<adapter>/sets/<set>.yaml``) start as those of its first submit;
   a build's live in its build record, survive pruning its weights and are reset by a
   rebuild.
+- Every write holds the registry's write lock (see locks.py); reads do not lock.
 """
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import shutil
 import uuid
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,6 +47,8 @@ from appinfra.cas import (
     is_object_id,
 )
 from appinfra.log import Logger
+
+from .locks import RegistryLock
 
 DEFAULT_SERIES = "main"
 
@@ -131,17 +131,20 @@ def series_root(base_model: str, recipe: dict[str, Any]) -> dict[str, Any]:
 class Lineage:
     """Series of training sets per adapter key, kept in a content-addressed store."""
 
-    def __init__(self, lg: Logger, store: Store, records_path: Path) -> None:
+    def __init__(self, lg: Logger, store: Store, records_path: Path, lock: RegistryLock) -> None:
         """Initialize lineage.
 
         Args:
             lg: Logger instance.
             store: Content-addressed store; one repository per adapter key.
-            records_path: Directory for submit dates and build records.
+            records_path: Directory for submit dates, build records and annotations.
+            lock: The registry's write lock, shared with every other writer of the
+                registry.
         """
         self._lg = lg
         self._store = store
         self._records_path = records_path
+        self._lock = lock
 
     def submit(
         self,
@@ -173,11 +176,23 @@ class Lineage:
                 annotations are not a JSON object within MAX_ANNOTATIONS_BYTES.
         """
         annotations = _json_object(annotations)
+        with self._lock.hold():
+            return self._submit(adapter, series, records, templates, root, annotations)
+
+    def _submit(
+        self,
+        adapter: str,
+        series: str,
+        records: list[dict[str, Any]],
+        templates: dict[str, str],
+        root: dict[str, Any],
+        annotations: dict[str, Any],
+    ) -> Submission:
+        """Body of submit(); the caller holds the registry's lock."""
         repo = self._store.repo(adapter)
         set_id = _put_set(repo, records, templates)
         if annotations:
-            with self._locked(adapter):
-                self._write_once(self._set_path(adapter, set_id), yaml.safe_dump(annotations))
+            self._write_once(self._set_path(adapter, set_id), yaml.safe_dump(annotations))
         payload = canonical_json(root)
         ref = _REF_PREFIX + series
         while True:
@@ -208,15 +223,16 @@ class Lineage:
                 ``new_series`` exists.
         """
         repo = self._store.repo(adapter)
-        tip = self.tip(adapter, series)
-        if tip is None:
-            raise ValueError(f"Series not found: {adapter}/{series}")
-        if commit is None:
-            commit = tip
-        elif all(c.id != commit for c in repo.first_parents(tip)):
-            raise ValueError(f"Commit {commit} is not in series {adapter}/{series}")
-        if not repo.set_ref(_REF_PREFIX + new_series, commit, None):
-            raise ValueError(f"Series already exists: {adapter}/{new_series}")
+        with self._lock.hold():
+            tip = self.tip(adapter, series)
+            if tip is None:
+                raise ValueError(f"Series not found: {adapter}/{series}")
+            if commit is None:
+                commit = tip
+            elif all(c.id != commit for c in repo.first_parents(tip)):
+                raise ValueError(f"Commit {commit} is not in series {adapter}/{series}")
+            if not repo.set_ref(_REF_PREFIX + new_series, commit, None):
+                raise ValueError(f"Series already exists: {adapter}/{new_series}")
         self._lg.info(
             "forked series",
             extra={"adapter": adapter, "series": series, "new": new_series, "commit": commit},
@@ -257,10 +273,18 @@ class Lineage:
         """Record the outcome of a build of ``commit``, replacing an earlier one.
 
         The earlier build's annotations go with it: they describe weights this build
-        replaces.
+        replaces. A failed build does not replace a completed or pruned one: those weights
+        exist (or existed) and are still the commit's build.
         """
         build = {"state": state, "at": datetime.now(UTC).isoformat(), "md5": md5, "error": error}
-        with self._locked(adapter):
+        with self._lock.hold():
+            earlier = self._read_build(adapter, commit)
+            if state == "failed" and earlier and earlier["state"] in ("completed", "pruned"):
+                self._lg.warning(
+                    "failed rebuild kept the earlier build",
+                    extra={"adapter": adapter, "commit": commit, "error": error},
+                )
+                return
             _write_atomic(self._build_path(adapter, commit), yaml.safe_dump(build))
 
     def build(self, adapter: str, commit: str) -> Build | None:
@@ -283,11 +307,11 @@ class Lineage:
             ValueError: ``commit`` was never built, or the merged annotations are not a
                 JSON object within MAX_ANNOTATIONS_BYTES.
         """
-        with self._locked(adapter):
+        new = _json_object(annotations)  # before merging: a non-dict would raise TypeError
+        with self._lock.hold():
             data = self._read_build(adapter, commit)
             if data is None:
                 raise ValueError(f"No build of commit {commit} for adapter {adapter}")
-            new = _json_object(annotations)  # before merging: a non-dict would raise TypeError
             data["annotations"] = _json_object({**(data.get("annotations") or {}), **new})
             _write_atomic(self._build_path(adapter, commit), yaml.safe_dump(data))
 
@@ -298,18 +322,18 @@ class Lineage:
             ValueError: No series of the adapter holds the set, or the merged annotations
                 are not a JSON object within MAX_ANNOTATIONS_BYTES.
         """
+        new = _json_object(annotations)  # before merging: a non-dict would raise TypeError
         repo = self._store.repo(adapter)
-        held = (c.tree for tip in repo.refs(_REF_PREFIX).values() for c in repo.first_parents(tip))
-        if set_id not in held:
-            raise ValueError(f"Training set not found: {adapter}/{set_id}")
-        with self._locked(adapter):
-            new = _json_object(annotations)  # before merging: a non-dict would raise TypeError
+        with self._lock.hold():
+            refs = repo.refs(_REF_PREFIX).values()
+            if set_id not in (c.tree for tip in refs for c in repo.first_parents(tip)):
+                raise ValueError(f"Training set not found: {adapter}/{set_id}")
             merged = _json_object({**self.set_annotations(adapter, set_id), **new})
             _write_atomic(self._set_path(adapter, set_id), yaml.safe_dump(merged))
 
     def mark_pruned(self, adapter: str, commit: str) -> None:
         """Mark a completed build pruned: its weights are gone, its record stays."""
-        with self._locked(adapter):
+        with self._lock.hold():
             data = self._read_build(adapter, commit)
             if data is None or data["state"] != "completed":
                 raise ValueError(f"No completed build of commit {commit} for adapter {adapter}")
@@ -377,25 +401,25 @@ class Lineage:
         Sets and builds shared with another series stay. Returns the dropped commits.
 
         Raises:
-            ValueError: The series does not exist, or a submit moved it meanwhile.
+            ValueError: The series does not exist.
         """
         repo = self._store.repo(adapter)
         ref = _REF_PREFIX + series
-        tip = repo.get_ref(ref)
-        if tip is None:
-            raise ValueError(f"Series not found: {adapter}/{series}")
-        history = list(repo.first_parents(tip))
-        if not repo.delete_ref(ref, tip):
-            raise ValueError(f"Series {adapter}/{series} changed while dropping it; retry")
-        shared = self._reachable(repo, exclude=None)
-        shared_sets = {self._commit_tree(repo, c) for c in shared}
-        dropped = [c for c in history if c.id not in shared]
-        for c in dropped:
-            self._build_path(adapter, c.id).unlink(missing_ok=True)
-            self._submitted_path(adapter, c.id).unlink(missing_ok=True)
-            if c.tree not in shared_sets:
-                self._set_path(adapter, c.tree).unlink(missing_ok=True)
-        repo.prune(_PRUNE_GRACE)
+        with self._lock.hold():
+            tip = repo.get_ref(ref)
+            if tip is None:
+                raise ValueError(f"Series not found: {adapter}/{series}")
+            history = list(repo.first_parents(tip))
+            repo.delete_ref(ref, tip)  # cannot fail: every ref writer holds the lock
+            shared = self._reachable(repo, exclude=None)
+            shared_sets = {self._commit_tree(repo, c) for c in shared}
+            dropped = [c for c in history if c.id not in shared]
+            for c in dropped:
+                self._build_path(adapter, c.id).unlink(missing_ok=True)
+                self._submitted_path(adapter, c.id).unlink(missing_ok=True)
+                if c.tree not in shared_sets:
+                    self._set_path(adapter, c.tree).unlink(missing_ok=True)
+            repo.prune(_PRUNE_GRACE)
         self._lg.info("dropped series", extra={"adapter": adapter, "series": series})
         return [c.id for c in reversed(dropped)]
 
@@ -406,7 +430,8 @@ class Lineage:
         alone names the series it was built for, not the one it was deployed for.
         """
         record = yaml.safe_dump({"series": series, "commit": commit})
-        _write_atomic(self._records_path / adapter / "deployed.yaml", record)
+        with self._lock.hold():
+            _write_atomic(self._records_path / adapter / "deployed.yaml", record)
 
     def deployed(self, adapter: str) -> tuple[str, str] | None:
         """Return the (series, commit) last recorded by ``record_deployed``, or None."""
@@ -421,7 +446,7 @@ class Lineage:
 
     def wipe(self, adapter: str) -> None:
         """Delete every series of an adapter with all its sets, builds and annotations."""
-        with self._locked(adapter):
+        with self._lock.hold():
             self._store.delete_repo(adapter)
             shutil.rmtree(self._records_path / adapter, ignore_errors=True)
         self._lg.info("wiped lineage", extra={"adapter": adapter})
@@ -439,19 +464,6 @@ class Lineage:
         if found is None:
             raise ValueError(f"Commit not found: {commit}")
         return found.tree
-
-    @contextmanager
-    def _locked(self, adapter: str) -> Iterator[None]:
-        """Hold an adapter's build-record lock, so read-modify-writes do not interleave.
-
-        The lock file lives outside the adapter's records directory, so wipe() can hold it
-        while deleting that directory. Adapter keys cannot start with a dot.
-        """
-        path = self._records_path / ".locks" / f"{adapter}.lock"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
-            yield
 
     def _read_build(self, adapter: str, commit: str) -> dict[str, Any] | None:
         try:

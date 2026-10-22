@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import threading
+import time
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -14,6 +16,7 @@ from appinfra import DotDict
 from appinfra.cas import MemoryStore
 
 from llm_kelt.training.lineage import MAX_ANNOTATIONS_BYTES, Lineage, Submission, series_root
+from llm_kelt.training.locks import RegistryLock
 from llm_kelt.training.manifest import Client
 from llm_kelt.training.manifest.loader import load_manifest, save_manifest
 from llm_kelt.training.manifest.schema import Data, Deployment, Manifest
@@ -42,7 +45,7 @@ def _submit(
 
 @pytest.fixture
 def lineage(lg, tmp_path: Path) -> Lineage:
-    return Lineage(lg, MemoryStore(lg), tmp_path / "lineage")
+    return Lineage(lg, MemoryStore(lg), tmp_path / "lineage", RegistryLock(tmp_path / ".lock"))
 
 
 class TestLineage:
@@ -383,6 +386,26 @@ class TestSeriesQueue:
         assert [p.name for p in storage.pending_path.iterdir()] == ["foo.yaml"]
 
 
+class TestStoppedRunner:
+    def test_run_pending_fails_builds_left_running(self, lg, storage: FileStorage):
+        storage.submit_manifest(_manifest(_rec(1), series="v1", policy="skip"))
+        commit = storage.claim_pending_manifest("foo+v1").commit  # the runner then stopped
+
+        [(key, result)] = Runner(lg, storage).run_pending()
+        assert (key, result.status) == ("foo+v1", "failed")
+        assert "runner stopped" in result.error
+        assert storage.list_running_keys() == []
+        assert storage.lineage.build("foo", commit).state == "failed"
+        storage.wipe_adapter("foo")  # the key is no longer blocked
+
+    def test_failed_rebuild_keeps_the_completed_build(self, storage: FileStorage):
+        commit = storage.submit_manifest(_manifest(_rec(1))).commit
+        storage.lineage.record_build("foo", commit, "completed", md5="abc123def456")
+        storage.lineage.record_build("foo", commit, "failed", error="boom")
+        build = storage.lineage.build("foo", commit)
+        assert (build.state, build.md5) == ("completed", "abc123def456")
+
+
 class TestSeriesDeployment:
     def test_deploying_a_new_series_switches_the_key_to_it(
         self, storage: FileStorage, tmp_path: Path
@@ -510,3 +533,157 @@ class TestSeriesRetention:
         storage.claim_pending_manifest("foo+v1")
         with pytest.raises(ValueError, match="running"):
             storage.wipe_adapter("foo")
+
+
+class TestRegistryLock:
+    def test_hold_is_reentrant_within_a_thread(self, tmp_path: Path):
+        lock = RegistryLock(tmp_path / ".lock")
+        other = RegistryLock(tmp_path / ".lock")  # a second object on the same lock file
+        with lock.hold(), lock.hold(), other.hold():
+            pass
+        with lock.hold():  # released after the nested holds
+            pass
+
+    def test_a_second_writer_waits(self, tmp_path: Path):
+        lock = RegistryLock(tmp_path / ".lock")
+        order: list[str] = []
+        held, waiting = threading.Event(), threading.Event()
+
+        def first() -> None:
+            with lock.hold():
+                order.append("first in")
+                held.set()
+                waiting.wait(5)
+                time.sleep(0.05)  # the second writer is blocked on the lock meanwhile
+                order.append("first out")
+
+        def second() -> None:
+            held.wait(5)
+            waiting.set()
+            with lock.hold():
+                order.append("second in")
+
+        threads = [threading.Thread(target=first), threading.Thread(target=second)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(5)
+        assert order == ["first in", "first out", "second in"]
+
+
+class TestEveryWriterLocks:
+    def test_queue_writers_hold_the_registry_lock(
+        self, storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+    ):
+        held: list[bool] = []
+        inside = {"depth": 0}
+        real_hold = RegistryLock.hold
+
+        def recording_hold(self: RegistryLock):
+            inside["depth"] += 1
+            try:
+                with real_hold(self):
+                    yield
+            finally:
+                inside["depth"] -= 1
+
+        monkeypatch.setattr(RegistryLock, "hold", contextmanager(recording_hold))
+        real_unlink = Path.unlink
+
+        def tracked_unlink(path: Path, missing_ok: bool = False) -> None:
+            if storage.base_path in path.parents and ".lock" not in path.name:
+                held.append(inside["depth"] > 0)
+            real_unlink(path, missing_ok=missing_ok)
+
+        monkeypatch.setattr(Path, "unlink", tracked_unlink)
+
+        one_off = _manifest(_rec(1))
+        one_off.series = None
+        storage.submit_manifest(one_off)
+        storage.remove_pending_manifest("foo")
+        storage.submit_manifest(_manifest(_rec(2)))
+        _complete(storage)
+        storage.submit_manifest(_manifest(_rec(3)))
+        storage.claim_pending_manifest("foo")
+        now = datetime.now(UTC)
+        storage.fail_running_manifest(
+            "foo", RunResult(status="failed", started_at=now, completed_at=now, error="x")
+        )
+        assert held and all(held)
+
+
+def _orphan_records(storage: FileStorage, series: str) -> list[str]:
+    """Lineage records of the adapter that name a commit or set no series holds."""
+    info = storage.lineage.series("foo", series)
+    commits = {e.commit for e in info.sets} if info else set()
+    sets = {e.set_id for e in info.sets} if info else set()
+    records = storage.base_path / "lineage" / "foo"
+    orphans = [p.name for p in (records / "builds").glob("*.yaml") if p.stem not in commits]
+    orphans += [p.name for p in (records / "submitted").glob("*") if p.name not in commits]
+    orphans += [p.name for p in (records / "sets").glob("*.yaml") if p.stem not in sets]
+    return orphans
+
+
+class TestConcurrentOperations:
+    def test_wipe_racing_writers_leaves_no_orphan_records(
+        self, storage: FileStorage, tmp_path: Path
+    ):
+        """Records written around a wipe always belong to a series that exists."""
+        storage.submit_manifest(_manifest(_rec(0), series="v1", policy="skip"))
+        built = _build(storage, tmp_path, "v1", "aaa111aaa111")
+
+        def submit(i: int) -> None:
+            manifest = _manifest(_rec(i), series="v1", policy="skip")
+            manifest.annotations = {"n": i}
+            storage.submit_manifest(manifest)
+
+        def annotate() -> None:
+            try:
+                storage.lineage.annotate_build("foo", built, {"gate": "passed"})
+            except ValueError:
+                pass  # the wipe came first
+
+        threads = [threading.Thread(target=submit, args=(i,)) for i in range(1, 9)]
+        threads += [threading.Thread(target=annotate) for _ in range(4)]
+        threads.insert(6, threading.Thread(target=storage.wipe_adapter, args=("foo",)))
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30)
+
+        assert _orphan_records(storage, "v1") == []
+
+    def test_deploy_racing_drop_keeps_the_deployed_series(
+        self, storage: FileStorage, tmp_path: Path
+    ):
+        """A drop either sees the deploy and refuses, or drops before the deploy fails."""
+        storage.submit_manifest(_manifest(_rec(1), series="v1", policy="skip"))
+        _build(storage, tmp_path, "v1", "aaa111aaa111")
+        storage.lineage.fork("foo", "v1", "trial")
+        outcomes: list[str] = []
+
+        def deploy() -> None:
+            try:
+                storage.deploy_series("foo", "trial")
+                outcomes.append("deployed")
+            except ValueError:
+                outcomes.append("deploy refused")
+
+        def drop() -> None:
+            try:
+                storage.drop_series("foo", "trial")
+                outcomes.append("dropped")
+            except ValueError:
+                outcomes.append("drop refused")
+
+        threads = [threading.Thread(target=deploy), threading.Thread(target=drop)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30)
+
+        active = storage.active_series("foo")
+        if "dropped" in outcomes:
+            assert active is None or active.series != "trial"
+        else:
+            assert active is not None and active.series == "trial"

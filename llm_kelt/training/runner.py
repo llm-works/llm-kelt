@@ -217,10 +217,17 @@ class Runner:
         to failed with the error in its output. A failure does not stop the remaining
         manifests. Arguments are as for run().
 
+        A registry has one runner, so manifests still in running/ when this starts were
+        left by a runner that stopped mid-build; they are failed first, which frees their
+        keys for new builds.
+
         Returns:
             (adapter key, RunResult) per manifest trained or failed, in run order.
         """
         results: list[tuple[str, RunResult]] = []
+        for adapter in self._storage.list_running_keys():
+            stopped = RuntimeError("The runner stopped before this build finished")
+            results.append((adapter, self._fail(adapter, datetime.now(UTC), stopped)))
         for adapter in self._storage.list_pending_keys():
             result = self._run_claimed(adapter, skip_registration, model_override, lora_profile)
             if result is not None:
