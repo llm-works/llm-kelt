@@ -46,6 +46,23 @@ class SubmitResult(FieldDict):
     commit: str | None = None
     # Whether the submit added the set; False when it was already in the series
     created: bool = True
+    # Whether the submit started the series (series manifests only)
+    root: bool = False
+
+
+class ActiveSeries(FieldDict):
+    """The series an adapter key serves: the series of its deployed version."""
+
+    # Adapter key
+    adapter: str
+    # Series name
+    series: str
+    # Commit the deployed version was built from
+    commit: str
+    # Deployed version
+    version_id: str
+    # MD5 hash of the deployed weights
+    md5: str
 
 
 # Training hyperparameter defaults

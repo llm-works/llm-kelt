@@ -118,6 +118,7 @@ def _build_manifest(data: dict[str, Any], source_path: Path | None = None) -> Ma
         adapter=data["adapter"],
         series=data.get("series"),
         commit=data.get("commit"),
+        annotations=dict(data.get("annotations") or {}),
         source=Source(data.get("source", {})),
         parent=parent,
         lora=DotDict(data.get("lora", {})),
@@ -266,6 +267,9 @@ def _build_manifest_dict(manifest: Manifest) -> dict[str, Any]:
     for key in ("series", "commit"):
         if manifest.get(key):
             data[key] = manifest.get(key)
+    annotations = manifest.get("annotations")
+    if annotations:
+        data["annotations"] = json.loads(json.dumps(annotations))  # plain dicts for YAML
     _add_provenance_fields(data, manifest)
 
     lora_config, _ = _get_effective_config(manifest)

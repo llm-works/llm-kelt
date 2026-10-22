@@ -378,6 +378,7 @@ manifest = kelt.train.manifest.create(
 result = kelt.train.manifest.submit(manifest)
 result.commit  # the lineage commit holding this set
 result.created  # False: the set was already in the series, nothing was added
+result.root  # True: this set started the series
 ```
 
 - The history works like git. The adapter key is a repository in `<registry>/cas/` and a
@@ -391,9 +392,9 @@ result.created  # False: the set was already in the series, nothing was added
   when it claims the build. Resubmitting a set re-queues the tip if its last build failed.
   Series `main` queues under the adapter key; another series under `<adapter>+<series>`
   (`status(adapter, series=...)`), so series of one adapter build independently.
-- Only series `main` is deployed; other series need deployment policy `skip`, and their
-  builds are skipped when "latest version" is resolved (`deploy` without a version,
-  `get_adapter`). `parent` is not supported on series manifests.
+- Only series `main` deploys when a build completes; other series need deployment policy
+  `skip` and are deployed by commit (see below). `parent` is not supported on series
+  manifests.
 - `kelt.train.manifest.fork(adapter, series, new_series, commit=None)` starts a series at a
   commit of another (default: its tip), sharing that history and its builds.
 - Completed series manifests record the `commit` they trained and keep no records; the sets
@@ -404,16 +405,63 @@ info = kelt.train.manifest.series("coding-v1")  # → SeriesInfo | None
 info.tip, info.base_model, info.recipe
 info.current_build  # newest SetEntry with a completed build
 for entry in info.sets:  # oldest first
-    entry.commit, entry.set_id, entry.submitted_at, entry.build  # build: state, md5, error
+    entry.commit, entry.set_id, entry.submitted_at, entry.annotations
+    entry.build  # state (completed, failed, pruned), md5, error, annotations
 kelt.train.manifest.find_set(set_id)  # → [(adapter, series), ...]
 ```
 
 An adapter version's series and commit are in its `config.yaml` (`series`, `commit`) and in
 its completed manifest: `kelt.train.manifest.get_manifest(md5).series` / `.commit`.
 
+#### Starting over and deploying a series
+
+Starting over from the base model, with a new recipe or on new data only, is a new series of
+the same adapter key: submit sets with `series="v2"`. The key keeps serving its deployed
+version while the new series trains; deploying one of its builds switches the key over.
+
+```python
+kelt.train.manifest.deploy("coding-v1", "v2", commit=None)  # default: v2's current build
+kelt.train.manifest.active("coding-v1")  # → ActiveSeries(series, commit, version_id, md5)
+```
+
+- `deploy` replaces the key's deployed versions; it links the new version before removing
+  the old ones, so the key is never left undeployed.
+- The active series is the series of the deployed version. "Latest version" (`deploy`
+  without a version, `get_adapter`) considers versions of `main` and of the active series.
+- An older series stays as history: its sets, build records and weights remain.
+
+#### Annotations
+
+Sets and builds carry annotations: small JSON objects (at most 64 KiB each), mutable, kept
+outside the content-addressed store so they never change an id.
+
+```python
+kelt.train.manifest.create(..., series="v2", annotations={"prompt": "v3"})  # the set's
+kelt.train.manifest.annotate_set("coding-v1", set_id, {"note": "use with caution"})
+kelt.train.manifest.annotate_build("coding-v1", commit, {"gate": "passed", "eval_loss": 0.41})
+```
+
+Annotations merge key by key. A set's start as those of its first submit. A build's survive
+pruning its weights and are reset when the commit is rebuilt.
+
+#### Pruning
+
+- `prune(adapter, series)` deletes the weights of the series' builds except deployed ones.
+  The sets stay; each build stays recorded as `pruned` with its md5 and annotations, and a
+  resubmit of a pruned tip rebuilds it. Builds a series shares with a fork are pruned for
+  both.
+- `drop(adapter, series)` deletes the series with the sets, builds, weights and annotations
+  only it holds; its training data is gone afterwards. Refused while the series is deployed
+  or a build of it runs.
+- `wipe(adapter)` deletes everything of the key: series, sets, builds, weights and
+  deployments. Completed and failed manifests stay.
+
 The CLI covers the same: `kelt train series coding-v1 [--series main]`,
-`kelt train series --set <set id>`, `kelt train series --md5 <md5>` and
-`kelt train series coding-v1 --fork trial [--commit <commit>]`.
+`kelt train series --set <set id>`, `kelt train series --md5 <md5>`,
+`kelt train series coding-v1 --fork trial [--commit <commit>]`,
+`kelt train series coding-v1 --annotate '<json>' (--commit <commit> | --set <set id>)`,
+`kelt train series coding-v1 -s v1 --prune | --drop`, `kelt train series coding-v1 --wipe`
+and `kelt train deploy coding-v1 --series v2 [--commit <commit>]`.
 
 ### Continue-training from a parent adapter
 
@@ -672,6 +720,7 @@ kelt train adapters                     # registered adapters
 kelt train adapters --deployed
 kelt train deploy coding-v1 --policy replace
 kelt train deploy coding-v1 --clear     # undeploy
+kelt train deploy coding-v1 --series v2 # deploy series v2's current build
 kelt train series coding-v1             # sets and builds of series main
 kelt train series --set <set id>        # series containing a set
 kelt train series --md5 <md5>           # series and commit of an adapter version
