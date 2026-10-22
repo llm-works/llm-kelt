@@ -413,6 +413,8 @@ class Lineage:
         except FileNotFoundError:
             return None
         data = yaml.safe_load(text)
+        if not data:
+            return None
         return data["series"], data["commit"]
 
     def wipe(self, adapter: str) -> None:

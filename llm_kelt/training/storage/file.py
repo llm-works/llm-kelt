@@ -8,12 +8,15 @@ Implements the Storage interface using the local filesystem.
 
 from __future__ import annotations
 
+import fcntl
 import gzip
 import json
 import os
 import re
 import shutil
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -485,16 +488,19 @@ class FileStorage(Storage):
         exclusive = self._lineage.exclusive_commits(adapter, series)
         builds = [self._lineage.build(adapter, c) for c in exclusive]
         md5s = [b.md5 for b in builds if b is not None and b.md5]
-        if any(self.is_deployed(adapter, md5) for md5 in md5s):
-            raise ValueError(f"A build of {adapter}/{series} is deployed; undeploy it first")
 
         queued = self._queued_metadata(self.pending_path, key)
         if queued is not None and queued.series == series:
             (self.pending_path / f"{key}.yaml").unlink(missing_ok=True)
-        # Weights go last: if the lineage refuses (the series moved), its builds keep them
-        dropped = self._lineage.drop_series(adapter, series)
-        for md5 in md5s:
-            self._remove_build_weights(adapter, md5)
+        # Lock: check deployed + remove weights atomically, so a concurrent deploy cannot
+        # create a symlink to weights we are about to delete.
+        with self._deploy_lock(adapter):
+            if any(self.is_deployed(adapter, md5) for md5 in md5s):
+                raise ValueError(f"A build of {adapter}/{series} is deployed; undeploy it first")
+            # Weights go last: if the lineage refuses (the series moved), its builds keep them
+            dropped = self._lineage.drop_series(adapter, series)
+            for md5 in md5s:
+                self._remove_build_weights(adapter, md5)
         return dropped
 
     def wipe_adapter(self, adapter: str) -> None:
@@ -522,10 +528,23 @@ class FileStorage(Storage):
         return [own, *series] if own.exists() else list(series)
 
     def _remove_build_weights(self, adapter: str, md5: str) -> None:
-        """Remove the adapter version with these weights, if the registry still has it."""
+        """Remove the adapter version with these weights, if the registry still has it.
+
+        Caller must hold _deploy_lock(adapter).
+        """
         version_id = self._find_version_by_md5(adapter, md5)
         if version_id is not None:
-            self.remove_adapter(adapter, version_id)
+            self._remove_version_unlocked(adapter, version_id)
+
+    @contextmanager
+    def _deploy_lock(self, adapter: str) -> Iterator[None]:
+        """Hold the adapter's deploy lock, so deploy/remove operations do not interleave."""
+        locks_dir = self.base_path / ".locks"
+        locks_dir.mkdir(parents=True, exist_ok=True)
+        path = locks_dir / f"{adapter}.deploy"
+        with path.open("a") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            yield
 
     def get_queue_status(self, adapter: str) -> QueueStatus | None:
         """Return the state of the latest submission for a queue key, or None.
@@ -959,16 +978,23 @@ class FileStorage(Storage):
             version_path = key_path / version_id
             if not version_path.exists():
                 raise ValueError(f"Version '{version_id}' not found for adapter '{key}'")
-            # Undeploy only this specific version if deployed
-            config = self._read_adapter_config(key, version_id)
-            version_md5 = config.get("md5")
-            if version_md5 and self.is_deployed(key, version_md5):
-                self.undeploy_adapter(key, version_md5)
-            shutil.rmtree(version_path)
+            # Lock: undeploy + rmtree atomically, so a concurrent deploy cannot create a
+            # symlink to the version we are about to delete.
+            with self._deploy_lock(key):
+                self._remove_version_unlocked(key, version_id)
             self._lg.info("removed adapter version", extra={"key": key, "version": version_id})
         else:
             shutil.rmtree(key_path)
             self._lg.info("removed adapter", extra={"key": key})
+
+    def _remove_version_unlocked(self, key: str, version_id: str) -> None:
+        """Remove a specific version. Caller must hold _deploy_lock(key)."""
+        version_path = self.adapters_path / key / version_id
+        config = self._read_adapter_config(key, version_id)
+        version_md5 = config.get("md5")
+        if version_md5 and self.is_deployed(key, version_md5):
+            self.undeploy_adapter(key, version_md5)
+        shutil.rmtree(version_path)
 
     def _get_deployed_symlinks(self, key: str) -> list[Path]:
         """Get all deployed symlinks for a key (deployed/{key} or deployed/{key}-{md5})."""
@@ -1052,22 +1078,25 @@ class FileStorage(Storage):
 
         version_id, md5 = self._resolve_deploy_version(key, version_id)
 
-        # Link the new version before removing others, so the key is never left undeployed:
-        # create the versioned symlink deployed/{key}-{md5} under a hidden name, rename it
-        # into place (replacing an older link of the same name), then apply the policy.
-        symlink_path = self.deployed_path / f"{key}-{md5}"
-        tmp_link = self.deployed_path / f".{key}-{md5}.{uuid.uuid4().hex}.tmp"
-        tmp_link.symlink_to(Path("..") / "adapters" / key / version_id)
-        try:
-            os.replace(tmp_link, symlink_path)
-        finally:
-            tmp_link.unlink(missing_ok=True)
+        # Lock: link + policy removal atomically, so a concurrent drop/remove cannot delete
+        # the version we are about to deploy.
+        with self._deploy_lock(key):
+            # Link the new version before removing others, so the key is never left undeployed:
+            # create the versioned symlink deployed/{key}-{md5} under a hidden name, rename it
+            # into place (replacing an older link of the same name), then apply the policy.
+            symlink_path = self.deployed_path / f"{key}-{md5}"
+            tmp_link = self.deployed_path / f".{key}-{md5}.{uuid.uuid4().hex}.tmp"
+            tmp_link.symlink_to(Path("..") / "adapters" / key / version_id)
+            try:
+                os.replace(tmp_link, symlink_path)
+            finally:
+                tmp_link.unlink(missing_ok=True)
 
-        if policy == "replace":
-            for symlink in self._get_deployed_symlinks(key):
-                if symlink != symlink_path:
-                    symlink.unlink()
-                    self._lg.info("removed deployment", extra={"symlink": symlink.name})
+            if policy == "replace":
+                for symlink in self._get_deployed_symlinks(key):
+                    if symlink != symlink_path:
+                        symlink.unlink()
+                        self._lg.info("removed deployment", extra={"symlink": symlink.name})
         self._lg.info(
             "deployed adapter",
             extra={"key": key, "version": version_id, "md5": md5, "policy": policy},

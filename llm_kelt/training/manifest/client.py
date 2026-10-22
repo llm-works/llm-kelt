@@ -333,7 +333,14 @@ class Client:
         self._storage.validate_key(new_series)
         return self._storage.lineage.fork(adapter, series, new_series, commit)
 
-    def deploy(self, adapter: str, series: str, commit: str | None = None) -> str:
+    def deploy(
+        self,
+        adapter: str,
+        series: str,
+        commit: str | None = None,
+        *,
+        policy: Literal["add", "replace"] = "replace",
+    ) -> str:
         """Deploy a series' build, making it the series the adapter key serves.
 
         Replaces the key's deployed versions; the new one is linked before the old ones are
@@ -343,6 +350,7 @@ class Client:
             adapter: Adapter key.
             series: Series name.
             commit: Commit of the series whose build to deploy (default: its current build).
+            policy: "replace" (default) removes other versions; "add" keeps them.
 
         Returns:
             The deployed version id.
@@ -351,7 +359,7 @@ class Client:
             ValueError: The series or commit does not exist, or the commit has no completed
                 build (never built, failed, or pruned).
         """
-        return self._storage.deploy_series(adapter, series, commit)
+        return self._storage.deploy_series(adapter, series, commit, policy=policy)
 
     def active(self, adapter: str) -> ActiveSeries | None:
         """Get the series an adapter key serves: series, commit and version deployed.
