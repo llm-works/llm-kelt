@@ -459,9 +459,10 @@ class FileStorage(Storage):
             build = entry.build
             if build is None or build.state != "completed" or not build.md5:
                 continue
-            if self.is_deployed(adapter, build.md5):
-                continue
-            self._remove_build_weights(adapter, build.md5)
+            with self._deploy_lock(adapter):
+                if self.is_deployed(adapter, build.md5):
+                    continue
+                self._remove_build_weights(adapter, build.md5)
             self._lineage.mark_pruned(adapter, entry.commit)
             pruned.append(entry.commit)
         self._lg.info("pruned series adapters", extra={"adapter": adapter, "series": series})
@@ -517,9 +518,10 @@ class FileStorage(Storage):
             raise ValueError(f"A build of {adapter} is running")
         for path in self._queue_files(self.pending_path, adapter):
             path.unlink(missing_ok=True)
-        if (self.adapters_path / adapter).exists():
-            self.remove_adapter(adapter)
-        self._lineage.wipe(adapter)
+        with self._deploy_lock(adapter):
+            if (self.adapters_path / adapter).exists():
+                self.remove_adapter(adapter)
+            self._lineage.wipe(adapter)
 
     def _queue_files(self, queue_dir: Path, adapter: str) -> list[Path]:
         """Queue files of an adapter key: its own and those of its series."""
@@ -1081,17 +1083,11 @@ class FileStorage(Storage):
         # Lock: link + policy removal atomically, so a concurrent drop/remove cannot delete
         # the version we are about to deploy.
         with self._deploy_lock(key):
-            # Link the new version before removing others, so the key is never left undeployed:
-            # create the versioned symlink deployed/{key}-{md5} under a hidden name, rename it
-            # into place (replacing an older link of the same name), then apply the policy.
-            symlink_path = self.deployed_path / f"{key}-{md5}"
-            tmp_link = self.deployed_path / f".{key}-{md5}.{uuid.uuid4().hex}.tmp"
-            tmp_link.symlink_to(Path("..") / "adapters" / key / version_id)
-            try:
-                os.replace(tmp_link, symlink_path)
-            finally:
-                tmp_link.unlink(missing_ok=True)
-
+            # Re-check: version could have been deleted between resolution and lock acquisition
+            version_path = self.adapters_path / key / version_id
+            if not version_path.exists():
+                raise ValueError(f"Version '{version_id}' was removed for adapter '{key}'")
+            symlink_path = self._atomic_deploy_symlink(key, version_id, md5)
             if policy == "replace":
                 for symlink in self._get_deployed_symlinks(key):
                     if symlink != symlink_path:
@@ -1101,6 +1097,17 @@ class FileStorage(Storage):
             "deployed adapter",
             extra={"key": key, "version": version_id, "md5": md5, "policy": policy},
         )
+
+    def _atomic_deploy_symlink(self, key: str, version_id: str, md5: str) -> Path:
+        """Create a versioned deploy symlink atomically. Caller must hold _deploy_lock."""
+        symlink_path = self.deployed_path / f"{key}-{md5}"
+        tmp_link = self.deployed_path / f".{key}-{md5}.{uuid.uuid4().hex}.tmp"
+        tmp_link.symlink_to(Path("..") / "adapters" / key / version_id)
+        try:
+            os.replace(tmp_link, symlink_path)
+        finally:
+            tmp_link.unlink(missing_ok=True)
+        return symlink_path
 
     def undeploy_adapter(self, key: str, md5: str | None = None) -> None:
         """Undeploy an adapter.
@@ -1352,6 +1359,9 @@ class FileStorage(Storage):
         served = {None, DEFAULT_SERIES, active.series if active else None}
         versions = sorted((p.name for p in key_path.iterdir() if p.is_dir()), reverse=True)
         for version_id in versions:
+            # Always admit the currently deployed version, regardless of which series built it
+            if active and version_id == active.version_id:
+                return version_id
             series = self._read_adapter_config(key, version_id).get("series")
             if series in served:
                 return version_id

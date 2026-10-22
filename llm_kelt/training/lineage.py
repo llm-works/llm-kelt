@@ -413,7 +413,7 @@ class Lineage:
         except FileNotFoundError:
             return None
         data = yaml.safe_load(text)
-        if not data:
+        if not data or "series" not in data or "commit" not in data:
             return None
         return data["series"], data["commit"]
 
