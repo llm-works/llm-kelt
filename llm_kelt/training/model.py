@@ -8,8 +8,10 @@ Provides model detection, quantization config, and training config helpers.
 
 from __future__ import annotations
 
+import json
 import math
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from appinfra import DotDict
 from llm_infer.models import get_model_metadata
@@ -36,6 +38,14 @@ def is_model_quantized(base_model: str) -> bool:
         return False
 
 
+def _read_checkpoint_config(base_model: str) -> dict[str, Any] | None:
+    """Read config.json from a local checkpoint, None when there is none."""
+    config_path = Path(base_model) / "config.json"
+    if not config_path.exists():
+        return None
+    return cast(dict[str, Any], json.loads(config_path.read_text()))
+
+
 def _load_stored_quantization_config(base_model: str) -> Any | None:
     """Build the quantization config to load a pre-quantized model with for training.
 
@@ -48,16 +58,11 @@ def _load_stored_quantization_config(base_model: str) -> Any | None:
     Reads the local checkpoint's config.json. Returns None when there is none (e.g. a hub ID)
     and for other formats (they load with the checkpoint's own config).
     """
-    import json
-    from pathlib import Path
-
     from transformers import BitsAndBytesConfig
 
-    config_path = Path(base_model) / "config.json"
-    if not config_path.exists():
+    model_config = _read_checkpoint_config(base_model)
+    if model_config is None:
         return None
-
-    model_config = json.loads(config_path.read_text())
     quant_dict = model_config.get("quantization_config") or {}
     quant_method = quant_dict.get("quant_method")
     if quant_method == "compressed-tensors":
@@ -209,18 +214,18 @@ def _coerce_types(config: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _checkpoint_dtype(base_model: str) -> str | None:
+def _checkpoint_dtype(lg: Logger, base_model: str) -> str | None:
     """Weight dtype from a local checkpoint's config.json, None when there is none.
 
     Transformers writes it as `dtype`; older checkpoints carry `torch_dtype`.
     """
-    import json
-    from pathlib import Path
-
-    config_path = Path(base_model) / "config.json"
-    if not config_path.exists():
+    try:
+        model_config = _read_checkpoint_config(base_model)
+    except json.JSONDecodeError as e:
+        lg.warning("malformed config.json, skipping dtype detection", extra={"error": str(e)})
         return None
-    model_config = json.loads(config_path.read_text())
+    if model_config is None:
+        return None
     dtype = model_config.get("dtype") or model_config.get("torch_dtype")
     return dtype if isinstance(dtype, str) else None
 
@@ -243,7 +248,7 @@ def _apply_precision_settings(lg: Logger, base_model: str, config: dict, overrid
             "detected pre-quantized model, disabled AMP",
             extra={"quantization": meta.quantization, "bits": meta.quantization_bits},
         )
-    elif _checkpoint_dtype(base_model) == "bfloat16":
+    elif _checkpoint_dtype(lg, base_model) == "bfloat16":
         precision = {"fp16": False, "bf16": True}
         lg.info("detected bfloat16 weights, using bf16 AMP")
     else:
