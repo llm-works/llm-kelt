@@ -421,8 +421,9 @@ class Lineage:
 
     def wipe(self, adapter: str) -> None:
         """Delete every series of an adapter with all its sets, builds and annotations."""
-        self._store.delete_repo(adapter)
-        shutil.rmtree(self._records_path / adapter, ignore_errors=True)
+        with self._locked(adapter):
+            self._store.delete_repo(adapter)
+            shutil.rmtree(self._records_path / adapter, ignore_errors=True)
         self._lg.info("wiped lineage", extra={"adapter": adapter})
 
     def _reachable(self, repo: Repo, exclude: str | None) -> set[str]:
@@ -441,8 +442,12 @@ class Lineage:
 
     @contextmanager
     def _locked(self, adapter: str) -> Iterator[None]:
-        """Hold an adapter's build-record lock, so read-modify-writes do not interleave."""
-        path = self._records_path / adapter / ".lock"
+        """Hold an adapter's build-record lock, so read-modify-writes do not interleave.
+
+        The lock file lives outside the adapter's records directory, so wipe() can hold it
+        while deleting that directory. Adapter keys cannot start with a dot.
+        """
+        path = self._records_path / ".locks" / f"{adapter}.lock"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
