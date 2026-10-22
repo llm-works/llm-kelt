@@ -626,9 +626,10 @@ TRAINING_DEFAULTS = DotDict(
 Merged in this order: `TRAINING_DEFAULTS` ← profile ← manifest `training` ← CLI/keyword
 overrides. Later values win.
 
-> **Note:** On Ampere+ GPUs (RTX 30xx, A100, etc.), models typically load in bf16. Pass
-> `bf16=True, fp16=False` to keep trainer precision aligned — the default `fp16=True` can
-> trigger a grad-scaler error when the model weights are bf16.
+`fp16` and `bf16` that the manifest's `training` section leaves unset follow the local
+checkpoint's `config.json`: bfloat16 weights train with `bf16=True, fp16=False` (fp16's grad
+scaler cannot unscale bfloat16 gradients), and pre-quantized models train with both off. A
+value the manifest sets is kept.
 
 ## Adapter registry
 

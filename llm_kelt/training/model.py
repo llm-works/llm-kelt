@@ -209,23 +209,48 @@ def _coerce_types(config: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _apply_quantized_model_settings(
-    lg: Logger, base_model: str, config: dict, overrides: dict
-) -> None:
-    """Disable AMP for pre-quantized models (modifies config in-place)."""
+def _checkpoint_dtype(base_model: str) -> str | None:
+    """Weight dtype from a local checkpoint's config.json, None when there is none.
+
+    Transformers writes it as `dtype`; older checkpoints carry `torch_dtype`.
+    """
+    import json
+    from pathlib import Path
+
+    config_path = Path(base_model) / "config.json"
+    if not config_path.exists():
+        return None
+    model_config = json.loads(config_path.read_text())
+    dtype = model_config.get("dtype") or model_config.get("torch_dtype")
+    return dtype if isinstance(dtype, str) else None
+
+
+def _apply_precision_settings(lg: Logger, base_model: str, config: dict, overrides: dict) -> None:
+    """Pick AMP precision from the checkpoint for keys the overrides leave unset (in-place).
+
+    - Pre-quantized models: AMP off.
+    - bfloat16 weights: bf16 AMP. fp16 AMP's grad scaler cannot unscale bfloat16 gradients
+      ("_amp_foreach_non_finite_check_and_unscale_cuda" not implemented for 'BFloat16').
+    - Anything else: the fp16/bf16 defaults.
+    """
     try:
         meta = get_model_metadata(path=base_model)
-        if meta.quantization:
-            if "fp16" not in overrides:
-                config["fp16"] = False
-            if "bf16" not in overrides:
-                config["bf16"] = False
-            lg.info(
-                "detected pre-quantized model, disabled AMP",
-                extra={"quantization": meta.quantization, "bits": meta.quantization_bits},
-            )
     except (FileNotFoundError, ValueError):
-        pass  # Can't detect, use config values as-is
+        return  # Can't detect, use config values as-is
+    if meta.quantization:
+        precision = {"fp16": False, "bf16": False}
+        lg.info(
+            "detected pre-quantized model, disabled AMP",
+            extra={"quantization": meta.quantization, "bits": meta.quantization_bits},
+        )
+    elif _checkpoint_dtype(base_model) == "bfloat16":
+        precision = {"fp16": False, "bf16": True}
+        lg.info("detected bfloat16 weights, using bf16 AMP")
+    else:
+        return
+    for key, value in precision.items():
+        if key not in overrides:
+            config[key] = value
 
 
 def compute_warmup_steps(num_samples: int, tc: DotDict) -> int:
@@ -270,7 +295,7 @@ def build_training_config(
     config.update(overrides)
     config = _coerce_types(config)
 
-    _apply_quantized_model_settings(lg, base_model, config, overrides)
+    _apply_precision_settings(lg, base_model, config, overrides)
 
     lg.info(
         f"training config (profile={profile_name})",
