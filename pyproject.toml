@@ -47,6 +47,7 @@ dev = [
     "coverage>=7.0.0,<8.0.0",
     "ruff>=0.1.0,<1.0.0",
     "mypy>=1.0.0,<2.0.0",
+    "types-PyYAML>=6.0,<7.0",
     "pytest>=7.0.0,<10.0.0",
     "pytest-asyncio>=0.21,<2.0",
     "pytest-cov>=4.0.0,<8.0.0",
@@ -87,8 +88,33 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
-ignore_missing_imports = true
 plugins = ["pydantic.mypy"]
+exclude = ["llm_kelt/examples/"]
+
+# ML stack (the training extra): not analysed, its imports are Any. CI does not
+# install it, and analysing torch/transformers ties the check to their annotations
+# across our wide version ranges. Skipped the same way locally and in CI, so both
+# give the same verdict. `.*` patterns match the package and its submodules.
+[[tool.mypy.overrides]]
+module = [
+    "torch.*",
+    "transformers.*",
+    "peft.*",
+    "trl.*",
+    "datasets.*",
+    "bitsandbytes.*",
+    "safetensors.*",
+    "numpy.*",
+]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+ignore_missing_imports = true
+
+# sqlalchemy_utils ships no types; its only stub package (types-sqlalchemy-utils)
+# is built on the SQLAlchemy 1.4 stubs and does not fit SQLAlchemy 2.0.
+[[tool.mypy.overrides]]
+module = ["sqlalchemy_utils.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

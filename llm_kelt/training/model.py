@@ -8,8 +8,10 @@ Provides model detection, quantization config, and training config helpers.
 
 from __future__ import annotations
 
+import json
 import math
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from appinfra import DotDict
 from llm_infer.models import get_model_metadata
@@ -36,6 +38,14 @@ def is_model_quantized(base_model: str) -> bool:
         return False
 
 
+def _read_checkpoint_config(base_model: str) -> dict[str, Any] | None:
+    """Read config.json from a local checkpoint, None when there is none."""
+    config_path = Path(base_model) / "config.json"
+    if not config_path.exists():
+        return None
+    return cast(dict[str, Any], json.loads(config_path.read_text()))
+
+
 def _load_stored_quantization_config(base_model: str) -> Any | None:
     """Build the quantization config to load a pre-quantized model with for training.
 
@@ -48,16 +58,11 @@ def _load_stored_quantization_config(base_model: str) -> Any | None:
     Reads the local checkpoint's config.json. Returns None when there is none (e.g. a hub ID)
     and for other formats (they load with the checkpoint's own config).
     """
-    import json
-    from pathlib import Path
-
     from transformers import BitsAndBytesConfig
 
-    config_path = Path(base_model) / "config.json"
-    if not config_path.exists():
+    model_config = _read_checkpoint_config(base_model)
+    if model_config is None:
         return None
-
-    model_config = json.loads(config_path.read_text())
     quant_dict = model_config.get("quantization_config") or {}
     quant_method = quant_dict.get("quant_method")
     if quant_method == "compressed-tensors":
@@ -209,23 +214,55 @@ def _coerce_types(config: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _apply_quantized_model_settings(
-    lg: Logger, base_model: str, config: dict, overrides: dict
-) -> None:
-    """Disable AMP for pre-quantized models (modifies config in-place)."""
+def _checkpoint_dtype(base_model: str) -> str | None:
+    """Weight dtype from a local checkpoint's config.json, None when there is none.
+
+    Transformers writes it as `dtype`; older checkpoints carry `torch_dtype`.
+    """
+    model_config = _read_checkpoint_config(base_model)
+    if model_config is None:
+        return None
+    dtype = model_config.get("dtype") or model_config.get("torch_dtype")
+    return dtype if isinstance(dtype, str) else None
+
+
+def _checkpoint_precision(lg: Logger, base_model: str) -> dict[str, bool] | None:
+    """AMP precision for a local checkpoint, None when nothing calls for a change.
+
+    - Pre-quantized models: AMP off.
+    - bfloat16 weights: bf16 AMP. fp16 AMP's grad scaler cannot unscale bfloat16 gradients
+      ("_amp_foreach_non_finite_check_and_unscale_cuda" not implemented for 'BFloat16').
+    """
     try:
         meta = get_model_metadata(path=base_model)
-        if meta.quantization:
-            if "fp16" not in overrides:
-                config["fp16"] = False
-            if "bf16" not in overrides:
-                config["bf16"] = False
-            lg.info(
-                "detected pre-quantized model, disabled AMP",
-                extra={"quantization": meta.quantization, "bits": meta.quantization_bits},
-            )
     except (FileNotFoundError, ValueError):
-        pass  # Can't detect, use config values as-is
+        return None  # Can't detect, use config values as-is
+    if meta.quantization:
+        lg.info(
+            "detected pre-quantized model, disabled AMP",
+            extra={"quantization": meta.quantization, "bits": meta.quantization_bits},
+        )
+        return {"fp16": False, "bf16": False}
+    if _checkpoint_dtype(base_model) == "bfloat16":
+        lg.info("detected bfloat16 weights, using bf16 AMP")
+        return {"fp16": False, "bf16": True}
+    return None
+
+
+def _apply_precision_settings(lg: Logger, base_model: str, config: dict, overrides: dict) -> None:
+    """Settle fp16/bf16 in config (in-place); transformers rejects both enabled.
+
+    An override that enables one of them picks the precision: the other is off unless the
+    overrides set it too. Otherwise keys the overrides leave unset follow the checkpoint.
+    """
+    explicit = {key: bool(overrides[key]) for key in ("fp16", "bf16") if key in overrides}
+    if any(explicit.values()):
+        for key in ("fp16", "bf16"):
+            config[key] = explicit.get(key, False)
+        return
+    for key, value in (_checkpoint_precision(lg, base_model) or {}).items():
+        if key not in overrides:
+            config[key] = value
 
 
 def compute_warmup_steps(num_samples: int, tc: DotDict) -> int:
@@ -270,7 +307,7 @@ def build_training_config(
     config.update(overrides)
     config = _coerce_types(config)
 
-    _apply_quantized_model_settings(lg, base_model, config, overrides)
+    _apply_precision_settings(lg, base_model, config, overrides)
 
     lg.info(
         f"training config (profile={profile_name})",

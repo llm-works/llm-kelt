@@ -35,15 +35,15 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ruff mypy types-PyYAML zizmor==1.31.1 actionlint-py==1.7.12.25
+          python -m pip install zizmor==1.31.1 actionlint-py==1.7.12.25
+          # Install appinfra, llm-infer and llm-saia from develop branch (policy: use @develop
+          # during active development, pin to specific commit for releases)
           python -m pip install "appinfra @ git+https://github.com/llm-works/appinfra.git@develop"
-          # Install minimal deps for type checking (avoid heavy ML deps)
-          python -m pip install sqlalchemy pydantic fastapi httpx
-          # Install llm-infer and llm-saia from develop branch (policy: use @develop during
-          # active development, pin to specific commit for releases)
-          python -m pip install "llm-infer @ git+https://github.com/llm-works/llm-infer.git@develop" --no-deps
-          python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop" --no-deps
-          python -m pip install -e . --no-deps
+          python -m pip install "llm-infer @ git+https://github.com/llm-works/llm-infer.git@develop"
+          python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop"
+          # dev: ruff, mypy, stubs. The training extra is skipped by the mypy overrides in
+          # pyproject.toml, not installed.
+          python -m pip install -e ".[dev]"
 
       - name: Check formatting
         run: python -m ruff format --check .
@@ -58,7 +58,7 @@ jobs:
           actionlint
 
       - name: Type check
-        run: python -m mypy llm_kelt/ --ignore-missing-imports
+        run: python -m mypy llm_kelt/
 
       - name: Check SPDX headers
         run: appinfra cq spdx

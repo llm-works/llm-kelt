@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from appinfra.db.pg.scoped import ScopedPG
+    from appinfra.db.pg import ScopedPG
     from appinfra.log import Logger
     from sqlalchemy.orm import Session
 
