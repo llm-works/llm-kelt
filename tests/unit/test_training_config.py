@@ -192,9 +192,17 @@ class TestPrecisionSettings:
         config = self._apply(lg, tmp_path, model_config)
         assert (config["fp16"], config["bf16"]) == (False, False)
 
-    def test_explicit_settings_win(self, lg, tmp_path):
+    def test_explicit_fp16_turns_bf16_off(self, lg, tmp_path):
         config = self._apply(lg, tmp_path, {"dtype": "bfloat16"}, {"fp16": True})
-        assert (config["fp16"], config["bf16"]) == (True, True)
+        assert (config["fp16"], config["bf16"]) == (True, False)
+
+    def test_explicit_bf16_turns_default_fp16_off(self, lg, tmp_path):
+        config = self._apply(lg, tmp_path, {"dtype": "float32"}, {"bf16": True})
+        assert (config["fp16"], config["bf16"]) == (False, True)
+
+    def test_explicit_fp16_off_leaves_bf16_to_checkpoint(self, lg, tmp_path):
+        config = self._apply(lg, tmp_path, {"dtype": "bfloat16"}, {"fp16": False})
+        assert (config["fp16"], config["bf16"]) == (False, True)
 
     def test_no_local_checkpoint_keeps_defaults(self, lg, tmp_path):
         config = {"fp16": True, "bf16": False}

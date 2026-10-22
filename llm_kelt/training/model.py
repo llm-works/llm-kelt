@@ -226,30 +226,41 @@ def _checkpoint_dtype(base_model: str) -> str | None:
     return dtype if isinstance(dtype, str) else None
 
 
-def _apply_precision_settings(lg: Logger, base_model: str, config: dict, overrides: dict) -> None:
-    """Pick AMP precision from the checkpoint for keys the overrides leave unset (in-place).
+def _checkpoint_precision(lg: Logger, base_model: str) -> dict[str, bool] | None:
+    """AMP precision for a local checkpoint, None when nothing calls for a change.
 
     - Pre-quantized models: AMP off.
     - bfloat16 weights: bf16 AMP. fp16 AMP's grad scaler cannot unscale bfloat16 gradients
       ("_amp_foreach_non_finite_check_and_unscale_cuda" not implemented for 'BFloat16').
-    - Anything else: the fp16/bf16 defaults.
     """
     try:
         meta = get_model_metadata(path=base_model)
     except (FileNotFoundError, ValueError):
-        return  # Can't detect, use config values as-is
+        return None  # Can't detect, use config values as-is
     if meta.quantization:
-        precision = {"fp16": False, "bf16": False}
         lg.info(
             "detected pre-quantized model, disabled AMP",
             extra={"quantization": meta.quantization, "bits": meta.quantization_bits},
         )
-    elif _checkpoint_dtype(base_model) == "bfloat16":
-        precision = {"fp16": False, "bf16": True}
+        return {"fp16": False, "bf16": False}
+    if _checkpoint_dtype(base_model) == "bfloat16":
         lg.info("detected bfloat16 weights, using bf16 AMP")
-    else:
+        return {"fp16": False, "bf16": True}
+    return None
+
+
+def _apply_precision_settings(lg: Logger, base_model: str, config: dict, overrides: dict) -> None:
+    """Settle fp16/bf16 in config (in-place); transformers rejects both enabled.
+
+    An override that enables one of them picks the precision: the other is off unless the
+    overrides set it too. Otherwise keys the overrides leave unset follow the checkpoint.
+    """
+    explicit = {key: bool(overrides[key]) for key in ("fp16", "bf16") if key in overrides}
+    if any(explicit.values()):
+        for key in ("fp16", "bf16"):
+            config[key] = explicit.get(key, False)
         return
-    for key, value in precision.items():
+    for key, value in (_checkpoint_precision(lg, base_model) or {}).items():
         if key not in overrides:
             config[key] = value
 

@@ -58,7 +58,7 @@ jobs:
           actionlint
 
       - name: Type check
-        run: make type
+        run: python -m mypy llm_kelt/
 
       - name: Check SPDX headers
         run: appinfra cq spdx

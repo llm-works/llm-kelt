@@ -629,7 +629,8 @@ overrides. Later values win.
 `fp16` and `bf16` that the manifest's `training` section leaves unset follow the local
 checkpoint's `config.json`: bfloat16 weights train with `bf16=True, fp16=False` (fp16's grad
 scaler cannot unscale bfloat16 gradients), and pre-quantized models train with both off. A
-value the manifest sets is kept.
+manifest that enables one of them picks the precision: the other is off unless the manifest
+sets it too.
 
 ## Adapter registry
 
