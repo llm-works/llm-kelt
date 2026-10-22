@@ -406,6 +406,27 @@ class TestSeriesDeployment:
         storage.deploy_series("foo", "v1")
         assert storage.active_series("foo").series == "v1"
 
+    def test_concurrent_deploys_record_the_deployed_commit(
+        self, storage: FileStorage, tmp_path: Path
+    ):
+        storage.submit_manifest(_manifest(_rec(1), series="v1", policy="skip"))
+        _build(storage, tmp_path, "v1", "aaa111aaa111")
+        storage.submit_manifest(_manifest(_rec(2), series="v2", policy="skip"))
+        _build(storage, tmp_path, "v2", "bbb222bbb222")
+
+        threads = [
+            threading.Thread(target=storage.deploy_series, args=("foo", f"v{1 + i % 2}"))
+            for i in range(16)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        active = storage.active_series("foo")
+        assert storage.lineage.deployed("foo") == (active.series, active.commit)
+        assert len(storage.list_deployed("foo")) == 1
+
     def test_redeploy_keeps_the_link(self, storage: FileStorage, tmp_path: Path):
         storage.submit_manifest(_manifest(_rec(1), series="v1", policy="skip"))
         _build(storage, tmp_path, "v1", "aaa111aaa111")

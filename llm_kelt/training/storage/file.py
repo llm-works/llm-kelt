@@ -388,9 +388,15 @@ class FileStorage(Storage):
         """
         self.validate_key(adapter)
         commit, version_id = self._series_build_version(adapter, series, commit)
-        # Recorded first: until the link is in place, the record does not match it
-        self._lineage.record_deployed(adapter, series, commit)
-        self.deploy_adapter(adapter, version_id, policy=policy)
+        self.deployed_path.mkdir(parents=True, exist_ok=True)
+        self._migrate_old_symlink(adapter)
+        version_id, md5 = self._resolve_deploy_version(adapter, version_id)
+        # One lock over record and link, so concurrent deploys of the key cannot pair one's
+        # record with another's link. Recorded first: if the link fails, the record does not
+        # match the deployed version and is ignored.
+        with self._deploy_lock(adapter):
+            self._lineage.record_deployed(adapter, series, commit)
+            self._link_version(adapter, version_id, md5, policy)
         return version_id
 
     def _series_build_version(
@@ -1083,16 +1089,22 @@ class FileStorage(Storage):
         # Lock: link + policy removal atomically, so a concurrent drop/remove cannot delete
         # the version we are about to deploy.
         with self._deploy_lock(key):
-            # Re-check: version could have been deleted between resolution and lock acquisition
-            version_path = self.adapters_path / key / version_id
-            if not version_path.exists():
-                raise ValueError(f"Version '{version_id}' was removed for adapter '{key}'")
-            symlink_path = self._atomic_deploy_symlink(key, version_id, md5)
-            if policy == "replace":
-                for symlink in self._get_deployed_symlinks(key):
-                    if symlink != symlink_path:
-                        symlink.unlink()
-                        self._lg.info("removed deployment", extra={"symlink": symlink.name})
+            self._link_version(key, version_id, md5, policy)
+
+    def _link_version(
+        self, key: str, version_id: str, md5: str, policy: Literal["add", "replace"]
+    ) -> None:
+        """Link a version into deployed/ and apply the policy. Caller must hold _deploy_lock."""
+        # Re-check: version could have been deleted between resolution and lock acquisition
+        version_path = self.adapters_path / key / version_id
+        if not version_path.exists():
+            raise ValueError(f"Version '{version_id}' was removed for adapter '{key}'")
+        symlink_path = self._atomic_deploy_symlink(key, version_id, md5)
+        if policy == "replace":
+            for symlink in self._get_deployed_symlinks(key):
+                if symlink != symlink_path:
+                    symlink.unlink()
+                    self._lg.info("removed deployment", extra={"symlink": symlink.name})
         self._lg.info(
             "deployed adapter",
             extra={"key": key, "version": version_id, "md5": md5, "policy": policy},
