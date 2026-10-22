@@ -202,6 +202,7 @@ class TestPrecisionSettings:
         assert (config["fp16"], config["bf16"]) == (True, False)
 
     def test_malformed_json_keeps_defaults(self, lg, tmp_path):
+        # get_model_metadata raises JSONDecodeError (a ValueError) before dtype is read
         (tmp_path / "config.json").write_text("not valid json {")
         config = {"fp16": True, "bf16": False}
         _apply_precision_settings(lg, str(tmp_path), config, {})

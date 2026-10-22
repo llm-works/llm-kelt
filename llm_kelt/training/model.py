@@ -214,16 +214,12 @@ def _coerce_types(config: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _checkpoint_dtype(lg: Logger, base_model: str) -> str | None:
+def _checkpoint_dtype(base_model: str) -> str | None:
     """Weight dtype from a local checkpoint's config.json, None when there is none.
 
     Transformers writes it as `dtype`; older checkpoints carry `torch_dtype`.
     """
-    try:
-        model_config = _read_checkpoint_config(base_model)
-    except json.JSONDecodeError as e:
-        lg.warning("malformed config.json, skipping dtype detection", extra={"error": str(e)})
-        return None
+    model_config = _read_checkpoint_config(base_model)
     if model_config is None:
         return None
     dtype = model_config.get("dtype") or model_config.get("torch_dtype")
@@ -248,7 +244,7 @@ def _apply_precision_settings(lg: Logger, base_model: str, config: dict, overrid
             "detected pre-quantized model, disabled AMP",
             extra={"quantization": meta.quantization, "bits": meta.quantization_bits},
         )
-    elif _checkpoint_dtype(lg, base_model) == "bfloat16":
+    elif _checkpoint_dtype(base_model) == "bfloat16":
         precision = {"fp16": False, "bf16": True}
         lg.info("detected bfloat16 weights, using bf16 AMP")
     else:
