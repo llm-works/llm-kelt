@@ -24,7 +24,7 @@ from appinfra.log import Logger
 
 from ..lineage import DEFAULT_SERIES, Lineage, series_root
 from ..manifest.schema import Data, Manifest
-from .base import Storage
+from .base import SERIES_SEPARATOR, Storage, queue_key
 
 # Pre-compiled regex for key validation (used on hot path)
 _KEY_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
@@ -139,10 +139,10 @@ class FileStorage(Storage):
         return True
 
     def get_pending_manifest(self, adapter: str) -> Manifest | None:
-        """Get a pending manifest by adapter key."""
+        """Get a pending manifest by queue key."""
         from ..manifest.loader import load_manifest
 
-        self.validate_key(adapter)
+        self.validate_queue_key(adapter)
         pending_file = self.pending_path / f"{adapter}.yaml"
         if not pending_file.exists():
             return None
@@ -179,7 +179,7 @@ class FileStorage(Storage):
 
     def remove_pending_manifest(self, adapter: str) -> None:
         """Remove a manifest from pending queue."""
-        self.validate_key(adapter)
+        self.validate_queue_key(adapter)
         pending_file = self.pending_path / f"{adapter}.yaml"
         if not pending_file.exists():
             raise FileNotFoundError(f"Manifest not found: {adapter}")
@@ -199,7 +199,7 @@ class FileStorage(Storage):
         """
         from ..manifest.loader import load_manifest
 
-        self.validate_key(adapter)
+        self.validate_queue_key(adapter)
         self.running_path.mkdir(parents=True, exist_ok=True)
         running_file = self.running_path / f"{adapter}.yaml"
         pending_file = self.pending_path / f"{adapter}.yaml"
@@ -226,7 +226,7 @@ class FileStorage(Storage):
         """
         from ..manifest.loader import load_manifest, save_manifest
 
-        self.validate_key(adapter)
+        self.validate_queue_key(adapter)
         self.failed_path.mkdir(parents=True, exist_ok=True)
         running_file = self.running_path / f"{adapter}.yaml"
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -243,7 +243,9 @@ class FileStorage(Storage):
             return failed_file
 
         if manifest.commit:
-            self._lineage.record_build(adapter, manifest.commit, "failed", error=result.error)
+            self._lineage.record_build(
+                manifest.adapter, manifest.commit, "failed", error=result.error
+            )
         manifest.output = result
         failed_file = self.failed_path / f"{adapter}-{stamp}.yaml.gz"
         save_manifest(manifest, failed_file, compress=True)
@@ -271,7 +273,7 @@ class FileStorage(Storage):
             dict(manifest.data.get("templates") or {}),
             _series_root(manifest),
         )
-        pending_file = self.pending_path / f"{manifest.adapter}.yaml"
+        pending_file = self.pending_path / f"{queue_key(manifest.adapter, series)}.yaml"
         if self._needs_build(manifest.adapter, series):
             queued = Manifest({**manifest, "data": Data(format="inline"), "commit": None})
             self._link_pending(queued, pending_file)  # False: a build is already queued
@@ -297,16 +299,17 @@ class FileStorage(Storage):
                 f"Only series '{DEFAULT_SERIES}' is deployed; "
                 f"use deployment policy 'skip' for series '{series}'"
             )
-        queued = self._pending_metadata(manifest.adapter)
+        # Series "main" shares its queue key with one-off manifests of the adapter
+        queued = self._queued_metadata(self.pending_path, queue_key(manifest.adapter, series))
         if queued is not None and queued.series != series:
             raise ValueError(f"Manifest already pending for adapter: {manifest.adapter}")
 
-    def _pending_metadata(self, adapter: str) -> Manifest | None:
-        """Return the metadata of the pending manifest of an adapter key, or None."""
+    def _queued_metadata(self, queue_dir: Path, key: str) -> Manifest | None:
+        """Return the metadata of the manifest queued under a key in a queue dir, or None."""
         from ..manifest.loader import load_manifest_metadata
 
         try:
-            return load_manifest_metadata(self.pending_path / f"{adapter}.yaml")
+            return load_manifest_metadata(queue_dir / f"{key}.yaml")
         except FileNotFoundError:
             return None
 
@@ -329,17 +332,12 @@ class FileStorage(Storage):
 
     def _needs_build(self, adapter: str, series: str) -> bool:
         """True unless the series' tip is built or being built."""
-        from ..manifest.loader import load_manifest_metadata
-
         tip = self._lineage.tip(adapter, series)
         build = self._lineage.build(adapter, tip) if tip else None
         if build is not None and build.state == "completed":
             return False
-        try:
-            running = load_manifest_metadata(self.running_path / f"{adapter}.yaml")
-        except FileNotFoundError:
-            return True
-        return running.commit != tip
+        running = self._queued_metadata(self.running_path, queue_key(adapter, series))
+        return running is None or running.commit != tip
 
     def _resolve_series_build(self, manifest: Manifest, series: str, running_file: Path) -> None:
         """Pin a claimed series build to the series' tip and fill in its training data.
@@ -358,12 +356,12 @@ class FileStorage(Storage):
         manifest.data = Data(format="inline", records=records, templates=templates)
 
     def get_queue_status(self, adapter: str) -> QueueStatus | None:
-        """Return the state of the latest submission for an adapter key, or None.
+        """Return the state of the latest submission for a queue key, or None.
 
         Reads manifest metadata only (not training data). A submission still queued wins
         over finished ones; among finished ones the most recently written file wins.
         """
-        self.validate_key(adapter)
+        self.validate_queue_key(adapter)
         queued = [
             ("pending", self.pending_path / f"{adapter}.yaml"),
             ("running", self.running_path / f"{adapter}.yaml"),
@@ -391,7 +389,7 @@ class FileStorage(Storage):
         """Build a QueueStatus from a manifest file's metadata.
 
         Returns None if the file is gone (moved by a runner meanwhile) or, for a finished
-        file found by name prefix, belongs to another adapter key.
+        file found by name prefix, belongs to another queue key.
         """
         from ..manifest.loader import load_manifest_metadata
         from ..schema import QueueStatus
@@ -410,10 +408,13 @@ class FileStorage(Storage):
                 else None
             )
 
-        if manifest.adapter != adapter:
+        if queue_key(manifest.adapter, manifest.series) != adapter:
             return None
         return QueueStatus(
-            adapter=adapter, state=state, created_at=manifest.created_at, output=manifest.output
+            adapter=manifest.adapter,
+            state=state,
+            created_at=manifest.created_at,
+            output=manifest.output,
         )
 
     def _link_manifest_to_adapter(self, key: str, md5: str, manifest_file: Path) -> None:
@@ -443,7 +444,8 @@ class FileStorage(Storage):
                 "completing manifest without md5, using timestamp",
                 extra={"adapter": manifest.adapter},
             )
-        completed_file = self.completed_path / f"{manifest.adapter}-{suffix}.yaml.gz"
+        key = queue_key(manifest.adapter, manifest.series)
+        completed_file = self.completed_path / f"{key}-{suffix}.yaml.gz"
         if manifest.commit:
             # A series build's sets stay in the lineage store, not in every completed manifest
             stored = Manifest({**manifest, "data": Data(format="inline")})
@@ -586,6 +588,8 @@ class FileStorage(Storage):
             "samples_trained": result.samples_trained,
             "duration_seconds": result.duration_seconds,
         }
+        if result.get("series"):
+            config["series"] = result.series
         config_path = adapter_path / "config.yaml"
         with config_path.open("w", encoding="utf-8") as f:
             yaml.safe_dump(config, f)
@@ -1000,7 +1004,7 @@ class FileStorage(Storage):
 
     def create_work_area(self, adapter: str, clean: bool = True) -> Path:
         """Create a temporary work area for training."""
-        self.validate_key(adapter)
+        self.validate_queue_key(adapter)
         work_dir = self.work_path / adapter
 
         if clean and work_dir.exists():
@@ -1012,7 +1016,7 @@ class FileStorage(Storage):
 
     def cleanup_work_area(self, adapter: str) -> None:
         """Clean up a training work area."""
-        self.validate_key(adapter)
+        self.validate_queue_key(adapter)
         work_dir = self.work_path / adapter
         if work_dir.exists():
             shutil.rmtree(work_dir)
@@ -1069,6 +1073,11 @@ class FileStorage(Storage):
                 f"Invalid key '{key}': must be alphanumeric with hyphens, underscores, or dots"
             )
 
+    def validate_queue_key(self, key: str) -> None:
+        """Validate a queue key: an adapter key, or ``<adapter>+<series>`` (see queue_key)."""
+        for part in key.split(SERIES_SEPARATOR, 1):
+            self.validate_key(part)
+
     # =========================================================================
     # Filesystem Helpers (not in ABC - for backwards compatibility)
     # =========================================================================
@@ -1124,13 +1133,21 @@ class FileStorage(Storage):
     # =========================================================================
 
     def _get_latest_version(self, key: str) -> str | None:
-        """Get latest version ID for an adapter."""
+        """Get latest version ID for an adapter.
+
+        Versions built by a series other than "main" are skipped: they are never deployed,
+        so "latest" (and deploying without a version) means the newest one that may be.
+        """
         key_path = self.adapters_path / key
         if not key_path.is_dir():
             return None
 
-        versions = sorted(p.name for p in key_path.iterdir() if p.is_dir())
-        return versions[-1] if versions else None
+        versions = sorted((p.name for p in key_path.iterdir() if p.is_dir()), reverse=True)
+        for version_id in versions:
+            series = self._read_adapter_config(key, version_id).get("series")
+            if series in (None, DEFAULT_SERIES):
+                return version_id
+        return None
 
     def _read_adapter_config(self, key: str, version_id: str) -> dict[str, Any]:
         """Read config.yaml for an adapter version."""

@@ -16,7 +16,7 @@ from appinfra.log import Logger
 
 from ..manifest.schema import Manifest, get_deploy_setting
 from ..schema import RunResult
-from ..storage import Storage
+from ..storage import Storage, queue_key
 
 if TYPE_CHECKING:
     from ..lora.config import Config
@@ -106,7 +106,9 @@ class Client:
 
     def _prepare_training(self, manifest: Manifest) -> tuple[Path, Path]:
         """Prepare training: resolve work dir and data path."""
-        work_dir = self._storage.create_work_area(manifest.adapter, clean=True)
+        work_dir = self._storage.create_work_area(
+            queue_key(manifest.adapter, manifest.series), clean=True
+        )
         data_path = self._storage.resolve_data_path(manifest, work_dir)
         self._lg.info("resolved data", extra={"path": str(data_path)})
 
@@ -182,12 +184,12 @@ class Client:
             result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=result.adapter.path)
 
         description = (manifest.source.description if manifest.source else None) or "DPO adapter"
-        deploy = get_deploy_setting(manifest)
+        result.series = manifest.series
         info = self.registry.register(
             training_result=result,
             key=manifest.adapter,
             description=description,
-            deploy=deploy,
+            deploy=get_deploy_setting(manifest),
             overwrite=True,
         )
         # Update result.adapter.path to registered location (adapters/, not work/)

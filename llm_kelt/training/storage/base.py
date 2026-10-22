@@ -17,6 +17,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from ..lineage import DEFAULT_SERIES
+
 if TYPE_CHECKING:
     from ..lineage import Lineage
     from ..manifest.schema import Manifest
@@ -32,6 +34,21 @@ class DupAdapterError(ValueError):
         super().__init__(
             f"Adapter '{key}' already exists with md5 {md5}. Use overwrite=True to return existing."
         )
+
+
+SERIES_SEPARATOR = "+"
+
+
+def queue_key(adapter: str, series: str | None) -> str:
+    """Return the key of a manifest's queue files and work area.
+
+    The adapter key, for a one-off manifest and series "main"; ``<adapter>+<series>`` for
+    another series, so series of one adapter queue and train independently. ``+`` is not
+    allowed in adapter keys, so the key is unambiguous.
+    """
+    if series is None or series == DEFAULT_SERIES:
+        return adapter
+    return f"{adapter}{SERIES_SEPARATOR}{series}"
 
 
 def extract_md5(version_id: str) -> str:
@@ -66,6 +83,9 @@ class Storage(ABC):
     Training work areas must provide real filesystem paths because
     HuggingFace/TRL libraries require disk access. Everything else
     can be stored abstractly.
+
+    Queue and work area methods take a queue key (see ``queue_key``): the adapter key, or
+    ``<adapter>+<series>`` for a series other than "main".
     """
 
     @property
@@ -93,8 +113,8 @@ class Storage(ABC):
             manifest, the commit holding the set.
 
         Raises:
-            ValueError: If a manifest with the same adapter key is already pending (for a
-                series manifest: one of another series), or a series manifest is invalid.
+            ValueError: If a manifest with the same queue key is already pending (for a
+                series manifest: a one-off one), or a series manifest is invalid.
         """
 
     @abstractmethod

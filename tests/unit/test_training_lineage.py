@@ -14,6 +14,7 @@ from appinfra import DotDict
 from appinfra.cas import MemoryStore
 
 from llm_kelt.training.lineage import Lineage, series_root
+from llm_kelt.training.manifest import Client
 from llm_kelt.training.manifest.loader import load_manifest
 from llm_kelt.training.manifest.schema import Data, Deployment, Manifest
 from llm_kelt.training.runner import Runner
@@ -84,6 +85,26 @@ class TestLineage:
         assert info.sets[0].submitted_at is not None
         assert info.current_build.commit == day1
         assert lineage.series("foo", "other") is None
+
+    def test_fork_shares_history_then_diverges(self, lineage: Lineage):
+        day1, _ = lineage.submit("foo", "main", [_rec(1)], {}, ROOT)
+        day2, _ = lineage.submit("foo", "main", [_rec(2)], {}, ROOT)
+        lineage.record_build("foo", day1, "completed", md5="abc123def456")
+
+        assert lineage.fork("foo", "main", "trial", day1) == day1
+        assert lineage.series("foo", "trial").current_build.commit == day1
+        trial2, _ = lineage.submit("foo", "trial", [_rec(3)], {}, ROOT)
+        assert lineage.tip("foo", "main") == day2
+        records, _, _ = lineage.build_input("foo", trial2)
+        assert records == [_rec(1), _rec(3)]
+
+    def test_fork_rejects_unknown_commit_and_existing_series(self, lineage: Lineage):
+        lineage.submit("foo", "main", [_rec(1)], {}, ROOT)
+        other, _ = lineage.submit("foo", "other", [_rec(2)], {}, ROOT)
+        with pytest.raises(ValueError, match="not in series"):
+            lineage.fork("foo", "main", "trial", other)
+        with pytest.raises(ValueError, match="already exists"):
+            lineage.fork("foo", "main", "other")
 
     def test_find_set(self, lineage: Lineage):
         lineage.submit("foo", "main", [_rec(1)], {}, ROOT)
@@ -166,10 +187,40 @@ class TestSeriesQueue:
         with pytest.raises(ValueError, match="already pending"):
             storage.submit_manifest(_manifest(_rec(2)))
 
+    def test_series_of_one_adapter_queue_separately(self, lg, storage: FileStorage):
+        storage.submit_manifest(_manifest(_rec(1)))
+        storage.submit_manifest(_manifest(_rec(2), series="trial", policy="skip"))
+        assert sorted(storage.list_pending_keys()) == ["foo", "foo+trial"]
+
+        trial = storage.claim_pending_manifest("foo+trial")
+        assert (trial.series, trial.data.records) == ("trial", [_rec(2)])
+        assert storage.claim_pending_manifest("foo").data.records == [_rec(1)]
+        assert Client(lg, storage).status("foo", series="trial").state == "running"
+
     def test_only_main_series_is_deployed(self, storage: FileStorage):
         with pytest.raises(ValueError, match="deployment policy 'skip'"):
             storage.submit_manifest(_manifest(_rec(1), series="trial"))
         storage.submit_manifest(_manifest(_rec(1), series="trial", policy="skip"))
+
+    def test_latest_version_skips_other_series(self, storage: FileStorage, tmp_path: Path):
+        """Deploying without a version never picks a build of a series other than main."""
+        source = tmp_path / "adapter"
+        source.mkdir()
+        (source / "adapter_model.safetensors").write_text("weights")
+        storage.store_adapter_files(source, "foo", "20000101-000000-aaa111")
+        storage.write_adapter_config("foo", "20000101-000000-aaa111", {"md5": "aaa111"})
+        now = datetime.now(UTC)
+        trial = RunResult(
+            started_at=now,
+            completed_at=now,
+            adapter=Adapter(md5="bbb222", mtime="", path=str(source)),
+            series="trial",
+        )
+        storage.store_adapter(trial, "foo", "trial build", deploy=False)
+
+        storage.deploy_adapter("foo")
+        assert storage.get_deployed_version("foo") == "20000101-000000-aaa111"
+        assert storage.get_adapter("foo").md5 == "aaa111"
 
     def test_model_override_fails_series_build(self, lg, storage: FileStorage):
         storage.submit_manifest(_manifest(_rec(1)))

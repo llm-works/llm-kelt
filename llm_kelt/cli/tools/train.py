@@ -581,7 +581,7 @@ class AdaptersTool(_ConfigMixin, Tool):
 
 
 class SeriesTool(_ConfigMixin, Tool):
-    """Show a training series, or find the series containing a set."""
+    """Show or fork a training series; find the series of a set or adapter version."""
 
     def __init__(self, parent: Any = None) -> None:
         super().__init__(parent, ToolConfig(name="series", help_text="Show a training series"))
@@ -590,24 +590,50 @@ class SeriesTool(_ConfigMixin, Tool):
         parser.add_argument("adapter", nargs="?", help="Adapter key")
         parser.add_argument("--series", "-s", default=DEFAULT_SERIES, help="Series name")
         parser.add_argument("--set", help="Find the series containing this set id")
+        parser.add_argument("--md5", help="Show the series and commit of an adapter version")
+        parser.add_argument("--fork", metavar="NEW", help="Start series NEW at --commit")
+        parser.add_argument("--commit", help="Commit to fork at (default: the series' tip)")
 
     def run(self, **kwargs: Any) -> int:
         try:
-            lineage = FileStorage(self.lg, self._registry_path()).lineage
+            storage = FileStorage(self.lg, self._registry_path())
             if self.args.set:
-                for adapter, series in lineage.find_set(self.args.set):
+                for adapter, series in storage.lineage.find_set(self.args.set):
                     print(f"{adapter}/{series}")
                 return 0
+            if self.args.md5:
+                return self._print_version(storage, self.args.md5)
             if not self.args.adapter:
-                raise ValueError("Give an adapter key or --set")
-            info = lineage.series(self.args.adapter, self.args.series)
+                raise ValueError("Give an adapter key, --set or --md5")
+            if self.args.fork:
+                storage.validate_key(self.args.fork)
+                commit = storage.lineage.fork(
+                    self.args.adapter, self.args.series, self.args.fork, self.args.commit
+                )
+                print(f"Started {self.args.adapter}/{self.args.fork} at {commit[:12]}")
+                return 0
+            return self._show(storage)
         except ValueError as e:
             self.lg.error(str(e))
             return 1
+
+    def _show(self, storage: FileStorage) -> int:
+        info = storage.lineage.series(self.args.adapter, self.args.series)
         if info is None:
             print(f"No series {self.args.adapter}/{self.args.series}")
             return 1
         self._print_series(info)
+        return 0
+
+    def _print_version(self, storage: FileStorage, md5: str) -> int:
+        manifest = storage.find_adapter_by_md5(md5)
+        if manifest is None:
+            print(f"No completed training for adapter version {md5}")
+            return 1
+        if not manifest.series:
+            print(f"{manifest.adapter}: one-off training, not part of a series")
+            return 0
+        print(f"{manifest.adapter}/{manifest.series} at commit {manifest.commit}")
         return 0
 
     def _print_series(self, info: SeriesInfo) -> None:

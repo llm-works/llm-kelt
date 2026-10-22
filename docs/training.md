@@ -389,8 +389,13 @@ result.created  # False: the set was already in the series, nothing was added
   The runner rejects `--model` and `--lora-profile` overrides for series builds.
 - A series has at most one pending build, of its tip: the runner trains whatever the tip is
   when it claims the build. Resubmitting a set re-queues the tip if its last build failed.
-- Only series `main` is deployed; other series need deployment policy `skip`. `parent` is
-  not supported on series manifests.
+  Series `main` queues under the adapter key; another series under `<adapter>+<series>`
+  (`status(adapter, series=...)`), so series of one adapter build independently.
+- Only series `main` is deployed; other series need deployment policy `skip`, and their
+  builds are skipped when "latest version" is resolved (`deploy` without a version,
+  `get_adapter`). `parent` is not supported on series manifests.
+- `kelt.train.manifest.fork(adapter, series, new_series, commit=None)` starts a series at a
+  commit of another (default: its tip), sharing that history and its builds.
 - Completed series manifests record the `commit` they trained and keep no records; the sets
   stay in the store.
 
@@ -403,8 +408,12 @@ for entry in info.sets:  # oldest first
 kelt.train.manifest.find_set(set_id)  # → [(adapter, series), ...]
 ```
 
-The CLI shows the same: `kelt train series coding-v1 [--series main]` and
-`kelt train series --set <set id>`.
+An adapter version's series and commit are in its completed manifest:
+`kelt.train.manifest.get_manifest(md5).series` / `.commit`.
+
+The CLI covers the same: `kelt train series coding-v1 [--series main]`,
+`kelt train series --set <set id>`, `kelt train series --md5 <md5>` and
+`kelt train series coding-v1 --fork trial [--commit <commit>]`.
 
 ### Continue-training from a parent adapter
 
@@ -665,6 +674,8 @@ kelt train deploy coding-v1 --policy replace
 kelt train deploy coding-v1 --clear     # undeploy
 kelt train series coding-v1             # sets and builds of series main
 kelt train series --set <set id>        # series containing a set
+kelt train series --md5 <md5>           # series and commit of an adapter version
+kelt train series coding-v1 --fork trial
 kelt train merge coding-v1 --model … --output ./merged
 ```
 

@@ -156,6 +156,29 @@ class Lineage:
             )
             return commit, True
 
+    def fork(self, adapter: str, series: str, new_series: str, commit: str | None = None) -> str:
+        """Start ``new_series`` at a commit of ``series`` (default: its tip); return it.
+
+        Raises:
+            ValueError: ``series`` does not exist, ``commit`` is not in its history, or
+                ``new_series`` exists.
+        """
+        repo = self._store.repo(adapter)
+        tip = self.tip(adapter, series)
+        if tip is None:
+            raise ValueError(f"Series not found: {adapter}/{series}")
+        if commit is None:
+            commit = tip
+        elif all(c.id != commit for c in repo.first_parents(tip)):
+            raise ValueError(f"Commit {commit} is not in series {adapter}/{series}")
+        if not repo.set_ref(_REF_PREFIX + new_series, commit, None):
+            raise ValueError(f"Series already exists: {adapter}/{new_series}")
+        self._lg.info(
+            "forked series",
+            extra={"adapter": adapter, "series": series, "new": new_series, "commit": commit},
+        )
+        return commit
+
     def tip(self, adapter: str, series: str) -> str | None:
         """Return the newest commit of a series, or None if the series does not exist."""
         return self._store.repo(adapter).get_ref(_REF_PREFIX + series)

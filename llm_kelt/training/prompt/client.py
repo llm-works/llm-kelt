@@ -16,7 +16,7 @@ from appinfra.log import Logger
 
 from ..manifest.schema import Manifest, get_deploy_setting
 from ..schema import RunResult
-from ..storage import Storage
+from ..storage import Storage, queue_key
 
 if TYPE_CHECKING:
     from ..lora.registry import AdapterRegistry
@@ -138,6 +138,7 @@ class Client:
 
         description = (manifest.source.description if manifest.source else None) or "Prompt adapter"
         deploy = get_deploy_setting(manifest)
+        result.series = manifest.series
         info = self.registry.register(
             training_result=result,
             key=manifest.adapter,
@@ -166,7 +167,9 @@ class Client:
         if manifest.data.format == "inline":
             self._validate_records(manifest)
 
-        work_dir = self._storage.create_work_area(manifest.adapter, clean=True)
+        work_dir = self._storage.create_work_area(
+            queue_key(manifest.adapter, manifest.series), clean=True
+        )
         data_path = self._storage.resolve_data_path(manifest, work_dir)
         self._lg.info("resolved data", extra={"path": str(data_path)})
 
