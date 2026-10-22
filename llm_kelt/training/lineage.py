@@ -287,7 +287,8 @@ class Lineage:
             data = self._read_build(adapter, commit)
             if data is None:
                 raise ValueError(f"No build of commit {commit} for adapter {adapter}")
-            data["annotations"] = _json_object({**(data.get("annotations") or {}), **annotations})
+            new = _json_object(annotations)  # before merging: a non-dict would raise TypeError
+            data["annotations"] = _json_object({**(data.get("annotations") or {}), **new})
             _write_atomic(self._build_path(adapter, commit), yaml.safe_dump(data))
 
     def annotate_set(self, adapter: str, set_id: str, annotations: dict[str, Any]) -> None:
@@ -302,7 +303,8 @@ class Lineage:
         if set_id not in held:
             raise ValueError(f"Training set not found: {adapter}/{set_id}")
         with self._locked(adapter):
-            merged = _json_object({**self.set_annotations(adapter, set_id), **annotations})
+            new = _json_object(annotations)  # before merging: a non-dict would raise TypeError
+            merged = _json_object({**self.set_annotations(adapter, set_id), **new})
             _write_atomic(self._set_path(adapter, set_id), yaml.safe_dump(merged))
 
     def mark_pruned(self, adapter: str, commit: str) -> None:

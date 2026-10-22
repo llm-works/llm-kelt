@@ -172,6 +172,15 @@ class TestAnnotations:
         with pytest.raises(ValueError, match="JSON|limit"):
             _submit(lineage, "main", _rec(1), annotations=annotations)
 
+    def test_merging_a_non_object_raises_value_error(self, lineage: Lineage):
+        commit = _submit(lineage, "main", _rec(1), annotations={"n": 1}).commit
+        lineage.record_build("foo", commit, "completed", md5="abc123def456")
+        set_id = lineage.series("foo", "main").sets[0].set_id
+        with pytest.raises(ValueError, match="JSON object"):
+            lineage.annotate_build("foo", commit, [1])  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="JSON object"):
+            lineage.annotate_set("foo", set_id, [1])  # type: ignore[arg-type]
+
 
 class TestDropAndWipe:
     def test_drop_removes_only_what_no_other_series_holds(self, lineage: Lineage):

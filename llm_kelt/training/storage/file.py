@@ -391,12 +391,12 @@ class FileStorage(Storage):
         self.deployed_path.mkdir(parents=True, exist_ok=True)
         self._migrate_old_symlink(adapter)
         version_id, md5 = self._resolve_deploy_version(adapter, version_id)
-        # One lock over record and link, so concurrent deploys of the key cannot pair one's
-        # record with another's link. Recorded first: if the link fails, the record does not
-        # match the deployed version and is ignored.
+        # One lock over link and record, so concurrent deploys of the key cannot pair one's
+        # record with another's link. Recorded only after the link succeeds, so a failed
+        # deploy leaves the record of the previous one.
         with self._deploy_lock(adapter):
-            self._lineage.record_deployed(adapter, series, commit)
             self._link_version(adapter, version_id, md5, policy)
+            self._lineage.record_deployed(adapter, series, commit)
         return version_id
 
     def _series_build_version(
@@ -486,29 +486,36 @@ class FileStorage(Storage):
         """
         self.validate_key(adapter)
         self.validate_key(series)
-        active = self.active_series(adapter)
-        if active is not None and active.series == series:
-            raise ValueError(f"Series {adapter}/{series} is deployed; deploy another first")
         key = queue_key(adapter, series)
         if self._queued_metadata(self.running_path, key) is not None:
             raise ValueError(f"A build of {adapter}/{series} is running")
-        exclusive = self._lineage.exclusive_commits(adapter, series)
-        builds = [self._lineage.build(adapter, c) for c in exclusive]
-        md5s = [b.md5 for b in builds if b is not None and b.md5]
-
-        queued = self._queued_metadata(self.pending_path, key)
-        if queued is not None and queued.series == series:
-            (self.pending_path / f"{key}.yaml").unlink(missing_ok=True)
-        # Lock: check deployed + remove weights atomically, so a concurrent deploy cannot
-        # create a symlink to weights we are about to delete.
+        # Lock: the deployment checks, the drop and the weight removal are one step, so a
+        # concurrent deploy can neither make the series active nor link weights being deleted.
         with self._deploy_lock(adapter):
-            if any(self.is_deployed(adapter, md5) for md5 in md5s):
-                raise ValueError(f"A build of {adapter}/{series} is deployed; undeploy it first")
+            md5s = self._check_droppable(adapter, series)
+            queued = self._queued_metadata(self.pending_path, key)
+            if queued is not None and queued.series == series:
+                (self.pending_path / f"{key}.yaml").unlink(missing_ok=True)
             # Weights go last: if the lineage refuses (the series moved), its builds keep them
             dropped = self._lineage.drop_series(adapter, series)
             for md5 in md5s:
                 self._remove_build_weights(adapter, md5)
         return dropped
+
+    def _check_droppable(self, adapter: str, series: str) -> list[str]:
+        """Return the md5s of the builds only the series holds; raise if it is deployed.
+
+        Caller must hold _deploy_lock(adapter).
+        """
+        active = self.active_series(adapter)
+        if active is not None and active.series == series:
+            raise ValueError(f"Series {adapter}/{series} is deployed; deploy another first")
+        exclusive = self._lineage.exclusive_commits(adapter, series)
+        builds = [self._lineage.build(adapter, c) for c in exclusive]
+        md5s = [b.md5 for b in builds if b is not None and b.md5]
+        if any(self.is_deployed(adapter, md5) for md5 in md5s):
+            raise ValueError(f"A build of {adapter}/{series} is deployed; undeploy it first")
+        return md5s
 
     def wipe_adapter(self, adapter: str) -> None:
         """Delete everything of an adapter key: series, sets, builds, versions, deployments.
