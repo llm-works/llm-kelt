@@ -230,3 +230,23 @@ class TestSeriesQueue:
         [(_, result)] = Runner(lg, storage).run_pending(model_override="org/model-b")
         assert result.status == "failed"
         assert "overrides are not allowed" in result.error
+
+    def test_concurrent_series_submits_queue_one_build(self, storage: FileStorage):
+        """Concurrent submits all land in the series and queue at most one build."""
+        results: list[tuple[str, bool]] = []
+
+        def submit(i: int) -> None:
+            r = storage.submit_manifest(_manifest(_rec(i)))
+            results.append((r.commit, r.created))
+
+        threads = [threading.Thread(target=submit, args=(i,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # All sets land in the series
+        records, _, _ = storage.lineage.build_input("foo", storage.lineage.tip("foo", "main"))
+        assert sorted(r["output"] for r in records) == [f"a{i}" for i in range(8)]
+        # Only one pending file (no duplicates)
+        assert [p.name for p in storage.pending_path.iterdir()] == ["foo.yaml"]

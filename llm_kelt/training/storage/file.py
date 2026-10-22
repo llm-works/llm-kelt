@@ -336,7 +336,10 @@ class FileStorage(Storage):
         build = self._lineage.build(adapter, tip) if tip else None
         if build is not None and build.state == "completed":
             return False
-        running = self._queued_metadata(self.running_path, queue_key(adapter, series))
+        key = queue_key(adapter, series)
+        if self._queued_metadata(self.pending_path, key) is not None:
+            return False  # Already queued
+        running = self._queued_metadata(self.running_path, key)
         return running is None or running.commit != tip
 
     def _resolve_series_build(self, manifest: Manifest, series: str, running_file: Path) -> None:
