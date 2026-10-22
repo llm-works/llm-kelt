@@ -640,12 +640,12 @@ class SeriesTool(_ConfigMixin, Tool):
         current = info.current_build
         print(f"\nSeries {info.adapter}/{info.series}: {info.recipe['method'].upper()}")
         print(f"  Base model: {info.base_model}")
-        print(f"  Tip: {info.tip[:12]}, current build: {current.commit[:12] if current else '-'}")
+        print(f"  Tip: {info.tip}, current build: {current.commit if current else '-'}")
         print("\n  Sets (oldest first):")
         for entry in info.sets:
             date = entry.submitted_at.isoformat(timespec="seconds") if entry.submitted_at else "-"
             build = entry.build.state if entry.build else "not built"
-            print(f"    {entry.commit[:12]}  set {entry.set_id[:12]}  {date}  {build}")
+            print(f"    {entry.commit}  set {entry.set_id}  {date}  {build}")
         print()
 
 
