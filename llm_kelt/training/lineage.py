@@ -16,14 +16,22 @@ weights carry over between builds.
 - Submit dates and builds are kept outside the store, per (adapter, commit):
   ``<records>/<adapter>/submitted/<commit>`` and ``<records>/<adapter>/builds/<commit>.yaml``.
   Series of one adapter that share a commit share its build.
+- Annotations are small mutable JSON objects outside the store, so they never change an
+  id: a set's (``<records>/<adapter>/sets/<set>.yaml``) start as those of its first submit;
+  a build's live in its build record, survive pruning its weights and are reset by a
+  rebuild.
 """
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import shutil
 import uuid
-from dataclasses import dataclass
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -31,6 +39,7 @@ from typing import Any, Literal
 import yaml
 from appinfra.cas import (
     Blob,
+    Commit,
     RefConflictError,
     Repo,
     Store,
@@ -45,17 +54,42 @@ DEFAULT_SERIES = "main"
 
 _REF_PREFIX = "series/"
 
+# Objects a dropped series leaves unreachable are deleted once they are this old (seconds),
+# so a concurrent submit's objects, stored but not yet referenced, are never collected.
+_PRUNE_GRACE = 3600.0
+
+# Annotations are notes and small metrics, read with every series lookup; the cap is on
+# their JSON encoding, per set or build.
+MAX_ANNOTATIONS_BYTES = 64 * 1024
+
+BuildState = Literal["completed", "failed", "pruned"]
+
 
 @dataclass(frozen=True)
 class Build:
     """Outcome of training one commit."""
 
-    state: Literal["completed", "failed"]
+    # "pruned": completed, then its adapter weights were deleted; md5 names them
+    state: BuildState
     at: datetime
-    # Adapter weights md5, for a completed build
+    # Adapter weights md5, for a completed or pruned build
     md5: str | None = None
     # Error message, for a failed build
     error: str | None = None
+    # Mutable metadata, e.g. a training gate's verdict and metrics
+    annotations: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Submission:
+    """Outcome of adding a set to a series."""
+
+    # Commit holding the set
+    commit: str
+    # Whether this submit added the set; False when it was already in the series' history
+    created: bool
+    # Whether this submit started the series (its commit is the root)
+    root: bool
 
 
 @dataclass(frozen=True)
@@ -66,6 +100,7 @@ class SetEntry:
     set_id: str
     submitted_at: datetime | None
     build: Build | None
+    annotations: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -115,7 +150,8 @@ class Lineage:
         records: list[dict[str, Any]],
         templates: dict[str, str],
         root: dict[str, Any],
-    ) -> tuple[str, bool]:
+        annotations: dict[str, Any],
+    ) -> Submission:
         """Add a training set to a series.
 
         Args:
@@ -125,16 +161,23 @@ class Lineage:
             templates: Shared prompt templates the records reference.
             root: Root payload (see ``series_root``); the series' first submit stores it,
                 later submits must match it.
+            annotations: The set's annotations (a JSON object); stored unless the set
+                already has some.
 
         Returns:
-            (commit, created): the commit that holds the set, and whether this submit
-            added it. A set already in the series' history returns its existing commit.
+            The commit that holds the set. A set already in the series' history returns
+            its existing commit, with ``created`` False.
 
         Raises:
-            ValueError: The series was started with another base model or recipe.
+            ValueError: The series was started with another base model or recipe, or the
+                annotations are not a JSON object within MAX_ANNOTATIONS_BYTES.
         """
+        annotations = _json_object(annotations)
         repo = self._store.repo(adapter)
         set_id = _put_set(repo, records, templates)
+        if annotations:
+            with self._locked(adapter):
+                self._write_once(self._set_path(adapter, set_id), yaml.safe_dump(annotations))
         payload = canonical_json(root)
         ref = _REF_PREFIX + series
         while True:
@@ -144,17 +187,18 @@ class Lineage:
                 _check_root(adapter, series, history[-1].payload, payload)
                 existing = next((c.id for c in history if c.tree == set_id), None)
                 if existing is not None:
-                    return existing, False
+                    return Submission(existing, created=False, root=False)
             try:
                 commit = repo.commit(ref, set_id, payload if tip is None else b"")
             except RefConflictError:
                 continue  # another submit moved the series; check its history again
-            self._write_submitted(adapter, commit)
+            self._write_once(self._submitted_path(adapter, commit), datetime.now(UTC).isoformat())
             self._lg.info(
                 "added set to series",
                 extra={"adapter": adapter, "series": series, "set": set_id, "commit": commit},
             )
-            return commit, True
+            # The ref was created by this compare-and-set, so no other submit started it
+            return Submission(commit, created=True, root=tip is None)
 
     def fork(self, adapter: str, series: str, new_series: str, commit: str | None = None) -> str:
         """Start ``new_series`` at a commit of ``series`` (default: its tip); return it.
@@ -210,22 +254,73 @@ class Lineage:
         md5: str | None = None,
         error: str | None = None,
     ) -> None:
-        """Record the outcome of a build of ``commit``, replacing an earlier one."""
+        """Record the outcome of a build of ``commit``, replacing an earlier one.
+
+        The earlier build's annotations go with it: they describe weights this build
+        replaces.
+        """
         build = {"state": state, "at": datetime.now(UTC).isoformat(), "md5": md5, "error": error}
-        _write_atomic(self._build_path(adapter, commit), yaml.safe_dump(build))
+        with self._locked(adapter):
+            _write_atomic(self._build_path(adapter, commit), yaml.safe_dump(build))
 
     def build(self, adapter: str, commit: str) -> Build | None:
         """Return the recorded build of ``commit``, or None if it was never built."""
-        try:
-            data = yaml.safe_load(self._build_path(adapter, commit).read_text(encoding="utf-8"))
-        except FileNotFoundError:
+        data = self._read_build(adapter, commit)
+        if data is None:
             return None
         return Build(
             state=data["state"],
             at=datetime.fromisoformat(data["at"]),
             md5=data.get("md5"),
             error=data.get("error"),
+            annotations=data.get("annotations") or {},
         )
+
+    def annotate_build(self, adapter: str, commit: str, annotations: dict[str, Any]) -> None:
+        """Merge ``annotations`` into the annotations of ``commit``'s build, key by key.
+
+        Raises:
+            ValueError: ``commit`` was never built, or the merged annotations are not a
+                JSON object within MAX_ANNOTATIONS_BYTES.
+        """
+        with self._locked(adapter):
+            data = self._read_build(adapter, commit)
+            if data is None:
+                raise ValueError(f"No build of commit {commit} for adapter {adapter}")
+            data["annotations"] = _json_object({**(data.get("annotations") or {}), **annotations})
+            _write_atomic(self._build_path(adapter, commit), yaml.safe_dump(data))
+
+    def annotate_set(self, adapter: str, set_id: str, annotations: dict[str, Any]) -> None:
+        """Merge ``annotations`` into a set's annotations, key by key.
+
+        Raises:
+            ValueError: No series of the adapter holds the set, or the merged annotations
+                are not a JSON object within MAX_ANNOTATIONS_BYTES.
+        """
+        repo = self._store.repo(adapter)
+        held = (c.tree for tip in repo.refs(_REF_PREFIX).values() for c in repo.first_parents(tip))
+        if set_id not in held:
+            raise ValueError(f"Training set not found: {adapter}/{set_id}")
+        with self._locked(adapter):
+            merged = _json_object({**self.set_annotations(adapter, set_id), **annotations})
+            _write_atomic(self._set_path(adapter, set_id), yaml.safe_dump(merged))
+
+    def mark_pruned(self, adapter: str, commit: str) -> None:
+        """Mark a completed build pruned: its weights are gone, its record stays."""
+        with self._locked(adapter):
+            data = self._read_build(adapter, commit)
+            if data is None or data["state"] != "completed":
+                raise ValueError(f"No completed build of commit {commit} for adapter {adapter}")
+            data["state"] = "pruned"
+            _write_atomic(self._build_path(adapter, commit), yaml.safe_dump(data))
+
+    def set_annotations(self, adapter: str, set_id: str) -> dict[str, Any]:
+        """Return a set's annotations, empty if it has none."""
+        try:
+            text = self._set_path(adapter, set_id).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return {}
+        return yaml.safe_load(text) or {}
 
     def series(self, adapter: str, series: str) -> SeriesInfo | None:
         """Return the state of a series, or None if it does not exist."""
@@ -240,6 +335,7 @@ class Lineage:
                 set_id=c.tree,
                 submitted_at=self._read_submitted(adapter, c.id),
                 build=self.build(adapter, c.id),
+                annotations=self.set_annotations(adapter, c.tree),
             )
             for c in reversed(history)
         ]
@@ -264,17 +360,111 @@ class Lineage:
                     found.append((adapter, ref.removeprefix(_REF_PREFIX)))
         return found
 
+    def exclusive_commits(self, adapter: str, series: str) -> list[str]:
+        """Commits of a series that no other series of the adapter reaches, oldest first."""
+        repo = self._store.repo(adapter)
+        tip = self.tip(adapter, series)
+        if tip is None:
+            raise ValueError(f"Series not found: {adapter}/{series}")
+        shared = self._reachable(repo, exclude=_REF_PREFIX + series)
+        return [c.id for c in reversed(list(repo.first_parents(tip))) if c.id not in shared]
+
+    def drop_series(self, adapter: str, series: str) -> list[str]:
+        """Delete a series and what only it reaches: commits, sets and their records.
+
+        Sets and builds shared with another series stay. Returns the dropped commits.
+
+        Raises:
+            ValueError: The series does not exist, or a submit moved it meanwhile.
+        """
+        repo = self._store.repo(adapter)
+        ref = _REF_PREFIX + series
+        tip = repo.get_ref(ref)
+        if tip is None:
+            raise ValueError(f"Series not found: {adapter}/{series}")
+        history = list(repo.first_parents(tip))
+        if not repo.delete_ref(ref, tip):
+            raise ValueError(f"Series {adapter}/{series} changed while dropping it; retry")
+        shared = self._reachable(repo, exclude=None)
+        shared_sets = {self._commit_tree(repo, c) for c in shared}
+        dropped = [c for c in history if c.id not in shared]
+        for c in dropped:
+            self._build_path(adapter, c.id).unlink(missing_ok=True)
+            self._submitted_path(adapter, c.id).unlink(missing_ok=True)
+            if c.tree not in shared_sets:
+                self._set_path(adapter, c.tree).unlink(missing_ok=True)
+        repo.prune(_PRUNE_GRACE)
+        self._lg.info("dropped series", extra={"adapter": adapter, "series": series})
+        return [c.id for c in reversed(dropped)]
+
+    def record_deployed(self, adapter: str, series: str, commit: str) -> None:
+        """Record which series a deployment of ``commit`` serves.
+
+        Needed because series that share a commit share its build: the deployed version
+        alone names the series it was built for, not the one it was deployed for.
+        """
+        record = yaml.safe_dump({"series": series, "commit": commit})
+        _write_atomic(self._records_path / adapter / "deployed.yaml", record)
+
+    def deployed(self, adapter: str) -> tuple[str, str] | None:
+        """Return the (series, commit) last recorded by ``record_deployed``, or None."""
+        try:
+            text = (self._records_path / adapter / "deployed.yaml").read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+        data = yaml.safe_load(text)
+        return data["series"], data["commit"]
+
+    def wipe(self, adapter: str) -> None:
+        """Delete every series of an adapter with all its sets, builds and annotations."""
+        self._store.delete_repo(adapter)
+        shutil.rmtree(self._records_path / adapter, ignore_errors=True)
+        self._lg.info("wiped lineage", extra={"adapter": adapter})
+
+    def _reachable(self, repo: Repo, exclude: str | None) -> set[str]:
+        """Ids of the commits any series ref reaches, except the ref ``exclude``."""
+        reachable: set[str] = set()
+        for ref, tip in repo.refs(_REF_PREFIX).items():
+            if ref != exclude:
+                reachable.update(c.id for c in repo.first_parents(tip))
+        return reachable
+
+    def _commit_tree(self, repo: Repo, commit: str) -> str:
+        found = repo.get(commit, Commit)
+        if found is None:
+            raise ValueError(f"Commit not found: {commit}")
+        return found.tree
+
+    @contextmanager
+    def _locked(self, adapter: str) -> Iterator[None]:
+        """Hold an adapter's build-record lock, so read-modify-writes do not interleave."""
+        path = self._records_path / adapter / ".lock"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            yield
+
+    def _read_build(self, adapter: str, commit: str) -> dict[str, Any] | None:
+        try:
+            text = self._build_path(adapter, commit).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+        data: dict[str, Any] = yaml.safe_load(text)
+        return data
+
     def _build_path(self, adapter: str, commit: str) -> Path:
         return self._records_path / adapter / "builds" / f"{commit}.yaml"
 
     def _submitted_path(self, adapter: str, commit: str) -> Path:
         return self._records_path / adapter / "submitted" / commit
 
-    def _write_submitted(self, adapter: str, commit: str) -> None:
-        """Record when a commit was added; the first submit of a commit wins."""
-        path = self._submitted_path(adapter, commit)
+    def _set_path(self, adapter: str, set_id: str) -> Path:
+        return self._records_path / adapter / "sets" / f"{set_id}.yaml"
+
+    def _write_once(self, path: Path, text: str) -> None:
+        """Write a record unless it exists; the first writer wins."""
         if not path.exists():
-            _write_atomic(path, datetime.now(UTC).isoformat())
+            _write_atomic(path, text)
 
     def _read_submitted(self, adapter: str, commit: str) -> datetime | None:
         try:
@@ -311,6 +501,25 @@ def _read_set(repo: Repo, set_id: str) -> tuple[list[dict[str, Any]], dict[str, 
             raise ValueError(f"Training set {set_id} has no {name}")
         parts[name] = json.loads(blob.data)
     return parts["records"], parts["templates"]
+
+
+def _json_object(annotations: dict[str, Any]) -> dict[str, Any]:
+    """Return annotations as plain JSON values, if they are a JSON object within the cap.
+
+    Raises:
+        ValueError: Not a JSON object, or its encoding exceeds MAX_ANNOTATIONS_BYTES.
+    """
+    if not isinstance(annotations, dict):
+        raise ValueError("Annotations must be a JSON object")
+    try:
+        encoded = json.dumps(annotations, allow_nan=False)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"Annotations are not JSON: {e}") from None
+    size = len(encoded.encode())
+    if size > MAX_ANNOTATIONS_BYTES:
+        raise ValueError(f"Annotations take {size} bytes; the limit is {MAX_ANNOTATIONS_BYTES}")
+    plain: dict[str, Any] = json.loads(encoded)
+    return plain
 
 
 def _check_root(adapter: str, series: str, stored: bytes, submitted: bytes) -> None:

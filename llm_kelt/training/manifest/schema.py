@@ -65,6 +65,8 @@ class Manifest(FieldDict):
     series: str | None = None
     # Lineage commit a series build trains, set when the build is claimed
     commit: str | None = None
+    # Annotations of this manifest's set (a small JSON object, series manifests only)
+    annotations: dict[str, Any] = field(default_factory=dict)
     # Deployment configuration
     deployment: Deployment | None = None
     # Schema version for forward compatibility

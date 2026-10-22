@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Training series: a manifest with `series` set adds its data as a set of that series; each
   build retrains from the base model on all of the series' sets. Lookups via
   `kelt.train.manifest.series()` / `find_set()` and `kelt train series`. See docs/training.md.
+- Any training series can be deployed by commit (`kelt.train.manifest.deploy()`, `active()`);
+  sets and builds take JSON annotations; `prune()` / `drop()` / `wipe()` delete a series'
+  weights, a series, or an adapter key. Replace deploys never leave the key undeployed.
 
 ### Changed
 - **Breaking:** the `training` extra requires current releases: `transformers>=5.18`,

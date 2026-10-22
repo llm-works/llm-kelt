@@ -30,7 +30,7 @@ from .base import SERIES_SEPARATOR, Storage, queue_key
 _KEY_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
 
 if TYPE_CHECKING:
-    from ..schema import AdapterInfo, QueueStatus, RunResult, SubmitResult
+    from ..schema import ActiveSeries, AdapterInfo, QueueStatus, RunResult, SubmitResult
 
 
 def _series_root(manifest: Manifest) -> dict[str, Any]:
@@ -266,23 +266,30 @@ class FileStorage(Storage):
         from ..schema import SubmitResult
 
         self._check_series_manifest(manifest, series)
-        commit, created = self._lineage.submit(
+        submission = self._lineage.submit(
             manifest.adapter,
             series,
             self._read_records(manifest),
             dict(manifest.data.get("templates") or {}),
             _series_root(manifest),
+            dict(manifest.get("annotations") or {}),
         )
         pending_file = self.pending_path / f"{queue_key(manifest.adapter, series)}.yaml"
         if self._needs_build(manifest.adapter, series):
-            queued = Manifest({**manifest, "data": Data(format="inline"), "commit": None})
-            self._link_pending(queued, pending_file)  # False: a build is already queued
+            # The queued build is of the series' tip, not of this set
+            empty: dict[str, Any] = {
+                "data": Data(format="inline"),
+                "commit": None,
+                "annotations": {},
+            }
+            self._link_pending(Manifest({**manifest, **empty}), pending_file)  # False: queued
         return SubmitResult(
             adapter=manifest.adapter,
             timestamp=datetime.now(),
             location=str(pending_file),
-            commit=commit,
-            created=created,
+            commit=submission.commit,
+            created=submission.created,
+            root=submission.root,
         )
 
     def _check_series_manifest(self, manifest: Manifest, series: str) -> None:
@@ -357,6 +364,168 @@ class FileStorage(Storage):
         records, templates, root = self._lineage.build_input(manifest.adapter, commit)
         manifest.training["requested_model"] = root["base"]["model"]
         manifest.data = Data(format="inline", records=records, templates=templates)
+
+    # =========================================================================
+    # Series deployment and retention
+    # =========================================================================
+
+    def deploy_series(
+        self,
+        adapter: str,
+        series: str,
+        commit: str | None = None,
+        *,
+        policy: Literal["add", "replace"] = "replace",
+    ) -> str:
+        """Deploy the adapter version built from a commit of a series; return its version id.
+
+        Raises:
+            ValueError: The series or commit does not exist, or the commit has no completed
+                build (never built, failed, or its weights were pruned).
+        """
+        self.validate_key(adapter)
+        commit, version_id = self._series_build_version(adapter, series, commit)
+        # Recorded first: until the link is in place, the record does not match it
+        self._lineage.record_deployed(adapter, series, commit)
+        self.deploy_adapter(adapter, version_id, policy=policy)
+        return version_id
+
+    def _series_build_version(
+        self, adapter: str, series: str, commit: str | None
+    ) -> tuple[str, str]:
+        """Return (commit, version id) of a completed series build; default: current build."""
+        info = self._lineage.series(adapter, series)
+        if info is None:
+            raise ValueError(f"Series not found: {adapter}/{series}")
+        if commit is None:
+            entry = info.current_build
+            if entry is None:
+                raise ValueError(f"Series {adapter}/{series} has no completed build")
+        else:
+            entry = next((e for e in info.sets if e.commit == commit), None)
+            if entry is None:
+                raise ValueError(f"Commit {commit} is not in series {adapter}/{series}")
+        build = entry.build
+        if build is None or build.state != "completed" or not build.md5:
+            state = build.state if build else "not built"
+            raise ValueError(f"Commit {entry.commit} of {adapter}/{series} is {state}")
+        version_id = self._find_version_by_md5(adapter, build.md5)
+        if version_id is None:
+            raise ValueError(f"No adapter version with md5 {build.md5} for {adapter}")
+        return entry.commit, version_id
+
+    def active_series(self, adapter: str) -> ActiveSeries | None:
+        """Return the series the adapter key serves, or None if no series build is deployed.
+
+        With several versions deployed, the most recently deployed one counts.
+        """
+        from ..schema import ActiveSeries
+
+        path = self.get_deployed_path(adapter)
+        if path is None:
+            return None
+        config = self._read_adapter_config(adapter, path.name)
+        commit, series = config.get("commit"), config.get("series")
+        if not commit or not series:
+            return None  # a one-off training
+        recorded = self._lineage.deployed(adapter)
+        if recorded is not None and recorded[1] == commit:
+            series = recorded[0]
+        return ActiveSeries(
+            adapter=adapter,
+            series=series,
+            commit=commit,
+            version_id=path.name,
+            md5=config.get("md5", "unknown"),
+        )
+
+    def prune_series_adapters(self, adapter: str, series: str) -> list[str]:
+        """Delete the adapter versions of a series' builds, except deployed ones.
+
+        The sets and build records stay; each build is marked pruned, with the md5 of its
+        weights, and can be rebuilt. Builds a series shares with a fork are pruned for both.
+
+        Returns:
+            The commits whose builds were pruned, oldest first.
+        """
+        info = self._lineage.series(adapter, series)
+        if info is None:
+            raise ValueError(f"Series not found: {adapter}/{series}")
+        pruned = []
+        for entry in info.sets:
+            build = entry.build
+            if build is None or build.state != "completed" or not build.md5:
+                continue
+            if self.is_deployed(adapter, build.md5):
+                continue
+            self._remove_build_weights(adapter, build.md5)
+            self._lineage.mark_pruned(adapter, entry.commit)
+            pruned.append(entry.commit)
+        self._lg.info("pruned series adapters", extra={"adapter": adapter, "series": series})
+        return pruned
+
+    def drop_series(self, adapter: str, series: str) -> list[str]:
+        """Delete a series with the sets, builds and adapter versions only it holds.
+
+        Sets and builds a series shares with another series stay. A queued build of the
+        series is removed. Returns the dropped commits, oldest first.
+
+        Raises:
+            ValueError: The series is active or has a deployed build, or a build of it is
+                running.
+        """
+        self.validate_key(adapter)
+        self.validate_key(series)
+        active = self.active_series(adapter)
+        if active is not None and active.series == series:
+            raise ValueError(f"Series {adapter}/{series} is deployed; deploy another first")
+        key = queue_key(adapter, series)
+        if self._queued_metadata(self.running_path, key) is not None:
+            raise ValueError(f"A build of {adapter}/{series} is running")
+        exclusive = self._lineage.exclusive_commits(adapter, series)
+        builds = [self._lineage.build(adapter, c) for c in exclusive]
+        md5s = [b.md5 for b in builds if b is not None and b.md5]
+        if any(self.is_deployed(adapter, md5) for md5 in md5s):
+            raise ValueError(f"A build of {adapter}/{series} is deployed; undeploy it first")
+
+        queued = self._queued_metadata(self.pending_path, key)
+        if queued is not None and queued.series == series:
+            (self.pending_path / f"{key}.yaml").unlink(missing_ok=True)
+        # Weights go last: if the lineage refuses (the series moved), its builds keep them
+        dropped = self._lineage.drop_series(adapter, series)
+        for md5 in md5s:
+            self._remove_build_weights(adapter, md5)
+        return dropped
+
+    def wipe_adapter(self, adapter: str) -> None:
+        """Delete everything of an adapter key: series, sets, builds, versions, deployments.
+
+        Queued manifests of the key are removed; completed and failed manifests stay as
+        the run archive.
+
+        Raises:
+            ValueError: A build of the key is running.
+        """
+        self.validate_key(adapter)
+        if self._queue_files(self.running_path, adapter):
+            raise ValueError(f"A build of {adapter} is running")
+        for path in self._queue_files(self.pending_path, adapter):
+            path.unlink(missing_ok=True)
+        if (self.adapters_path / adapter).exists():
+            self.remove_adapter(adapter)
+        self._lineage.wipe(adapter)
+
+    def _queue_files(self, queue_dir: Path, adapter: str) -> list[Path]:
+        """Queue files of an adapter key: its own and those of its series."""
+        own = queue_dir / f"{adapter}.yaml"
+        series = queue_dir.glob(f"{adapter}{SERIES_SEPARATOR}*.yaml")
+        return [own, *series] if own.exists() else list(series)
+
+    def _remove_build_weights(self, adapter: str, md5: str) -> None:
+        """Remove the adapter version with these weights, if the registry still has it."""
+        version_id = self._find_version_by_md5(adapter, md5)
+        if version_id is not None:
+            self.remove_adapter(adapter, version_id)
 
     def get_queue_status(self, adapter: str) -> QueueStatus | None:
         """Return the state of the latest submission for a queue key, or None.
@@ -883,19 +1052,22 @@ class FileStorage(Storage):
 
         version_id, md5 = self._resolve_deploy_version(key, version_id)
 
-        # Remove existing symlinks if policy is "replace"
+        # Link the new version before removing others, so the key is never left undeployed:
+        # create the versioned symlink deployed/{key}-{md5} under a hidden name, rename it
+        # into place (replacing an older link of the same name), then apply the policy.
+        symlink_path = self.deployed_path / f"{key}-{md5}"
+        tmp_link = self.deployed_path / f".{key}-{md5}.{uuid.uuid4().hex}.tmp"
+        tmp_link.symlink_to(Path("..") / "adapters" / key / version_id)
+        try:
+            os.replace(tmp_link, symlink_path)
+        finally:
+            tmp_link.unlink(missing_ok=True)
+
         if policy == "replace":
             for symlink in self._get_deployed_symlinks(key):
-                symlink.unlink()
-                self._lg.info("removed deployment", extra={"symlink": symlink.name})
-
-        # Create new versioned symlink: deployed/{key}-{md5}
-        symlink_path = self.deployed_path / f"{key}-{md5}"
-        if symlink_path.exists() or symlink_path.is_symlink():
-            symlink_path.unlink()
-
-        relative_target = Path("..") / "adapters" / key / version_id
-        symlink_path.symlink_to(relative_target)
+                if symlink != symlink_path:
+                    symlink.unlink()
+                    self._lg.info("removed deployment", extra={"symlink": symlink.name})
         self._lg.info(
             "deployed adapter",
             extra={"key": key, "version": version_id, "md5": md5, "policy": policy},
@@ -1139,17 +1311,20 @@ class FileStorage(Storage):
     def _get_latest_version(self, key: str) -> str | None:
         """Get latest version ID for an adapter.
 
-        Versions built by a series other than "main" are skipped: they are never deployed,
-        so "latest" (and deploying without a version) means the newest one that may be.
+        Versions built by a series other than "main" or the active one are skipped: such
+        a series is deployed only by commit (deploy_series), so "latest" (and deploying
+        without a version) means the newest version of a series the key serves.
         """
         key_path = self.adapters_path / key
         if not key_path.is_dir():
             return None
 
+        active = self.active_series(key)
+        served = {None, DEFAULT_SERIES, active.series if active else None}
         versions = sorted((p.name for p in key_path.iterdir() if p.is_dir()), reverse=True)
         for version_id in versions:
             series = self._read_adapter_config(key, version_id).get("series")
-            if series in (None, DEFAULT_SERIES):
+            if series in served:
                 return version_id
         return None
 

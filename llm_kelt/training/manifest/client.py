@@ -15,7 +15,7 @@ from appinfra import DotDict
 from appinfra.log import Logger
 
 from ..lineage import DEFAULT_SERIES, SeriesInfo
-from ..schema import Adapter, QueueStatus, SubmitResult
+from ..schema import ActiveSeries, Adapter, QueueStatus, SubmitResult
 from ..storage import Storage, queue_key
 from .loader import load_manifest as _load_manifest
 from .loader import save_manifest as _save_manifest
@@ -173,6 +173,7 @@ class Client:
         deployment_policy: Literal["skip", "add", "replace"] | None = None,
         templates: dict[str, str] | None = None,
         series: str | None = None,
+        annotations: dict[str, Any] | None = None,
     ) -> Manifest:
         """Create a new training manifest with inline data.
 
@@ -197,6 +198,8 @@ class Client:
                 the deployed one). Each build of a series trains from ``model`` on every
                 set of the series; the first submit fixes the model and configuration.
                 None: a one-off training on ``data`` alone.
+            annotations: Notes on the set (a JSON object of at most 64 KiB), kept with it in
+                the series; the first submit of a set stores them (see annotate_set).
 
         Returns:
             Manifest instance.
@@ -214,6 +217,7 @@ class Client:
             method=method,
             data=Data(format="inline", records=data, templates=dict(templates or {})),
             series=series,
+            annotations=dict(annotations or {}),
             deployment=deployment,
             source=source,
             parent=parent,
@@ -328,6 +332,89 @@ class Client:
         """
         self._storage.validate_key(new_series)
         return self._storage.lineage.fork(adapter, series, new_series, commit)
+
+    def deploy(self, adapter: str, series: str, commit: str | None = None) -> str:
+        """Deploy a series' build, making it the series the adapter key serves.
+
+        Replaces the key's deployed versions; the new one is linked before the old ones are
+        removed, so the key is never left undeployed.
+
+        Args:
+            adapter: Adapter key.
+            series: Series name.
+            commit: Commit of the series whose build to deploy (default: its current build).
+
+        Returns:
+            The deployed version id.
+
+        Raises:
+            ValueError: The series or commit does not exist, or the commit has no completed
+                build (never built, failed, or pruned).
+        """
+        return self._storage.deploy_series(adapter, series, commit)
+
+    def active(self, adapter: str) -> ActiveSeries | None:
+        """Get the series an adapter key serves: series, commit and version deployed.
+
+        Returns:
+            ActiveSeries, or None if nothing is deployed or the deployed version is a
+            one-off training.
+        """
+        return self._storage.active_series(adapter)
+
+    def annotate_build(self, adapter: str, commit: str, annotations: dict[str, Any]) -> None:
+        """Merge annotations into those of a commit's build, key by key.
+
+        Build annotations (e.g. a training gate's verdict and metrics, or "do not use")
+        survive pruning the build's weights and are reset when the commit is rebuilt.
+
+        Raises:
+            ValueError: The commit was never built, or the merged annotations are not a
+                JSON object of at most 64 KiB.
+        """
+        self._storage.lineage.annotate_build(adapter, commit, annotations)
+
+    def annotate_set(self, adapter: str, set_id: str, annotations: dict[str, Any]) -> None:
+        """Merge annotations into those of a training set, key by key.
+
+        Raises:
+            ValueError: No series of the adapter holds the set, or the merged annotations
+                are not a JSON object of at most 64 KiB.
+        """
+        self._storage.lineage.annotate_set(adapter, set_id, annotations)
+
+    def prune(self, adapter: str, series: str) -> list[str]:
+        """Delete the weights of a series' builds, except deployed ones; keep its sets.
+
+        Each build stays recorded as pruned, with its md5, and can be rebuilt. Builds a
+        series shares with a fork are pruned for both.
+
+        Returns:
+            The commits whose builds were pruned, oldest first.
+        """
+        return self._storage.prune_series_adapters(adapter, series)
+
+    def drop(self, adapter: str, series: str) -> list[str]:
+        """Delete a series: the sets, builds, weights and annotations only it holds.
+
+        The training data of its sets is gone afterwards; to keep it, prune instead.
+
+        Returns:
+            The dropped commits, oldest first.
+
+        Raises:
+            ValueError: The series is active or has a deployed build, or a build of it is
+                running.
+        """
+        return self._storage.drop_series(adapter, series)
+
+    def wipe(self, adapter: str) -> None:
+        """Delete everything of an adapter key: series, sets, builds, weights, deployments.
+
+        Raises:
+            ValueError: A build of the key is running.
+        """
+        self._storage.wipe_adapter(adapter)
 
     def list_pending(self) -> list[Manifest]:
         """List manifests waiting for training.

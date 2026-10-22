@@ -482,6 +482,8 @@ class DeployTool(_ConfigMixin, Tool):
         parser.add_argument(
             "--clear", "-c", action="store_true", help="Remove all deployments for adapter"
         )
+        parser.add_argument("--series", "-s", help="Deploy a build of this series")
+        parser.add_argument("--commit", help="Commit of --series (default: its current build)")
 
     def _resolve_version(
         self, storage: FileStorage, adapter: str, version: str | None
@@ -508,6 +510,18 @@ class DeployTool(_ConfigMixin, Tool):
 
         raise ValueError(f"Version '{version}' not found for adapter '{adapter}'")
 
+    def _deploy(self, storage: FileStorage, adapter: str) -> None:
+        """Deploy a series build (--series) or a version (--version, default: latest)."""
+        if self.args.series:
+            if self.args.version:
+                raise ValueError("Give --version or --series, not both")
+            storage.deploy_series(
+                adapter, self.args.series, self.args.commit, policy=self.args.policy
+            )
+            return
+        version_id = self._resolve_version(storage, adapter, self.args.version)
+        storage.deploy_adapter(adapter, version_id, policy=self.args.policy)
+
     def _print_deployed(self, storage: FileStorage, adapter: str) -> None:
         """Print currently deployed versions."""
         deployed = storage.list_deployed(adapter)
@@ -531,8 +545,7 @@ class DeployTool(_ConfigMixin, Tool):
                 print(f"\nCleared all deployments for {adapter}")
                 return 0
 
-            version_id = self._resolve_version(storage, adapter, self.args.version)
-            storage.deploy_adapter(adapter, version_id, policy=self.args.policy)
+            self._deploy(storage, adapter)
             self._print_deployed(storage, adapter)
             return 0
         except ValueError as e:
@@ -581,7 +594,7 @@ class AdaptersTool(_ConfigMixin, Tool):
 
 
 class SeriesTool(_ConfigMixin, Tool):
-    """Show or fork a training series; find the series of a set or adapter version."""
+    """Show, fork, annotate, prune or drop a training series; find a set's or version's."""
 
     def __init__(self, parent: Any = None) -> None:
         super().__init__(parent, ToolConfig(name="series", help_text="Show a training series"))
@@ -593,10 +606,24 @@ class SeriesTool(_ConfigMixin, Tool):
         parser.add_argument("--md5", help="Show the series and commit of an adapter version")
         parser.add_argument("--fork", metavar="NEW", help="Start series NEW at --commit")
         parser.add_argument("--commit", help="Commit to fork at (default: the series' tip)")
+        parser.add_argument(
+            "--annotate", metavar="JSON", help="Merge a JSON object into --commit's build or --set"
+        )
+        parser.add_argument(
+            "--prune", action="store_true", help="Delete the series' undeployed weights"
+        )
+        parser.add_argument(
+            "--drop", action="store_true", help="Delete the series with its sets and weights"
+        )
+        parser.add_argument(
+            "--wipe", action="store_true", help="Delete everything of the adapter key"
+        )
 
     def run(self, **kwargs: Any) -> int:
         try:
             storage = FileStorage(self.lg, self._registry_path())
+            if self.args.annotate:
+                return self._annotate(storage, json.loads(self.args.annotate))
             if self.args.set:
                 for adapter, series in storage.lineage.find_set(self.args.set):
                     print(f"{adapter}/{series}")
@@ -605,24 +632,46 @@ class SeriesTool(_ConfigMixin, Tool):
                 return self._print_version(storage, self.args.md5)
             if not self.args.adapter:
                 raise ValueError("Give an adapter key, --set or --md5")
-            if self.args.fork:
-                storage.validate_key(self.args.fork)
-                commit = storage.lineage.fork(
-                    self.args.adapter, self.args.series, self.args.fork, self.args.commit
-                )
-                print(f"Started {self.args.adapter}/{self.args.fork} at {commit[:12]}")
-                return 0
-            return self._show(storage)
-        except ValueError as e:
+            return self._run_on_adapter(storage)
+        except (ValueError, json.JSONDecodeError) as e:
             self.lg.error(str(e))
             return 1
+
+    def _run_on_adapter(self, storage: FileStorage) -> int:
+        adapter, series = self.args.adapter, self.args.series
+        if self.args.fork:
+            storage.validate_key(self.args.fork)
+            commit = storage.lineage.fork(adapter, series, self.args.fork, self.args.commit)
+            print(f"Started {adapter}/{self.args.fork} at {commit[:12]}")
+        elif self.args.prune:
+            pruned = storage.prune_series_adapters(adapter, series)
+            print(f"Pruned the builds of {len(pruned)} commits of {adapter}/{series}")
+        elif self.args.drop:
+            dropped = storage.drop_series(adapter, series)
+            print(f"Dropped {adapter}/{series} ({len(dropped)} commits only it held)")
+        elif self.args.wipe:
+            storage.wipe_adapter(adapter)
+            print(f"Wiped {adapter}")
+        else:
+            return self._show(storage)
+        return 0
+
+    def _annotate(self, storage: FileStorage, annotations: Any) -> int:
+        if not self.args.adapter or bool(self.args.commit) == bool(self.args.set):
+            raise ValueError("--annotate needs an adapter key and one of --commit or --set")
+        if self.args.commit:
+            storage.lineage.annotate_build(self.args.adapter, self.args.commit, annotations)
+        else:
+            storage.lineage.annotate_set(self.args.adapter, self.args.set, annotations)
+        return 0
 
     def _show(self, storage: FileStorage) -> int:
         info = storage.lineage.series(self.args.adapter, self.args.series)
         if info is None:
             print(f"No series {self.args.adapter}/{self.args.series}")
             return 1
-        self._print_series(info)
+        active = storage.active_series(self.args.adapter)
+        self._print_series(info, active.commit if active and active.series == info.series else None)
         return 0
 
     def _print_version(self, storage: FileStorage, md5: str) -> int:
@@ -636,16 +685,21 @@ class SeriesTool(_ConfigMixin, Tool):
         print(f"{manifest.adapter}/{manifest.series} at commit {manifest.commit}")
         return 0
 
-    def _print_series(self, info: SeriesInfo) -> None:
+    def _print_series(self, info: SeriesInfo, deployed: str | None) -> None:
         current = info.current_build
         print(f"\nSeries {info.adapter}/{info.series}: {info.recipe['method'].upper()}")
         print(f"  Base model: {info.base_model}")
         print(f"  Tip: {info.tip}, current build: {current.commit if current else '-'}")
+        print(f"  Active: {'yes, deployed ' + deployed if deployed else 'no'}")
         print("\n  Sets (oldest first):")
         for entry in info.sets:
             date = entry.submitted_at.isoformat(timespec="seconds") if entry.submitted_at else "-"
             build = entry.build.state if entry.build else "not built"
             print(f"    {entry.commit}  set {entry.set_id}  {date}  {build}")
+            if entry.annotations:
+                print(f"      set: {json.dumps(entry.annotations)}")
+            if entry.build and entry.build.annotations:
+                print(f"      build: {json.dumps(entry.build.annotations)}")
         print()
 
 

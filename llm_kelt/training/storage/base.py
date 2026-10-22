@@ -22,7 +22,7 @@ from ..lineage import DEFAULT_SERIES
 if TYPE_CHECKING:
     from ..lineage import Lineage
     from ..manifest.schema import Manifest
-    from ..schema import AdapterInfo, QueueStatus, RunResult, SubmitResult
+    from ..schema import ActiveSeries, AdapterInfo, QueueStatus, RunResult, SubmitResult
 
 
 class DupAdapterError(ValueError):
@@ -110,7 +110,8 @@ class Storage(ABC):
 
         Returns:
             SubmitResult with adapter key, timestamp, storage location and, for a series
-            manifest, the commit holding the set.
+            manifest, the commit holding the set and whether the submit started the
+            series.
 
         Raises:
             ValueError: If a manifest with the same queue key is already pending (for a
@@ -372,6 +373,76 @@ class Storage(ABC):
 
         Returns:
             Path to deployed adapter, or None if not deployed.
+        """
+
+    # =========================================================================
+    # Series Deployment and Retention
+    # =========================================================================
+
+    @abstractmethod
+    def deploy_series(
+        self,
+        adapter: str,
+        series: str,
+        commit: str | None = None,
+        *,
+        policy: Literal["add", "replace"] = "replace",
+    ) -> str:
+        """Deploy the adapter version built from a commit of a series.
+
+        Deploying makes the series the one the adapter key serves (see active_series).
+        "replace" links the new version before removing the others, so the key is never
+        left undeployed.
+
+        Args:
+            adapter: Adapter key.
+            series: Series name.
+            commit: Commit of the series (default: its current build).
+            policy: As for deploy_adapter.
+
+        Returns:
+            The deployed version id.
+
+        Raises:
+            ValueError: The series or commit does not exist, or the commit has no completed
+                build (never built, failed, or its weights were pruned).
+        """
+
+    @abstractmethod
+    def active_series(self, adapter: str) -> ActiveSeries | None:
+        """Return the series the adapter key serves: that of its deployed version.
+
+        None if nothing is deployed or the deployed version is a one-off training.
+        """
+
+    @abstractmethod
+    def prune_series_adapters(self, adapter: str, series: str) -> list[str]:
+        """Delete the adapter versions of a series' builds, except deployed ones.
+
+        Sets and build records stay; each build is marked pruned and can be rebuilt.
+
+        Returns:
+            The commits whose builds were pruned, oldest first.
+        """
+
+    @abstractmethod
+    def drop_series(self, adapter: str, series: str) -> list[str]:
+        """Delete a series with the sets, builds and adapter versions only it holds.
+
+        Returns:
+            The dropped commits, oldest first.
+
+        Raises:
+            ValueError: The series is active or has a deployed build, or a build of it is
+                running.
+        """
+
+    @abstractmethod
+    def wipe_adapter(self, adapter: str) -> None:
+        """Delete every series, set, build, version and deployment of an adapter key.
+
+        Raises:
+            ValueError: A build of the key is running.
         """
 
     # =========================================================================
