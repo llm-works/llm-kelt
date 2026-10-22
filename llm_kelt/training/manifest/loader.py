@@ -87,6 +87,13 @@ def _build_output_result(output_data: dict[str, Any]) -> RunResult:
     return RunResult(data)
 
 
+def _migrate_model_section(data: dict[str, Any], training_data: dict[str, Any]) -> None:
+    """Move an old-format ``model.base`` into ``training.requested_model``."""
+    model_data = data.get("model")
+    if model_data and "requested_model" not in training_data and model_data.get("base"):
+        training_data["requested_model"] = model_data["base"]
+
+
 def _build_manifest(data: dict[str, Any], source_path: Path | None = None) -> Manifest:
     """Build Manifest from validated dict.
 
@@ -99,12 +106,7 @@ def _build_manifest(data: dict[str, Any], source_path: Path | None = None) -> Ma
     # Training section may contain output (new format) or output at root (old format)
     training_data = dict(data.get("training", {}))
     output_data = training_data.pop("output", None) or data.get("output")
-
-    # Migrate old model section to training (backwards compatibility)
-    if "model" in data:
-        model_data = data["model"]
-        if "requested_model" not in training_data and model_data.get("base"):
-            training_data["requested_model"] = model_data["base"]
+    _migrate_model_section(data, training_data)
 
     output = _build_output_result(output_data) if output_data else None
     parent = Adapter(data["parent"]) if data.get("parent") else None
@@ -114,6 +116,8 @@ def _build_manifest(data: dict[str, Any], source_path: Path | None = None) -> Ma
         created_at=_parse_datetime(data.get("created_at")),
         method=data["method"],
         adapter=data["adapter"],
+        series=data.get("series"),
+        commit=data.get("commit"),
         source=Source(data.get("source", {})),
         parent=parent,
         lora=DotDict(data.get("lora", {})),
@@ -259,6 +263,9 @@ def _build_manifest_dict(manifest: Manifest) -> dict[str, Any]:
         "method": manifest.get("method"),
         "adapter": manifest.get("adapter"),
     }
+    for key in ("series", "commit"):
+        if manifest.get(key):
+            data[key] = manifest.get(key)
     _add_provenance_fields(data, manifest)
 
     lora_config, _ = _get_effective_config(manifest)

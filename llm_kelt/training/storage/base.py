@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    from ..lineage import Lineage
     from ..manifest.schema import Manifest
     from ..schema import AdapterInfo, QueueStatus, RunResult, SubmitResult
 
@@ -67,6 +68,11 @@ class Storage(ABC):
     can be stored abstractly.
     """
 
+    @property
+    @abstractmethod
+    def lineage(self) -> Lineage:
+        """Series of training sets per adapter key (see training/lineage.py)."""
+
     # =========================================================================
     # Manifest Operations
     # =========================================================================
@@ -75,14 +81,20 @@ class Storage(ABC):
     def submit_manifest(self, manifest: Manifest) -> SubmitResult:
         """Submit a manifest to the pending queue.
 
+        A manifest with ``series`` set adds its data as a new set of that series and
+        queues a build of the series' tip, unless one is already pending or the tip is
+        built. Submitting a set already in the series adds nothing.
+
         Args:
             manifest: Manifest to submit.
 
         Returns:
-            SubmitResult with adapter key, timestamp, and storage location.
+            SubmitResult with adapter key, timestamp, storage location and, for a series
+            manifest, the commit holding the set.
 
         Raises:
-            ValueError: If manifest with same adapter key already pending.
+            ValueError: If a manifest with the same adapter key is already pending (for a
+                series manifest: one of another series), or a series manifest is invalid.
         """
 
     @abstractmethod

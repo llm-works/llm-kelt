@@ -147,6 +147,11 @@ class Runner:
         errors = validate_manifest(manifest)
         if errors:
             raise ValueError(f"Invalid manifest: {'; '.join(errors)}")
+        if manifest.get("series") and (model_override or lora_profile):
+            raise ValueError(
+                "A series build trains with its series' base model and recipe; "
+                "model and LoRA profile overrides are not allowed"
+            )
 
         manifest.training["base_model"] = self._get_effective_model(manifest, model_override)
         if lora_profile is not None:
@@ -194,6 +199,10 @@ class Runner:
         """
         self._lg.info("loading manifest", extra={"path": str(manifest_path)})
         manifest = load_manifest(manifest_path)
+        if manifest.get("series"):
+            raise ValueError(
+                "A series manifest is built from the queue: submit it, then run pending"
+            )
         return self._train(manifest, skip_registration, model_override, lora_profile)
 
     def run_pending(

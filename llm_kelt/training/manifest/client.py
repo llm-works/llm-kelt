@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from appinfra import DotDict
 from appinfra.log import Logger
 
+from ..lineage import DEFAULT_SERIES, SeriesInfo
 from ..schema import Adapter, QueueStatus, SubmitResult
 from ..storage import Storage
 from .loader import load_manifest as _load_manifest
@@ -171,6 +172,7 @@ class Client:
         config: dict[str, Any] | None = None,
         deployment_policy: Literal["skip", "add", "replace"] | None = None,
         templates: dict[str, str] | None = None,
+        series: str | None = None,
     ) -> Manifest:
         """Create a new training manifest with inline data.
 
@@ -191,6 +193,10 @@ class Client:
             templates: Shared prompt templates for SFT records, keyed by
                 ``template_id(text)`` or ``template_id(text, length=32)``; records reference them as
                 ``{"template": id, "slots": {...}, "output": ...}``.
+            series: Series of the adapter that ``data`` is a new set of (``"main"`` is
+                the deployed one). Each build of a series trains from ``model`` on every
+                set of the series; the first submit fixes the model and configuration.
+                None: a one-off training on ``data`` alone.
 
         Returns:
             Manifest instance.
@@ -207,6 +213,7 @@ class Client:
             adapter=adapter,
             method=method,
             data=Data(format="inline", records=data, templates=dict(templates or {})),
+            series=series,
             deployment=deployment,
             source=source,
             parent=parent,
@@ -275,6 +282,30 @@ class Client:
             or error); None if the key was never submitted.
         """
         return self._storage.get_queue_status(adapter)
+
+    def series(self, adapter: str, series: str = DEFAULT_SERIES) -> SeriesInfo | None:
+        """Get the state of a series: tip, base model, recipe, sets with dates and builds.
+
+        Args:
+            adapter: Adapter key.
+            series: Series name.
+
+        Returns:
+            SeriesInfo (``current_build`` is the newest set with a completed build), or
+            None if the series does not exist.
+        """
+        return self._storage.lineage.series(adapter, series)
+
+    def find_set(self, set_id: str) -> list[tuple[str, str]]:
+        """Find the series containing a training set.
+
+        Args:
+            set_id: Set id (``SetEntry.set_id``).
+
+        Returns:
+            (adapter key, series) of every series whose history contains the set.
+        """
+        return self._storage.lineage.find_set(set_id)
 
     def list_pending(self) -> list[Manifest]:
         """List manifests waiting for training.

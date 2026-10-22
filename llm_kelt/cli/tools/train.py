@@ -12,6 +12,7 @@ from appinfra.app.tools import Tool, ToolConfig
 from llm_infer import compute_adapter_metadata
 from llm_infer.models import ModelResolver
 
+from ...training.lineage import DEFAULT_SERIES, SeriesInfo
 from ...training.lora import AdapterRegistry
 from ...training.lora import Config as LoraConfig
 from ...training.manifest.loader import load_manifest
@@ -579,6 +580,49 @@ class AdaptersTool(_ConfigMixin, Tool):
         return 0
 
 
+class SeriesTool(_ConfigMixin, Tool):
+    """Show a training series, or find the series containing a set."""
+
+    def __init__(self, parent: Any = None) -> None:
+        super().__init__(parent, ToolConfig(name="series", help_text="Show a training series"))
+
+    def add_args(self, parser) -> None:
+        parser.add_argument("adapter", nargs="?", help="Adapter key")
+        parser.add_argument("--series", "-s", default=DEFAULT_SERIES, help="Series name")
+        parser.add_argument("--set", help="Find the series containing this set id")
+
+    def run(self, **kwargs: Any) -> int:
+        try:
+            lineage = FileStorage(self.lg, self._registry_path()).lineage
+            if self.args.set:
+                for adapter, series in lineage.find_set(self.args.set):
+                    print(f"{adapter}/{series}")
+                return 0
+            if not self.args.adapter:
+                raise ValueError("Give an adapter key or --set")
+            info = lineage.series(self.args.adapter, self.args.series)
+        except ValueError as e:
+            self.lg.error(str(e))
+            return 1
+        if info is None:
+            print(f"No series {self.args.adapter}/{self.args.series}")
+            return 1
+        self._print_series(info)
+        return 0
+
+    def _print_series(self, info: SeriesInfo) -> None:
+        current = info.current_build
+        print(f"\nSeries {info.adapter}/{info.series}: {info.recipe['method'].upper()}")
+        print(f"  Base model: {info.base_model}")
+        print(f"  Tip: {info.tip[:12]}, current build: {current.commit[:12] if current else '-'}")
+        print("\n  Sets (oldest first):")
+        for entry in info.sets:
+            date = entry.submitted_at.isoformat(timespec="seconds") if entry.submitted_at else "-"
+            build = entry.build.state if entry.build else "not built"
+            print(f"    {entry.commit[:12]}  set {entry.set_id[:12]}  {date}  {build}")
+        print()
+
+
 class MergeTool(_ConfigMixin, Tool):
     """Merge LoRA adapter into base model weights."""
 
@@ -887,6 +931,7 @@ class TrainTool(Tool):
         self.add_tool(SftTool(self))
         self.add_tool(AdaptersTool(self))
         self.add_tool(DeployTool(self))
+        self.add_tool(SeriesTool(self))
         self.add_tool(MergeTool(self))
 
     def run(self, **kwargs: Any) -> int:

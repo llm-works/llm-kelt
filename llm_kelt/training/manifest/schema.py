@@ -60,6 +60,11 @@ class Manifest(FieldDict):
     method: Literal["dpo", "sft", "prompt"]
     # Training data specification
     data: Data
+    # Series of the adapter this manifest's data is a new set of (see training/lineage.py).
+    # Unset: a one-off training on this data alone.
+    series: str | None = None
+    # Lineage commit a series build trains, set when the build is claimed
+    commit: str | None = None
     # Deployment configuration
     deployment: Deployment | None = None
     # Schema version for forward compatibility

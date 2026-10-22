@@ -42,6 +42,10 @@ class SubmitResult(FieldDict):
     timestamp: datetime
     # Storage location (path for file, URI for DB, etc.)
     location: str
+    # Lineage commit holding the submitted set (series manifests only)
+    commit: str | None = None
+    # Whether the submit added the set; False when it was already in the series
+    created: bool = True
 
 
 # Training hyperparameter defaults
