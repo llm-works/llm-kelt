@@ -141,6 +141,14 @@ class TestAnnotations:
         [entry] = lineage.series("foo", "trial").sets
         assert entry.annotations == {"source": "batch 1"}
 
+    def test_rejected_submit_leaves_no_set_annotation(self, lineage: Lineage):
+        _submit(lineage, "main", _rec(1))
+        other_recipe = series_root("org/model-a", {"method": "dpo"})
+        with pytest.raises(ValueError, match="another recipe"):
+            _submit(lineage, "main", _rec(2), annotations={"n": "rejected"}, root=other_recipe)
+        _submit(lineage, "main", _rec(2), annotations={"n": "accepted"})
+        assert lineage.series("foo", "main").sets[1].annotations == {"n": "accepted"}
+
     def test_annotate_set_merges(self, lineage: Lineage):
         _submit(lineage, "main", _rec(1), annotations={"source": "batch 1"})
         set_id = lineage.series("foo", "main").sets[0].set_id

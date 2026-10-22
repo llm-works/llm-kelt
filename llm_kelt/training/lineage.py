@@ -191,8 +191,6 @@ class Lineage:
         """Body of submit(); the caller holds the registry's lock."""
         repo = self._store.repo(adapter)
         set_id = _put_set(repo, records, templates)
-        if annotations:
-            self._write_once(self._set_path(adapter, set_id), yaml.safe_dump(annotations))
         payload = canonical_json(root)
         ref = _REF_PREFIX + series
         while True:
@@ -202,11 +200,13 @@ class Lineage:
                 _check_root(adapter, series, history[-1].payload, payload)
                 existing = next((c.id for c in history if c.tree == set_id), None)
                 if existing is not None:
+                    self._annotate_new_set(adapter, set_id, annotations)
                     return Submission(existing, created=False, root=False)
             try:
                 commit = repo.commit(ref, set_id, payload if tip is None else b"")
             except RefConflictError:
                 continue  # another submit moved the series; check its history again
+            self._annotate_new_set(adapter, set_id, annotations)
             self._write_once(self._submitted_path(adapter, commit), datetime.now(UTC).isoformat())
             self._lg.info(
                 "added set to series",
@@ -481,6 +481,11 @@ class Lineage:
 
     def _set_path(self, adapter: str, set_id: str) -> Path:
         return self._records_path / adapter / "sets" / f"{set_id}.yaml"
+
+    def _annotate_new_set(self, adapter: str, set_id: str, annotations: dict[str, Any]) -> None:
+        """Store an accepted set's annotations unless it already has some."""
+        if annotations:
+            self._write_once(self._set_path(adapter, set_id), yaml.safe_dump(annotations))
 
     def _write_once(self, path: Path, text: str) -> None:
         """Write a record unless it exists; the first writer wins."""
