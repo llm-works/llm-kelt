@@ -192,7 +192,7 @@ class Client:
 
         description = (manifest.source.description if manifest.source else None) or "SFT adapter"
         deploy = get_deploy_setting(manifest)
-        result.series = manifest.series
+        result.series, result.commit = manifest.series, manifest.commit
         info = self.registry.register(
             training_result=result,
             key=manifest.adapter,

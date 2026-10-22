@@ -588,8 +588,9 @@ class FileStorage(Storage):
             "samples_trained": result.samples_trained,
             "duration_seconds": result.duration_seconds,
         }
-        if result.get("series"):
-            config["series"] = result.series
+        for lineage_key in ("series", "commit"):
+            if result.get(lineage_key):
+                config[lineage_key] = result.get(lineage_key)
         config_path = adapter_path / "config.yaml"
         with config_path.open("w", encoding="utf-8") as f:
             yaml.safe_dump(config, f)

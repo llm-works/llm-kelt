@@ -111,8 +111,9 @@ class RunResult(FieldDict):
     adapter: Adapter | None = None
     # Parent adapter this was trained from (for lineage tracking)
     parent: Adapter | None = None
-    # Series the run built (see training/lineage.py); None for a one-off run
+    # Series and lineage commit the run built (see training/lineage.py); None for a one-off run
     series: str | None = None
+    commit: str | None = None
     # Error message if status is "failed"
     error: str | None = None
 

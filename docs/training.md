@@ -408,8 +408,8 @@ for entry in info.sets:  # oldest first
 kelt.train.manifest.find_set(set_id)  # → [(adapter, series), ...]
 ```
 
-An adapter version's series and commit are in its completed manifest:
-`kelt.train.manifest.get_manifest(md5).series` / `.commit`.
+An adapter version's series and commit are in its `config.yaml` (`series`, `commit`) and in
+its completed manifest: `kelt.train.manifest.get_manifest(md5).series` / `.commit`.
 
 The CLI covers the same: `kelt train series coding-v1 [--series main]`,
 `kelt train series --set <set id>`, `kelt train series --md5 <md5>` and

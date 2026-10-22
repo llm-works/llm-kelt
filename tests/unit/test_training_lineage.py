@@ -215,8 +215,11 @@ class TestSeriesQueue:
             completed_at=now,
             adapter=Adapter(md5="bbb222", mtime="", path=str(source)),
             series="trial",
+            commit="c" * 64,
         )
-        storage.store_adapter(trial, "foo", "trial build", deploy=False)
+        info = storage.store_adapter(trial, "foo", "trial build", deploy=False)
+        config = storage.read_adapter_config("foo", info.version_id)
+        assert (config["series"], config["commit"]) == ("trial", "c" * 64)
 
         storage.deploy_adapter("foo")
         assert storage.get_deployed_version("foo") == "20000101-000000-aaa111"

@@ -184,7 +184,7 @@ class Client:
             result.adapter = Adapter(md5=meta.md5, mtime=meta.mtime, path=result.adapter.path)
 
         description = (manifest.source.description if manifest.source else None) or "DPO adapter"
-        result.series = manifest.series
+        result.series, result.commit = manifest.series, manifest.commit
         info = self.registry.register(
             training_result=result,
             key=manifest.adapter,
