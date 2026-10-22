@@ -361,6 +361,60 @@ kelt.train.manifest.find_adapter("a1b2c3d4e5f6")  # → Adapter | None
 kelt.train.manifest.get_latest_completed(adapter="coding-v1")
 ```
 
+### Series: training sets that accumulate
+
+A manifest with `series` set holds a new training *set* of that series, not a full training
+job. Each build of a series trains from the base model on every set submitted to it, oldest
+first, and writes a new version of the adapter; no weights carry over between builds.
+
+```python
+manifest = kelt.train.manifest.create(
+    adapter="coding-v1",
+    method="sft",
+    model="Qwen/Qwen2.5-7B-Instruct",
+    data=todays_records,
+    series="main",
+)
+result = kelt.train.manifest.submit(manifest)
+result.commit  # the lineage commit holding this set
+result.created  # False: the set was already in the series, nothing was added
+```
+
+- The history works like git. The adapter key is a repository in `<registry>/cas/` and a
+  series is a branch of it. Each set becomes a commit, identified by the hash of its records
+  (in any order) and templates. A set is in a series' history at most once, so resubmitting
+  it adds nothing.
+- A series' first submit fixes its base model and recipe (method, `lora`, `training`, method
+  config). A later submit with different ones is rejected; start a new series to change them.
+  The runner rejects `--model` and `--lora-profile` overrides for series builds.
+- A series has at most one pending build, of its tip: the runner trains whatever the tip is
+  when it claims the build. Resubmitting a set re-queues the tip if its last build failed.
+  Series `main` queues under the adapter key; another series under `<adapter>+<series>`
+  (`status(adapter, series=...)`), so series of one adapter build independently.
+- Only series `main` is deployed; other series need deployment policy `skip`, and their
+  builds are skipped when "latest version" is resolved (`deploy` without a version,
+  `get_adapter`). `parent` is not supported on series manifests.
+- `kelt.train.manifest.fork(adapter, series, new_series, commit=None)` starts a series at a
+  commit of another (default: its tip), sharing that history and its builds.
+- Completed series manifests record the `commit` they trained and keep no records; the sets
+  stay in the store.
+
+```python
+info = kelt.train.manifest.series("coding-v1")  # → SeriesInfo | None
+info.tip, info.base_model, info.recipe
+info.current_build  # newest SetEntry with a completed build
+for entry in info.sets:  # oldest first
+    entry.commit, entry.set_id, entry.submitted_at, entry.build  # build: state, md5, error
+kelt.train.manifest.find_set(set_id)  # → [(adapter, series), ...]
+```
+
+An adapter version's series and commit are in its `config.yaml` (`series`, `commit`) and in
+its completed manifest: `kelt.train.manifest.get_manifest(md5).series` / `.commit`.
+
+The CLI covers the same: `kelt train series coding-v1 [--series main]`,
+`kelt train series --set <set id>`, `kelt train series --md5 <md5>` and
+`kelt train series coding-v1 --fork trial [--commit <commit>]`.
+
 ### Continue-training from a parent adapter
 
 ```python
@@ -618,6 +672,10 @@ kelt train adapters                     # registered adapters
 kelt train adapters --deployed
 kelt train deploy coding-v1 --policy replace
 kelt train deploy coding-v1 --clear     # undeploy
+kelt train series coding-v1             # sets and builds of series main
+kelt train series --set <set id>        # series containing a set
+kelt train series --md5 <md5>           # series and commit of an adapter version
+kelt train series coding-v1 --fork trial
 kelt train merge coding-v1 --model … --output ./merged
 ```
 

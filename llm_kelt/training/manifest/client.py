@@ -14,8 +14,9 @@ from typing import TYPE_CHECKING, Any, Literal
 from appinfra import DotDict
 from appinfra.log import Logger
 
+from ..lineage import DEFAULT_SERIES, SeriesInfo
 from ..schema import Adapter, QueueStatus, SubmitResult
-from ..storage import Storage
+from ..storage import Storage, queue_key
 from .loader import load_manifest as _load_manifest
 from .loader import save_manifest as _save_manifest
 from .schema import Data, Deployment, Manifest, Source
@@ -171,6 +172,7 @@ class Client:
         config: dict[str, Any] | None = None,
         deployment_policy: Literal["skip", "add", "replace"] | None = None,
         templates: dict[str, str] | None = None,
+        series: str | None = None,
     ) -> Manifest:
         """Create a new training manifest with inline data.
 
@@ -191,6 +193,10 @@ class Client:
             templates: Shared prompt templates for SFT records, keyed by
                 ``template_id(text)`` or ``template_id(text, length=32)``; records reference them as
                 ``{"template": id, "slots": {...}, "output": ...}``.
+            series: Series of the adapter that ``data`` is a new set of (``"main"`` is
+                the deployed one). Each build of a series trains from ``model`` on every
+                set of the series; the first submit fixes the model and configuration.
+                None: a one-off training on ``data`` alone.
 
         Returns:
             Manifest instance.
@@ -207,6 +213,7 @@ class Client:
             adapter=adapter,
             method=method,
             data=Data(format="inline", records=data, templates=dict(templates or {})),
+            series=series,
             deployment=deployment,
             source=source,
             parent=parent,
@@ -261,20 +268,66 @@ class Client:
         self._lg.info("submitted manifest", extra={"adapter": manifest.adapter})
         return result
 
-    def status(self, adapter: str) -> QueueStatus | None:
+    def status(self, adapter: str, series: str | None = None) -> QueueStatus | None:
         """Get the state of the latest submission for an adapter key.
 
         Reads manifest metadata only, so it stays cheap with large training sets.
 
         Args:
             adapter: Adapter key.
+            series: Series other than "main", whose builds queue separately.
 
         Returns:
             QueueStatus with state ("pending", "running", "completed" or "failed"), the
             manifest's created_at, and for finished runs the output (adapter identity
             or error); None if the key was never submitted.
         """
-        return self._storage.get_queue_status(adapter)
+        return self._storage.get_queue_status(queue_key(adapter, series))
+
+    def series(self, adapter: str, series: str = DEFAULT_SERIES) -> SeriesInfo | None:
+        """Get the state of a series: tip, base model, recipe, sets with dates and builds.
+
+        Args:
+            adapter: Adapter key.
+            series: Series name.
+
+        Returns:
+            SeriesInfo (``current_build`` is the newest set with a completed build), or
+            None if the series does not exist.
+        """
+        return self._storage.lineage.series(adapter, series)
+
+    def find_set(self, set_id: str) -> list[tuple[str, str]]:
+        """Find the series containing a training set.
+
+        Args:
+            set_id: Set id (``SetEntry.set_id``).
+
+        Returns:
+            (adapter key, series) of every series whose history contains the set.
+        """
+        return self._storage.lineage.find_set(set_id)
+
+    def fork(self, adapter: str, series: str, new_series: str, commit: str | None = None) -> str:
+        """Start a new series on a commit of an existing one.
+
+        The new series shares that history, including the builds of its commits; later
+        submits to either series do not affect the other.
+
+        Args:
+            adapter: Adapter key.
+            series: Series to fork.
+            new_series: Name of the new series.
+            commit: Commit of ``series`` to fork at (default: its tip).
+
+        Returns:
+            The commit the new series starts at.
+
+        Raises:
+            ValueError: ``series`` or ``commit`` not found, or ``new_series`` exists.
+        """
+        self._storage.validate_key(new_series)
+        return self._storage.lineage.fork(adapter, series, new_series, commit)
 
     def list_pending(self) -> list[Manifest]:
         """List manifests waiting for training.
@@ -296,28 +349,30 @@ class Client:
         """Validate adapter name has no path traversal characters."""
         self._storage.validate_key(adapter)
 
-    def get_pending(self, adapter: str) -> Manifest | None:
+    def get_pending(self, adapter: str, series: str | None = None) -> Manifest | None:
         """Get a pending manifest by adapter key.
 
         Args:
             adapter: Adapter key to look up.
+            series: Series other than "main", whose builds queue separately.
 
         Returns:
             Manifest or None if not found.
         """
-        return self._storage.get_pending_manifest(adapter)
+        return self._storage.get_pending_manifest(queue_key(adapter, series))
 
-    def remove_pending(self, adapter: str) -> None:
+    def remove_pending(self, adapter: str, series: str | None = None) -> None:
         """Remove a manifest from the pending queue.
 
         Args:
             adapter: Adapter key of manifest to remove.
+            series: Series other than "main", whose builds queue separately.
 
         Raises:
             FileNotFoundError: If manifest not in queue.
             ValueError: If adapter name contains path traversal characters.
         """
-        self._storage.remove_pending_manifest(adapter)
+        self._storage.remove_pending_manifest(queue_key(adapter, series))
         self._lg.info("removed from queue", extra={"adapter": adapter})
 
     def find_adapter(self, md5: str) -> Adapter | None:

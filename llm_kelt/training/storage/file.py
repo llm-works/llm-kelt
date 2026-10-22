@@ -19,16 +19,32 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
+from appinfra.cas import FileStore
 from appinfra.log import Logger
 
-from .base import Storage
+from ..lineage import DEFAULT_SERIES, Lineage, series_root
+from ..manifest.schema import Data, Manifest
+from .base import SERIES_SEPARATOR, Storage, queue_key
 
 # Pre-compiled regex for key validation (used on hot path)
 _KEY_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
 
 if TYPE_CHECKING:
-    from ..manifest.schema import Manifest
     from ..schema import AdapterInfo, QueueStatus, RunResult, SubmitResult
+
+
+def _series_root(manifest: Manifest) -> dict[str, Any]:
+    """Return the base model and recipe a series manifest trains with."""
+    training = {
+        k: v for k, v in manifest.training.items() if k not in ("requested_model", "base_model")
+    }
+    recipe = {
+        "method": manifest.method,
+        "lora": dict(manifest.lora),
+        "training": training,
+        "method_config": dict(manifest.method_config),
+    }
+    return series_root(str(manifest.training["requested_model"]), recipe)
 
 
 class FileStorage(Storage):
@@ -49,7 +65,9 @@ class FileStorage(Storage):
         ├── adapters/      # All adapters stored here
         │   └── {key}/{version_id}/
         ├── deployed/      # Symlinks to enabled adapters
-        └── work/          # Temporary training directories
+        ├── work/          # Temporary training directories
+        ├── cas/           # Training sets of series, one repository per adapter key
+        └── lineage/       # Submit dates and builds of series commits
     """
 
     def __init__(self, lg: Logger, base_path: str | Path) -> None:
@@ -68,6 +86,14 @@ class FileStorage(Storage):
         self.adapters_path = self.base_path / "adapters"
         self.deployed_path = self.base_path / "deployed"
         self.work_path = self.base_path / "work"
+        self._lineage = Lineage(
+            lg, FileStore(lg, self.base_path / "cas"), self.base_path / "lineage"
+        )
+
+    @property
+    def lineage(self) -> Lineage:
+        """Series of training sets per adapter key."""
+        return self._lineage
 
     # =========================================================================
     # Manifest Operations (ABC implementation)
@@ -80,27 +106,15 @@ class FileStorage(Storage):
         readers of pending/ never see a partial file and a concurrent submit for the same
         key fails instead of overwriting.
         """
-        from ..manifest.loader import save_manifest
         from ..schema import SubmitResult
 
+        if manifest.series:
+            return self._submit_series(manifest, manifest.series)
+
         self.validate_key(manifest.adapter)
-        self.pending_path.mkdir(parents=True, exist_ok=True)
-
         pending_file = self.pending_path / f"{manifest.adapter}.yaml"
-        if pending_file.exists():
+        if pending_file.exists() or not self._link_pending(manifest, pending_file):
             raise ValueError(f"Manifest already pending for adapter: {manifest.adapter}")
-
-        tmp_file = self.pending_path / f".{manifest.adapter}.{uuid.uuid4().hex}.tmp"
-        try:
-            save_manifest(manifest, tmp_file)
-            try:
-                os.link(tmp_file, pending_file)
-            except FileExistsError:
-                raise ValueError(
-                    f"Manifest already pending for adapter: {manifest.adapter}"
-                ) from None
-        finally:
-            tmp_file.unlink(missing_ok=True)
         self._lg.info("submitted manifest", extra={"adapter": manifest.adapter})
 
         return SubmitResult(
@@ -109,11 +123,26 @@ class FileStorage(Storage):
             location=str(pending_file),
         )
 
+    def _link_pending(self, manifest: Manifest, pending_file: Path) -> bool:
+        """Write a manifest to pending_file unless it exists; False if it does."""
+        from ..manifest.loader import save_manifest
+
+        self.pending_path.mkdir(parents=True, exist_ok=True)
+        tmp_file = self.pending_path / f".{manifest.adapter}.{uuid.uuid4().hex}.tmp"
+        try:
+            save_manifest(manifest, tmp_file)
+            os.link(tmp_file, pending_file)
+        except FileExistsError:
+            return False
+        finally:
+            tmp_file.unlink(missing_ok=True)
+        return True
+
     def get_pending_manifest(self, adapter: str) -> Manifest | None:
-        """Get a pending manifest by adapter key."""
+        """Get a pending manifest by queue key."""
         from ..manifest.loader import load_manifest
 
-        self.validate_key(adapter)
+        self.validate_queue_key(adapter)
         pending_file = self.pending_path / f"{adapter}.yaml"
         if not pending_file.exists():
             return None
@@ -150,7 +179,7 @@ class FileStorage(Storage):
 
     def remove_pending_manifest(self, adapter: str) -> None:
         """Remove a manifest from pending queue."""
-        self.validate_key(adapter)
+        self.validate_queue_key(adapter)
         pending_file = self.pending_path / f"{adapter}.yaml"
         if not pending_file.exists():
             raise FileNotFoundError(f"Manifest not found: {adapter}")
@@ -170,7 +199,7 @@ class FileStorage(Storage):
         """
         from ..manifest.loader import load_manifest
 
-        self.validate_key(adapter)
+        self.validate_queue_key(adapter)
         self.running_path.mkdir(parents=True, exist_ok=True)
         running_file = self.running_path / f"{adapter}.yaml"
         pending_file = self.pending_path / f"{adapter}.yaml"
@@ -182,6 +211,9 @@ class FileStorage(Storage):
         self._lg.info("claimed manifest", extra={"adapter": adapter})
 
         manifest = load_manifest(running_file)
+        if manifest.series:
+            self._resolve_series_build(manifest, manifest.series, running_file)
+            return manifest
         data_path = manifest.data.get("path")
         if manifest.data.format == "external" and data_path and not Path(data_path).is_absolute():
             manifest.data.path = str(self.pending_path / data_path)
@@ -194,7 +226,7 @@ class FileStorage(Storage):
         """
         from ..manifest.loader import load_manifest, save_manifest
 
-        self.validate_key(adapter)
+        self.validate_queue_key(adapter)
         self.failed_path.mkdir(parents=True, exist_ok=True)
         running_file = self.running_path / f"{adapter}.yaml"
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -210,6 +242,10 @@ class FileStorage(Storage):
             running_file.rename(failed_file)
             return failed_file
 
+        if manifest.commit:
+            self._lineage.record_build(
+                manifest.adapter, manifest.commit, "failed", error=result.error
+            )
         manifest.output = result
         failed_file = self.failed_path / f"{adapter}-{stamp}.yaml.gz"
         save_manifest(manifest, failed_file, compress=True)
@@ -217,13 +253,118 @@ class FileStorage(Storage):
         self._lg.info("failed manifest", extra={"adapter": adapter, "error": result.error})
         return failed_file
 
+    # =========================================================================
+    # Series (see training/lineage.py)
+    # =========================================================================
+
+    def _submit_series(self, manifest: Manifest, series: str) -> SubmitResult:
+        """Add a series manifest's data to its series and queue a build of the tip.
+
+        The queued manifest carries no data: the runner builds whatever the series' tip
+        is when it claims the build, so a submit while a build is pending queues nothing.
+        """
+        from ..schema import SubmitResult
+
+        self._check_series_manifest(manifest, series)
+        commit, created = self._lineage.submit(
+            manifest.adapter,
+            series,
+            self._read_records(manifest),
+            dict(manifest.data.get("templates") or {}),
+            _series_root(manifest),
+        )
+        pending_file = self.pending_path / f"{queue_key(manifest.adapter, series)}.yaml"
+        if self._needs_build(manifest.adapter, series):
+            queued = Manifest({**manifest, "data": Data(format="inline"), "commit": None})
+            self._link_pending(queued, pending_file)  # False: a build is already queued
+        return SubmitResult(
+            adapter=manifest.adapter,
+            timestamp=datetime.now(),
+            location=str(pending_file),
+            commit=commit,
+            created=created,
+        )
+
+    def _check_series_manifest(self, manifest: Manifest, series: str) -> None:
+        """Raise ValueError if a series manifest cannot be submitted."""
+        self.validate_key(manifest.adapter)
+        self.validate_key(series)
+        if not manifest.training.get("requested_model"):
+            raise ValueError("A series manifest requires a base model")
+        if manifest.get("parent") is not None:
+            raise ValueError("A series manifest cannot have a parent adapter")
+        policy = manifest.deployment.policy if manifest.deployment else "replace"
+        if series != DEFAULT_SERIES and policy != "skip":
+            raise ValueError(
+                f"Only series '{DEFAULT_SERIES}' is deployed; "
+                f"use deployment policy 'skip' for series '{series}'"
+            )
+        # Series "main" shares its queue key with one-off manifests of the adapter
+        queued = self._queued_metadata(self.pending_path, queue_key(manifest.adapter, series))
+        if queued is not None and queued.series != series:
+            raise ValueError(f"Manifest already pending for adapter: {manifest.adapter}")
+
+    def _queued_metadata(self, queue_dir: Path, key: str) -> Manifest | None:
+        """Return the metadata of the manifest queued under a key in a queue dir, or None."""
+        from ..manifest.loader import load_manifest_metadata
+
+        try:
+            return load_manifest_metadata(queue_dir / f"{key}.yaml")
+        except FileNotFoundError:
+            return None
+
+    def _read_records(self, manifest: Manifest) -> list[dict[str, Any]]:
+        """Return a manifest's records, inline or from its external JSONL file."""
+        data = manifest.data
+        if data.format == "inline":
+            records = list(data.records)
+        else:
+            if not data.path:
+                raise ValueError("External data requires a path")
+            path = Path(data.path)
+            if not path.is_absolute() and manifest.source_path is not None:
+                path = manifest.source_path.parent / path
+            lines = path.read_text(encoding="utf-8").splitlines()
+            records = [json.loads(line) for line in lines if line.strip()]
+        if not records:
+            raise ValueError("A series manifest requires at least one record")
+        return records
+
+    def _needs_build(self, adapter: str, series: str) -> bool:
+        """True unless the series' tip is built or being built."""
+        tip = self._lineage.tip(adapter, series)
+        build = self._lineage.build(adapter, tip) if tip else None
+        if build is not None and build.state == "completed":
+            return False
+        key = queue_key(adapter, series)
+        if self._queued_metadata(self.pending_path, key) is not None:
+            return False  # Already queued
+        running = self._queued_metadata(self.running_path, key)
+        return running is None or running.commit != tip
+
+    def _resolve_series_build(self, manifest: Manifest, series: str, running_file: Path) -> None:
+        """Pin a claimed series build to the series' tip and fill in its training data.
+
+        The running file records the commit, so a failed build is recorded against it.
+        """
+        from ..manifest.loader import save_manifest
+
+        commit = self._lineage.tip(manifest.adapter, series)
+        if commit is None:
+            raise ValueError(f"Series not found: {manifest.adapter}/{series}")
+        manifest.commit = commit
+        save_manifest(manifest, running_file)
+        records, templates, root = self._lineage.build_input(manifest.adapter, commit)
+        manifest.training["requested_model"] = root["base"]["model"]
+        manifest.data = Data(format="inline", records=records, templates=templates)
+
     def get_queue_status(self, adapter: str) -> QueueStatus | None:
-        """Return the state of the latest submission for an adapter key, or None.
+        """Return the state of the latest submission for a queue key, or None.
 
         Reads manifest metadata only (not training data). A submission still queued wins
         over finished ones; among finished ones the most recently written file wins.
         """
-        self.validate_key(adapter)
+        self.validate_queue_key(adapter)
         queued = [
             ("pending", self.pending_path / f"{adapter}.yaml"),
             ("running", self.running_path / f"{adapter}.yaml"),
@@ -251,7 +392,7 @@ class FileStorage(Storage):
         """Build a QueueStatus from a manifest file's metadata.
 
         Returns None if the file is gone (moved by a runner meanwhile) or, for a finished
-        file found by name prefix, belongs to another adapter key.
+        file found by name prefix, belongs to another queue key.
         """
         from ..manifest.loader import load_manifest_metadata
         from ..schema import QueueStatus
@@ -270,10 +411,13 @@ class FileStorage(Storage):
                 else None
             )
 
-        if manifest.adapter != adapter:
+        if queue_key(manifest.adapter, manifest.series) != adapter:
             return None
         return QueueStatus(
-            adapter=adapter, state=state, created_at=manifest.created_at, output=manifest.output
+            adapter=manifest.adapter,
+            state=state,
+            created_at=manifest.created_at,
+            output=manifest.output,
         )
 
     def _link_manifest_to_adapter(self, key: str, md5: str, manifest_file: Path) -> None:
@@ -303,8 +447,15 @@ class FileStorage(Storage):
                 "completing manifest without md5, using timestamp",
                 extra={"adapter": manifest.adapter},
             )
-        completed_file = self.completed_path / f"{manifest.adapter}-{suffix}.yaml.gz"
-        save_manifest(manifest, completed_file, compress=True)
+        key = queue_key(manifest.adapter, manifest.series)
+        completed_file = self.completed_path / f"{key}-{suffix}.yaml.gz"
+        if manifest.commit:
+            # A series build's sets stay in the lineage store, not in every completed manifest
+            stored = Manifest({**manifest, "data": Data(format="inline")})
+            save_manifest(stored, completed_file, compress=True)
+            self._lineage.record_build(manifest.adapter, manifest.commit, "completed", md5=md5)
+        else:
+            save_manifest(manifest, completed_file, compress=True)
 
         if md5:
             self._link_manifest_to_adapter(manifest.adapter, md5, completed_file)
@@ -440,6 +591,9 @@ class FileStorage(Storage):
             "samples_trained": result.samples_trained,
             "duration_seconds": result.duration_seconds,
         }
+        for lineage_key in ("series", "commit"):
+            if result.get(lineage_key):
+                config[lineage_key] = result.get(lineage_key)
         config_path = adapter_path / "config.yaml"
         with config_path.open("w", encoding="utf-8") as f:
             yaml.safe_dump(config, f)
@@ -854,7 +1008,7 @@ class FileStorage(Storage):
 
     def create_work_area(self, adapter: str, clean: bool = True) -> Path:
         """Create a temporary work area for training."""
-        self.validate_key(adapter)
+        self.validate_queue_key(adapter)
         work_dir = self.work_path / adapter
 
         if clean and work_dir.exists():
@@ -866,7 +1020,7 @@ class FileStorage(Storage):
 
     def cleanup_work_area(self, adapter: str) -> None:
         """Clean up a training work area."""
-        self.validate_key(adapter)
+        self.validate_queue_key(adapter)
         work_dir = self.work_path / adapter
         if work_dir.exists():
             shutil.rmtree(work_dir)
@@ -923,6 +1077,11 @@ class FileStorage(Storage):
                 f"Invalid key '{key}': must be alphanumeric with hyphens, underscores, or dots"
             )
 
+    def validate_queue_key(self, key: str) -> None:
+        """Validate a queue key: an adapter key, or ``<adapter>+<series>`` (see queue_key)."""
+        for part in key.split(SERIES_SEPARATOR, 1):
+            self.validate_key(part)
+
     # =========================================================================
     # Filesystem Helpers (not in ABC - for backwards compatibility)
     # =========================================================================
@@ -978,13 +1137,21 @@ class FileStorage(Storage):
     # =========================================================================
 
     def _get_latest_version(self, key: str) -> str | None:
-        """Get latest version ID for an adapter."""
+        """Get latest version ID for an adapter.
+
+        Versions built by a series other than "main" are skipped: they are never deployed,
+        so "latest" (and deploying without a version) means the newest one that may be.
+        """
         key_path = self.adapters_path / key
         if not key_path.is_dir():
             return None
 
-        versions = sorted(p.name for p in key_path.iterdir() if p.is_dir())
-        return versions[-1] if versions else None
+        versions = sorted((p.name for p in key_path.iterdir() if p.is_dir()), reverse=True)
+        for version_id in versions:
+            series = self._read_adapter_config(key, version_id).get("series")
+            if series in (None, DEFAULT_SERIES):
+                return version_id
+        return None
 
     def _read_adapter_config(self, key: str, version_id: str) -> dict[str, Any]:
         """Read config.yaml for an adapter version."""

@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reading manifest metadata only.
 - SFT, DPO and prompt tuning support Qwen3.5/Qwen3.8 and compressed-tensors checkpoints
   (dequantized at load). Models load with their saved class; LoRA targets default per family.
+- Training series: a manifest with `series` set adds its data as a set of that series; each
+  build retrains from the base model on all of the series' sets. Lookups via
+  `kelt.train.manifest.series()` / `find_set()` and `kelt train series`. See docs/training.md.
 
 ### Changed
 - **Breaking:** the `training` extra requires current releases: `transformers>=5.18`,

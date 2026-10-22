@@ -42,6 +42,10 @@ class SubmitResult(FieldDict):
     timestamp: datetime
     # Storage location (path for file, URI for DB, etc.)
     location: str
+    # Lineage commit holding the submitted set (series manifests only)
+    commit: str | None = None
+    # Whether the submit added the set; False when it was already in the series
+    created: bool = True
 
 
 # Training hyperparameter defaults
@@ -107,6 +111,9 @@ class RunResult(FieldDict):
     adapter: Adapter | None = None
     # Parent adapter this was trained from (for lineage tracking)
     parent: Adapter | None = None
+    # Series and lineage commit the run built (see training/lineage.py); None for a one-off run
+    series: str | None = None
+    commit: str | None = None
     # Error message if status is "failed"
     error: str | None = None
 

@@ -21,9 +21,9 @@ from llm_kelt.core.schema import _VERSION_TABLE_NAME
 # This is the Alembic Config object
 config = context.config
 
-# Create logger for migrations
-_log_config = LogConfig.from_params(level="info")
-_lg = LoggerFactory.create_root(_log_config)
+# SchemaManager runs alembic in the caller's process and passes its logger; only the
+# standalone alembic CLI, a process of its own, creates one.
+_lg = config.attributes.get("lg") or LoggerFactory.create_root(LogConfig.from_params(level="info"))
 
 
 def _get_database_url() -> str:

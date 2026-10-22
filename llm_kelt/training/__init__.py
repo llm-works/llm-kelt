@@ -16,6 +16,7 @@ Install training dependencies with: pip install llm-kelt[training]
 from .dpo import Client as DpoClient
 from .export import ExportResult, export_feedback_classifier, export_feedback_sft
 from .factory import Factory
+from .lineage import Build, SeriesInfo, SetEntry
 from .lora import AdapterInfo, AdapterRegistry
 from .lora import Config as LoraConfig
 from .manifest import Client, Data, Manifest, Source
@@ -58,6 +59,10 @@ __all__ = [
     "Manifest",
     "Source",
     "Data",
+    # Lineage
+    "SeriesInfo",
+    "SetEntry",
+    "Build",
     # Training functions (lazy-loaded, require 'training' extras)
     "train_lora",
     "train_dpo",

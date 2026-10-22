@@ -17,6 +17,7 @@ from alembic import command
 from alembic.config import Config as AlembicConfig
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from appinfra.log import LoggerFactory
 from sqlalchemy import text
 
 from .errors import SchemaVersionError
@@ -147,6 +148,7 @@ class SchemaManager:
         # Tell Alembic which schema + table to use for the version bookkeeping row.
         config.set_main_option("version_table_schema", self._schema_name)
         config.set_main_option("version_table", _VERSION_TABLE_NAME)
+        config.attributes["lg"] = LoggerFactory.derive(self._lg, "migration")
         return config
 
     def _get_head_version(self) -> str:

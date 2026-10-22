@@ -45,7 +45,7 @@ except ImportError:
         RESET,
         WARN,
     )
-from appinfra.log import create_root_lg
+from appinfra.log import Logger, create_root_lg
 
 from llm_kelt.conversation import (
     Config,
@@ -89,11 +89,10 @@ def demo_types():
     print(f"  {MUTED}As dict: {d}{RESET}")
 
 
-def demo_conversation():
+def demo_conversation(lg: Logger):
     """Demonstrate conversation management with token tracking."""
     print(f"\n{H2}▶ Conversation Management{RESET}")
 
-    lg = create_root_lg(level="warning")
     config = Config(max_tokens=200, compact_threshold=0.8, min_recent_messages=2)
     conv = Conversation(lg, config=config)
 
@@ -149,11 +148,9 @@ def demo_compaction(conv: Conversation):
         print(f"    [{role}] {preview}")
 
 
-def demo_storage():
+def demo_storage(lg: Logger):
     """Demonstrate file-based session persistence."""
     print(f"\n{H2}▶ Session Storage (File Backend){RESET}")
-
-    lg = create_root_lg(level="warning")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         storage = FileSessionStorage(lg, tmpdir)
@@ -198,7 +195,7 @@ def demo_storage():
         print(f"  {INFO}Remaining sessions:{RESET} {len(remaining)}")
 
 
-async def demo_llm_conversation():
+async def demo_llm_conversation(lg: Logger):
     """Demonstrate multi-turn LLM conversation with session persistence.
 
     Requires an LLM backend configured in etc/llm-kelt.yaml.
@@ -225,8 +222,6 @@ async def demo_llm_conversation():
     if not llm_config:
         print(f"  {MUTED}(Skipped: no llm section in config){RESET}")
         return
-
-    lg = create_root_lg(level="warning")
 
     try:
         llm_factory = LLMClientFactory(lg)
@@ -285,11 +280,12 @@ async def demo_llm_conversation():
 
 
 if __name__ == "__main__":
+    lg = create_root_lg(level="warning")
     demo_types()
-    conv = demo_conversation()
+    conv = demo_conversation(lg)
     demo_compaction(conv)
-    demo_storage()
-    asyncio.run(demo_llm_conversation())
+    demo_storage(lg)
+    asyncio.run(demo_llm_conversation(lg))
 
     print(f"\n{H1}{'=' * 60}")
     print("  Done!")
