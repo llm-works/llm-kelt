@@ -123,7 +123,30 @@ def get_quantization_config(
 _TRAINABLE_ARCH_SUFFIXES = ("ForCausalLM", "ForConditionalGeneration")
 
 
-def resolve_model_class(base_model: str) -> Any:
+def load_model_config(lg: Logger, base_model: str) -> Any:
+    """Load a checkpoint's transformers config for loading the model to train.
+
+    A compressed-tensors ``kv_cache_scheme`` is dropped. It quantizes the KV cache, which
+    training does not use, and applying it needs ``num_attention_heads`` on the top-level
+    config: multimodal configs keep it in ``text_config``, so the load fails
+    with "Cannot determine num_attention_heads from config". The checkpoint's config.json
+    is untouched, so inference still applies the scheme.
+    """
+    from transformers import AutoConfig
+
+    config = AutoConfig.from_pretrained(base_model, trust_remote_code=True)
+    quant = getattr(config, "quantization_config", None)
+    if (
+        isinstance(quant, dict)
+        and quant.get("quant_method") == "compressed-tensors"
+        and quant.get("kv_cache_scheme")
+    ):
+        config.quantization_config = {**quant, "kv_cache_scheme": None}
+        lg.info("dropped kv_cache_scheme for training", extra={"model": base_model})
+    return config
+
+
+def resolve_model_class(config: Any) -> Any:
     """Return the transformers class a checkpoint was saved with, else AutoModelForCausalLM.
 
     Multimodal checkpoints (e.g. Qwen3.5 ``*ForConditionalGeneration``) name their language
@@ -133,9 +156,8 @@ def resolve_model_class(base_model: str) -> Any:
     adapter's module names match what an inference server loads for the same checkpoint.
     """
     import transformers
-    from transformers import AutoConfig, AutoModelForCausalLM
+    from transformers import AutoModelForCausalLM
 
-    config = AutoConfig.from_pretrained(base_model, trust_remote_code=True)
     for arch in getattr(config, "architectures", None) or []:
         cls = getattr(transformers, arch, None)
         if cls is not None and arch.endswith(_TRAINABLE_ARCH_SUFFIXES):
@@ -169,10 +191,15 @@ def load_base_model(
         The loaded model. Use is_kbit_loaded() to decide on k-bit training preparation.
     """
     quant_config, _ = get_quantization_config(lg, base_model, quantize_override)
-    model_cls = resolve_model_class(base_model)
+    config = load_model_config(lg, base_model)
+    model_cls = resolve_model_class(config)
     # Only pass quantization_config if we're applying it - passing None overwrites
     # pre-quantized model configs and breaks transformers' to_dict() serialization
-    model_kwargs: dict[str, Any] = {"device_map": "auto", "trust_remote_code": True}
+    model_kwargs: dict[str, Any] = {
+        "config": config,
+        "device_map": "auto",
+        "trust_remote_code": True,
+    }
     if quant_config is not None:
         model_kwargs["quantization_config"] = quant_config
     elif dtype is not None:

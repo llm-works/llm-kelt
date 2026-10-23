@@ -21,31 +21,81 @@ def _write_config(path: Path, **fields) -> Path:
     return path
 
 
+def _model_class(lg, path: Path):
+    return model_mod.resolve_model_class(model_mod.load_model_config(lg, str(path)))
+
+
 class TestResolveModelClass:
-    def test_saved_conditional_generation_class(self, tmp_path: Path):
+    def test_saved_conditional_generation_class(self, tmp_path: Path, lg):
         path = _write_config(
             tmp_path / "m",
             model_type="qwen3_5",
             architectures=["Qwen3_5ForConditionalGeneration"],
         )
-        assert (
-            model_mod.resolve_model_class(str(path)) is transformers.Qwen3_5ForConditionalGeneration
-        )
+        assert _model_class(lg, path) is transformers.Qwen3_5ForConditionalGeneration
 
-    def test_saved_causal_lm_class(self, tmp_path: Path):
+    def test_saved_causal_lm_class(self, tmp_path: Path, lg):
         path = _write_config(tmp_path / "m", model_type="qwen2", architectures=["Qwen2ForCausalLM"])
-        assert model_mod.resolve_model_class(str(path)) is transformers.Qwen2ForCausalLM
+        assert _model_class(lg, path) is transformers.Qwen2ForCausalLM
 
     @pytest.mark.parametrize(
         "architectures",
         [None, ["Qwen2ForSequenceClassification"], ["SomeRemoteCodeForCausalLM"]],
     )
-    def test_falls_back_to_auto_causal_lm(self, tmp_path: Path, architectures):
+    def test_falls_back_to_auto_causal_lm(self, tmp_path: Path, lg, architectures):
         fields = {"model_type": "qwen2"}
         if architectures is not None:
             fields["architectures"] = architectures
         path = _write_config(tmp_path / "m", **fields)
-        assert model_mod.resolve_model_class(str(path)) is transformers.AutoModelForCausalLM
+        assert _model_class(lg, path) is transformers.AutoModelForCausalLM
+
+
+_KV_CACHE_SCHEME = {"num_bits": 8, "type": "float", "strategy": "tensor", "symmetric": True}
+
+
+class TestLoadModelConfig:
+    def test_drops_compressed_tensors_kv_cache_scheme(self, tmp_path: Path, lg):
+        path = _write_config(
+            tmp_path / "m",
+            model_type="qwen2",
+            quantization_config={
+                "quant_method": "compressed-tensors",
+                "format": "pack-quantized",
+                "kv_cache_scheme": _KV_CACHE_SCHEME,
+            },
+        )
+        quant = model_mod.load_model_config(lg, str(path)).quantization_config
+        assert quant["kv_cache_scheme"] is None
+        assert quant["format"] == "pack-quantized"
+        on_disk = json.loads((path / "config.json").read_text())
+        assert on_disk["quantization_config"]["kv_cache_scheme"] == _KV_CACHE_SCHEME
+
+    def test_keeps_other_formats(self, tmp_path: Path, lg):
+        quant = {"quant_method": "gptq", "bits": 4, "kv_cache_scheme": _KV_CACHE_SCHEME}
+        path = _write_config(tmp_path / "m", model_type="qwen2", quantization_config=quant)
+        assert model_mod.load_model_config(lg, str(path)).quantization_config == quant
+
+    def test_load_base_model_passes_the_loaded_config(self, tmp_path: Path, lg, monkeypatch):
+        path = _write_config(
+            tmp_path / "m",
+            model_type="qwen2",
+            quantization_config={
+                "quant_method": "compressed-tensors",
+                "kv_cache_scheme": _KV_CACHE_SCHEME,
+            },
+        )
+        captured: dict = {}
+
+        class _Model:
+            @classmethod
+            def from_pretrained(cls, *args, **kwargs):
+                captured.update(kwargs)
+                return cls()
+
+        monkeypatch.setattr(model_mod, "get_quantization_config", lambda *_: (None, False))
+        monkeypatch.setattr(model_mod, "resolve_model_class", lambda _config: _Model)
+        model_mod.load_base_model(lg, str(path), None)
+        assert captured["config"].quantization_config["kv_cache_scheme"] is None
 
 
 class TestQuantizationConfig:
