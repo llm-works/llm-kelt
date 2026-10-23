@@ -137,9 +137,8 @@ class Trainer:
             self.model = get_peft_model(self.model, peft_config)
 
         trainable, total = self.model.get_nb_trainable_parameters()
-        self._lg.info(
-            f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
-        )
+        pct = 100 * trainable / total if total > 0 else 0.0
+        self._lg.info(f"Trainable params: {trainable:,} / {total:,} ({pct:.2f}%)")
 
     def _load_model(self):
         """Load base model with auto-detected quantization and apply LoRA."""
