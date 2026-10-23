@@ -56,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transformers does, so DPO runs may get one more warmup step than before.
 - Training a model with bfloat16 weights no longer crashes in the fp16 grad scaler:
   a manifest that sets neither `fp16` nor `bf16` trains such models in bf16.
+- Compressed-tensors checkpoints with a quantized KV cache load for training; the
+  `kv_cache_scheme` is ignored at load, since training does not use it.
 
 ## [0.4.5] - 2026-09-07
 
