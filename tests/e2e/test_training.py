@@ -78,7 +78,7 @@ class TestLoraTraining:
 
 def _tokenized_train_dataset(logger, data_path: Path, model_path: Path, training_config, out: Path):
     """Build the SFTTrainer for a dataset (no training) and return (train_dataset, data_collator)."""
-    from llm_kelt.training.lora.trainer import Trainer
+    from llm_kelt.training.runtime.lora import Trainer
 
     trainer = Trainer(
         lg=logger,

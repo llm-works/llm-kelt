@@ -11,7 +11,7 @@ from appinfra import DotDict
 
 from llm_kelt.training import TRAINING_DEFAULTS, RunResult
 from llm_kelt.training.lora import Config as LoraConfig
-from llm_kelt.training.model import _apply_precision_settings, compute_warmup_steps
+from llm_kelt.training.runtime.model import _apply_precision_settings, compute_warmup_steps
 
 
 class TestLoraConfig:
@@ -118,8 +118,10 @@ class TestLoraFamilyDefaults:
 
     def test_unresolved_config_cannot_build_peft_config(self):
         pytest.importorskip("peft")
+        from llm_kelt.training.runtime.peft_config import lora_peft_config
+
         with pytest.raises(ValueError, match="resolve"):
-            LoraConfig().to_peft_config()
+            lora_peft_config(LoraConfig())
 
     def test_invalid_bias(self):
         """Test that invalid bias raises ValueError."""

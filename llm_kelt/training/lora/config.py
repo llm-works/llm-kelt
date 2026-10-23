@@ -6,10 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Literal
-
-if TYPE_CHECKING:
-    from peft import LoraConfig as PeftLoraConfig
+from typing import Literal
 
 # Default target modules for Qwen2.5 architecture
 QWEN_TARGET_MODULES = [
@@ -98,37 +95,4 @@ class Config:
             self,
             target_modules=list(self.target_modules) if self.target_modules else targets,
             exclude_modules=exclude if self.exclude_modules is None else self.exclude_modules,
-        )
-
-    def to_peft_config(self) -> PeftLoraConfig:
-        """Convert to PEFT LoraConfig for training.
-
-        Returns:
-            peft.LoraConfig instance ready for get_peft_model()
-
-        Raises:
-            ValueError: If target_modules is unset; call resolve() first.
-        """
-        from peft import LoraConfig as PeftLoraConfig
-        from peft import TaskType
-
-        if self.target_modules is None:
-            raise ValueError("target_modules is unset; resolve() the config for the model first")
-
-        task_type_map = {
-            "CAUSAL_LM": TaskType.CAUSAL_LM,
-            "SEQ_CLS": TaskType.SEQ_CLS,
-            "SEQ_2_SEQ_LM": TaskType.SEQ_2_SEQ_LM,
-            "TOKEN_CLS": TaskType.TOKEN_CLS,
-        }
-
-        return PeftLoraConfig(
-            r=self.r,
-            lora_alpha=self.lora_alpha,
-            lora_dropout=self.lora_dropout,
-            target_modules=self.target_modules,
-            exclude_modules=self.exclude_modules,
-            bias=self.bias,
-            task_type=task_type_map[self.task_type],
-            use_rslora=self.use_rslora,
         )

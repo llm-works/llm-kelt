@@ -14,12 +14,11 @@ from pathlib import Path
 from appinfra import DotDict
 from appinfra.log import Logger
 
-from ..lora import Config as LoraConfig
-from ..model import build_training_config, compute_warmup_steps
+from ..lora.config import Config as LoraConfig
 from ..schema import TRAINING_CONFIG_KEYS, Adapter, RunResult
 from ..stability import check_training_stability, log_stability_warnings
-
-DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+from .model import build_training_config, compute_warmup_steps
+from .peft_config import lora_peft_config
 
 
 def _to_chat_format(record: dict) -> dict:
@@ -71,7 +70,7 @@ class Trainer:
         lg: Logger,
         data_path: str | Path,
         output_dir: str | Path,
-        base_model: str = DEFAULT_BASE_MODEL,
+        base_model: str,
         lora_config: LoraConfig | None = None,
         training_config: DotDict | None = None,
         beta: float = 0.1,
@@ -134,7 +133,7 @@ class Trainer:
             self.model.set_adapter("default")  # Ensure default is active
         else:
             self.lora_config = self.lora_config.resolve(self.model.config.model_type)
-            peft_config = self.lora_config.to_peft_config()
+            peft_config = lora_peft_config(self.lora_config)
             self.model = get_peft_model(self.model, peft_config)
 
         trainable, total = self.model.get_nb_trainable_parameters()
@@ -147,7 +146,7 @@ class Trainer:
         import torch
         from peft import prepare_model_for_kbit_training
 
-        from ..model import is_kbit_loaded, load_base_model
+        from .model import is_kbit_loaded, load_base_model
 
         self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
@@ -395,7 +394,7 @@ def train_dpo(
     lg: Logger,
     data_path: str | Path,
     output_dir: str | Path,
-    base_model: str = DEFAULT_BASE_MODEL,
+    base_model: str,
     lora_config: LoraConfig | None = None,
     training_config: DotDict | None = None,
     beta: float = 0.1,
@@ -408,7 +407,7 @@ def train_dpo(
         lg: Logger instance.
         data_path: Path to JSONL file with {"prompt", "chosen", "rejected"} records.
         output_dir: Directory to save the trained adapter.
-        base_model: HuggingFace model ID. Defaults to Qwen2.5-7B-Instruct.
+        base_model: HuggingFace model ID or local path.
         lora_config: LoRA hyperparameters. Uses sensible defaults if not provided.
         training_config: Training hyperparameters. Uses sensible defaults if not provided.
         beta: DPO beta parameter (higher = more conservative).

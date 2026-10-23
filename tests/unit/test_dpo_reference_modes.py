@@ -18,7 +18,7 @@ class TestEnableImplicitReference:
 
     def _make_trainer(self, ref_model=None, parent=None):
         """Create a Trainer instance with mocked dependencies."""
-        from llm_kelt.training.dpo.trainer import Trainer
+        from llm_kelt.training.runtime.dpo import Trainer
 
         with patch.object(Trainer, "_init_state"):
             trainer = object.__new__(Trainer)

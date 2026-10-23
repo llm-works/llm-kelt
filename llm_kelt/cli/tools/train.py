@@ -18,6 +18,7 @@ from ...training.lora import Config as LoraConfig
 from ...training.manifest.loader import load_manifest
 from ...training.profiles import build_training_config, get_registry_path, load_default_profile
 from ...training.runner import Runner
+from ...training.runtime import load
 from ...training.schema import Adapter
 from ...training.storage import FileStorage, extract_md5, md5_matches
 
@@ -931,25 +932,21 @@ class MergeTool(_ConfigMixin, Tool):
         """Re-quantize a fp16 model to BNB 4-bit in place using layerwise quantization."""
         import tempfile
 
-        from ...training.merge import quantize_layerwise
-
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp) / "model"
-            quantize_layerwise(self.lg, model_path, tmp_path)
+            load("merge").quantize_layerwise(self.lg, model_path, tmp_path)
             self._replace_safetensors(model_path, tmp_path)
 
     def _do_merge(
         self, model_path: Path, adapter_path: Path, output_path: Path, dtype: Any
     ) -> bool:
         """Merge adapter into model. Returns True if layerwise merge was used."""
-        from ...training.merge import merge_layerwise
-
         # Use layerwise merge only for sharded BNB models (non-sharded fall back to standard)
         use_layerwise = self._is_bnb_model_path(model_path) and self._is_sharded_model(model_path)
 
         if use_layerwise:
             self.lg.info("using layerwise merge for BNB quantized model")
-            merge_layerwise(self.lg, model_path, adapter_path, output_path, dtype)
+            load("merge").merge_layerwise(self.lg, model_path, adapter_path, output_path, dtype)
         else:
             merged = self._load_and_merge(model_path, adapter_path, dtype)
             self.lg.info("saving merged model", extra={"output": str(output_path)})

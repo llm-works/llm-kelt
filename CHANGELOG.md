@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** the `training` extra requires current releases: `transformers>=5.18`,
   `trl>=1.14`, `peft>=0.21`, `torch>=2.13`, `accelerate>=1.15`, `datasets>=5.0`,
   `bitsandbytes>=0.50`. transformers 4.x is no longer supported.
+- **Breaking:** the trainers and all ML-stack code moved to `llm_kelt.training.runtime`
+  (`lora`, `dpo`, `prompt`, `model`, `dataset`, `merge`, `peft_config`), so type-checking
+  against the training API no longer analyses torch, transformers, peft, trl or datasets.
+  `Config.to_peft_config()` moved to `runtime.peft_config`; trainers require `base_model`.
 - LoRA `target_modules` defaults to the model family's set (resolved after loading) instead of
   a fixed Qwen2.5 list. A pre-quantized checkpoint always loads with its stored config, also
   with `quantize=False`.

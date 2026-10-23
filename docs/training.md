@@ -695,7 +695,7 @@ For deployment to systems that don't natively load LoRA:
 kelt train merge coding-v1 --model Qwen/Qwen2.5-7B-Instruct --output ./merged/ --dtype bfloat16
 ```
 
-Programmatically → `llm_kelt.training.merge` (`merge_lora_adapter(...)`). Produces a full
+Programmatically → `llm_kelt.training.runtime.merge` (`merge_layerwise(...)`). Produces a full
 checkpoint at `--output`. `--overwrite` replaces existing files.
 
 ## Stability detection

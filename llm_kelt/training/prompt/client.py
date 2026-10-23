@@ -15,6 +15,7 @@ from appinfra import DotDict
 from appinfra.log import Logger
 
 from ..manifest.schema import Manifest, get_deploy_setting
+from ..runtime import load
 from ..schema import RunResult
 from ..storage import Storage, queue_key
 
@@ -93,8 +94,6 @@ class Client:
         data_path: Path,
     ) -> RunResult:
         """Execute prompt tuning training."""
-        from .trainer import Trainer
-
         base_model = self._get_base_model(manifest)
         prompt_config = self._build_prompt_config(manifest.method_config)
 
@@ -107,7 +106,7 @@ class Client:
             },
         )
 
-        trainer = Trainer(
+        trainer = load("prompt").Trainer(
             lg=self._lg,
             data_path=data_path,
             output_dir=work_dir,
@@ -115,7 +114,7 @@ class Client:
             prompt_config=prompt_config,
             training_config=manifest.training,
         )
-        result = trainer.train()
+        result: RunResult = trainer.train()
 
         self._lg.info("training complete", extra={"duration_s": result.duration_seconds})
         return result

@@ -12,7 +12,7 @@ import pytest
 
 transformers = pytest.importorskip("transformers")
 
-from llm_kelt.training import model as model_mod  # noqa: E402
+from llm_kelt.training.runtime import model as model_mod  # noqa: E402
 
 
 def _write_config(path: Path, **fields) -> Path:

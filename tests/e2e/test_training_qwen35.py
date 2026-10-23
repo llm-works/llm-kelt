@@ -102,7 +102,7 @@ class TestQwen35Training:
     def test_sft(
         self, logger, qwen35_model: Path, tiny_qwen35_bf16: Path, train_config, tmp_path: Path
     ):
-        from llm_kelt.training.lora.trainer import Trainer
+        from llm_kelt.training.runtime.lora import Trainer
 
         trainer = Trainer(
             lg=logger,
@@ -123,7 +123,7 @@ class TestQwen35Training:
         assert (Path(result.adapter.path) / "adapter_model.safetensors").exists()
 
     def test_dpo(self, logger, qwen35_model: Path, train_config, tmp_path: Path):
-        from llm_kelt.training.dpo.trainer import Trainer
+        from llm_kelt.training.runtime.dpo import Trainer
 
         trainer = Trainer(
             lg=logger,
