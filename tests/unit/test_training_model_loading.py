@@ -75,6 +75,28 @@ class TestLoadModelConfig:
         path = _write_config(tmp_path / "m", model_type="qwen2", quantization_config=quant)
         assert model_mod.load_model_config(lg, str(path)).quantization_config == quant
 
+    def test_load_base_model_passes_the_loaded_config(self, tmp_path: Path, lg, monkeypatch):
+        path = _write_config(
+            tmp_path / "m",
+            model_type="qwen2",
+            quantization_config={
+                "quant_method": "compressed-tensors",
+                "kv_cache_scheme": _KV_CACHE_SCHEME,
+            },
+        )
+        captured: dict = {}
+
+        class _Model:
+            @classmethod
+            def from_pretrained(cls, *args, **kwargs):
+                captured.update(kwargs)
+                return cls()
+
+        monkeypatch.setattr(model_mod, "get_quantization_config", lambda *_: (None, False))
+        monkeypatch.setattr(model_mod, "resolve_model_class", lambda _config: _Model)
+        model_mod.load_base_model(lg, str(path), None)
+        assert captured["config"].quantization_config["kv_cache_scheme"] is None
+
 
 class TestQuantizationConfig:
     @pytest.mark.parametrize("override", [None, False, True])
