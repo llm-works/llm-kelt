@@ -15,6 +15,7 @@ from appinfra import DotDict
 from appinfra.log import Logger
 
 from ..manifest.schema import Manifest, get_deploy_setting
+from ..runtime import load
 from ..schema import RunResult
 from ..storage import Storage, queue_key
 
@@ -135,8 +136,6 @@ class Client:
         data_path: Path,
     ) -> RunResult:
         """Execute DPO training."""
-        from .trainer import train_dpo
-
         base_model: str | None = manifest.training.get("base_model")
         if not base_model:
             raise ValueError(
@@ -145,7 +144,7 @@ class Client:
             )
         self._log_training_start(manifest, base_model)
 
-        result = train_dpo(
+        result: RunResult = load("dpo").train_dpo(
             lg=self._lg,
             data_path=data_path,
             output_dir=work_dir,

@@ -16,13 +16,12 @@ from pathlib import Path
 from appinfra import DotDict
 from appinfra.log import Logger
 
-from ..model import build_training_config, compute_warmup_steps
+from ..prompt.config import Config as PromptConfig
 from ..schema import TRAINING_CONFIG_KEYS, Adapter, RunResult
-from ..sft.dataset import load_sft_dataset, require_chat_template
 from ..stability import check_training_stability, log_stability_warnings
-from .config import Config as PromptConfig
-
-DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+from .dataset import load_sft_dataset, require_chat_template
+from .model import build_training_config, compute_warmup_steps
+from .peft_config import prompt_peft_config
 
 
 class Trainer:
@@ -33,7 +32,7 @@ class Trainer:
         lg: Logger,
         data_path: str | Path,
         output_dir: str | Path,
-        base_model: str = DEFAULT_BASE_MODEL,
+        base_model: str,
         prompt_config: PromptConfig | None = None,
         training_config: DotDict | None = None,
         quantize: bool | None = None,
@@ -65,7 +64,7 @@ class Trainer:
         """Load base model and apply prompt tuning."""
         from peft import get_peft_model
 
-        from ..model import is_kbit_loaded, load_base_model
+        from .model import is_kbit_loaded, load_base_model
 
         self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
@@ -81,7 +80,7 @@ class Trainer:
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
 
-        peft_config = self.prompt_config.to_peft_config(self.base_model)
+        peft_config = prompt_peft_config(self.prompt_config, self.base_model)
         self.model = get_peft_model(self.model, peft_config)
         trainable, total = self.model.get_nb_trainable_parameters()
         pct = 100 * trainable / total if total > 0 else 0.0

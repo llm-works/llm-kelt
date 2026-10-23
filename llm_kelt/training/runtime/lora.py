@@ -13,13 +13,12 @@ from pathlib import Path
 from appinfra import DotDict
 from appinfra.log import Logger
 
-from ..model import build_training_config, compute_warmup_steps
+from ..lora.config import Config as LoraConfig
 from ..schema import TRAINING_CONFIG_KEYS, Adapter, RunResult
-from ..sft.dataset import load_sft_dataset, require_chat_template
 from ..stability import check_training_stability, log_stability_warnings
-from .config import Config as LoraConfig
-
-DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+from .dataset import load_sft_dataset, require_chat_template
+from .model import build_training_config, compute_warmup_steps
+from .peft_config import lora_peft_config
 
 
 class Trainer:
@@ -30,7 +29,7 @@ class Trainer:
         lg: Logger,
         data_path: str | Path,
         output_dir: str | Path,
-        base_model: str = DEFAULT_BASE_MODEL,
+        base_model: str,
         lora_config: LoraConfig | None = None,
         training_config: DotDict | None = None,
         quantize: bool | None = None,
@@ -64,7 +63,7 @@ class Trainer:
         from peft import get_peft_model
 
         self.lora_config = self.lora_config.resolve(self.model.config.model_type)
-        peft_config = self.lora_config.to_peft_config()
+        peft_config = lora_peft_config(self.lora_config)
         self.model = get_peft_model(self.model, peft_config)
         trainable, total = self.model.get_nb_trainable_parameters()
         pct = 100 * trainable / total if total > 0 else 0.0
@@ -74,7 +73,7 @@ class Trainer:
         """Load base model with auto-detected quantization and apply LoRA."""
         from peft import prepare_model_for_kbit_training
 
-        from ..model import is_kbit_loaded, load_base_model
+        from .model import is_kbit_loaded, load_base_model
 
         self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
@@ -234,7 +233,7 @@ def train_lora(
     lg: Logger,
     data_path: str | Path,
     output_dir: str | Path,
-    base_model: str = DEFAULT_BASE_MODEL,
+    base_model: str,
     lora_config: LoraConfig | None = None,
     training_config: DotDict | None = None,
     quantize: bool | None = None,
@@ -247,7 +246,7 @@ def train_lora(
         data_path: Path to JSONL file with {"instruction", "output", "input"?} records
             ("prompt" and "response" are accepted in place of "instruction" and "output").
         output_dir: Directory to save the trained adapter.
-        base_model: HuggingFace model ID. Defaults to Qwen2.5-7B-Instruct.
+        base_model: HuggingFace model ID or local path.
         lora_config: LoRA hyperparameters. Uses sensible defaults if not provided.
         training_config: Training hyperparameters. Uses sensible defaults if not provided.
         quantize: Force quantization on/off. None = auto-detect from model metadata.

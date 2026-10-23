@@ -9,9 +9,12 @@ Contains utilities for training data preparation and model fine-tuning:
 - sft: SFT training client
 - lora: LoRA/SFT training and adapter registry
 - schema: Training dataclasses (Adapter, RunResult)
+- runtime: the trainers and all code that imports the ML stack, loaded through runtime.load()
 
 Install training dependencies with: pip install llm-kelt[training]
 """
+
+from typing import Any
 
 from .dpo import Client as DpoClient
 from .export import ExportResult, export_feedback_classifier, export_feedback_sft
@@ -27,6 +30,7 @@ from .profiles import (
     load_default_profile,
 )
 from .runner import Runner
+from .runtime import load
 from .schema import (
     TRAINING_DEFAULTS,
     ActiveSeries,
@@ -79,14 +83,10 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
-    """Lazy import training functions that require optional dependencies."""
+def __getattr__(name: str) -> Any:
+    """train_lora and train_dpo, loaded on first use from the training runtime."""
     if name == "train_lora":
-        from .lora import train_lora
-
-        return train_lora
+        return load("lora").train_lora
     if name == "train_dpo":
-        from .dpo import train_dpo
-
-        return train_dpo
+        return load("dpo").train_dpo
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

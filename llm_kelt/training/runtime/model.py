@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 from appinfra import DotDict
 from llm_infer.models import get_model_metadata
 
-from .schema import TRAINING_DEFAULTS
+from ..schema import TRAINING_DEFAULTS
 
 if TYPE_CHECKING:
     from appinfra.log import Logger
@@ -293,7 +293,7 @@ def build_training_config(
     overrides: DotDict | dict | None = None,
 ) -> DotDict:
     """Build training config with model-aware defaults."""
-    from .profiles import get_model_size_profile
+    from ..profiles import get_model_size_profile
 
     overrides = dict(overrides) if overrides else {}
     profile_override = overrides.pop("lora_profile", None)

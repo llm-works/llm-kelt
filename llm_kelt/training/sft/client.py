@@ -18,6 +18,7 @@ from appinfra.log import Logger
 from ...core.export.jsonl import load_jsonl
 from ..manifest.schema import Manifest, get_deploy_setting
 from ..manifest.templates import render_records, validate_templates
+from ..runtime import load
 from ..schema import RunResult
 from ..storage import Storage, queue_key
 
@@ -154,15 +155,13 @@ class Client:
         data_path: Path,
     ) -> RunResult:
         """Execute SFT training."""
-        from ..lora.trainer import train_lora
-
         base_model = self._get_base_model(manifest)
         self._lg.info(
             "starting SFT training",
             extra={"adapter": manifest.adapter, "model": base_model},
         )
 
-        result = train_lora(
+        result: RunResult = load("lora").train_lora(
             lg=self._lg,
             data_path=data_path,
             output_dir=work_dir,

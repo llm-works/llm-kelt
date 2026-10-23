@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from llm_kelt.training.runtime.dataset import load_sft_dataset, to_prompt_completion
 from llm_kelt.training.schema import TRAINING_DEFAULTS
-from llm_kelt.training.sft.dataset import load_sft_dataset, to_prompt_completion
 
 
 def _turns(user: str, assistant: str) -> dict:
@@ -91,7 +91,7 @@ def test_completion_only_loss_defaults_off():
 def test_completion_only_loss_reaches_sft_config(lg, tmp_path: Path, override):
     """The trainer passes the configured (default: off) completion_only_loss to TRL."""
     pytest.importorskip("trl")
-    from llm_kelt.training.lora.trainer import Trainer
+    from llm_kelt.training.runtime.lora import Trainer
 
     overrides = {"lora_profile": "small"}
     if override is not None:
