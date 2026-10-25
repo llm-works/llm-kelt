@@ -224,7 +224,7 @@ depends_on = None
 
 
 def upgrade():
-    op.execute("CREATE TABLE upgrade_probe_{rev} (id integer)")
+    op.execute({sql!r})
 
 
 def downgrade():
@@ -232,14 +232,17 @@ def downgrade():
 """
 
 
-def _write_migrations(path: Path) -> Path:
-    """A migrations dir with kelt's env.py and two revisions, r1 -> r2."""
+def _write_migrations(path: Path, revisions: dict[str, str]) -> Path:
+    """A migrations dir with kelt's env.py and a chain of revisions, each running its SQL."""
     versions = path / "versions"
     versions.mkdir(parents=True)
     shutil.copy(Path(llm_kelt.__file__).parent / "migrations" / "env.py", path / "env.py")
     (path / "alembic.ini").write_text("[alembic]\nscript_location = %(here)s\n")
-    for rev, down in (("r1", "None"), ("r2", '"r1"')):
-        (versions / f"{rev}.py").write_text(_REVISION.format(rev=rev, down=down))
+    down = None
+    for rev, sql in revisions.items():
+        source = _REVISION.format(rev=rev, down=repr(down), sql=sql)
+        (versions / f"{rev}.py").write_text(source)
+        down = rev
     return path
 
 
@@ -274,7 +277,8 @@ class TestUpgrade:
         settings, so creating one fails the test.
         """
         engine = pg_with_tables.engine
-        migrations = _write_migrations(tmp_path / "migrations")
+        revisions = {"r1": "SELECT 1", "r2": "CREATE TABLE upgrade_probe_r2 (id integer)"}
+        migrations = _write_migrations(tmp_path / "migrations", revisions)
         manager = SchemaManager(
             logger, engine, migrations_path=migrations, schema_name=self._SCHEMA
         )
@@ -296,6 +300,35 @@ class TestUpgrade:
             assert "upgrade_probe_r2" in tables
         finally:
             monkeypatch.undo()
+            with engine.begin() as conn:
+                conn.execute(text(f'DROP SCHEMA IF EXISTS "{self._SCHEMA}" CASCADE'))
+
+    def test_failed_upgrade_rolls_back(self, logger, pg_with_tables, tmp_path):
+        """A revision failing mid-upgrade rolls back the revisions before it with it."""
+        engine = pg_with_tables.engine
+        revisions = {
+            "r1": "SELECT 1",
+            "r2": "CREATE TABLE upgrade_probe_r2 (id integer)",
+            "r3": "SELECT * FROM upgrade_probe_missing",
+        }
+        migrations = _write_migrations(tmp_path / "migrations", revisions)
+        manager = SchemaManager(
+            logger, engine, migrations_path=migrations, schema_name=self._SCHEMA
+        )
+        self._stamp(engine, "r1")
+
+        try:
+            with pytest.raises(ProgrammingError):
+                manager.ensure_schema()
+
+            with engine.connect() as conn:
+                tables = sqlalchemy.inspect(conn).get_table_names(schema=self._SCHEMA)
+                version = conn.execute(
+                    text(f'SELECT version_num FROM "{self._SCHEMA}"."{_VERSION_TABLE_NAME}"')
+                ).scalar()
+            assert "upgrade_probe_r2" not in tables
+            assert version == "r1"
+        finally:
             with engine.begin() as conn:
                 conn.execute(text(f'DROP SCHEMA IF EXISTS "{self._SCHEMA}" CASCADE'))
 
