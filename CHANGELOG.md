@@ -58,6 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a manifest that sets neither `fp16` nor `bf16` trains such models in bf16.
 - Compressed-tensors checkpoints with a quantized KV cache load for training; the
   `kv_cache_scheme` is ignored at load, since training does not use it.
+- Schema upgrades of an existing database run on the client's own database connection and
+  its configured settings, instead of a separate connection that could fail to connect.
 
 ## [0.4.5] - 2026-09-07
 

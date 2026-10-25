@@ -3,13 +3,17 @@
 
 """Tests for schema management and migrations."""
 
+import shutil
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 import pytest
+import sqlalchemy
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
+import llm_kelt
 from llm_kelt.core.errors import SchemaVersionError
 from llm_kelt.core.schema import _VERSION_TABLE_NAME, SchemaManager, SchemaState
 
@@ -208,6 +212,92 @@ class TestSchemaManager:
             finally:
                 holder_conn.execute(text(f"SELECT pg_advisory_unlock({_ADVISORY_LOCK_KEY})"))
                 holder_conn.commit()
+
+
+_REVISION = """\
+from alembic import op
+
+revision = "{rev}"
+down_revision = {down}
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    op.execute("CREATE TABLE upgrade_probe_{rev} (id integer)")
+
+
+def downgrade():
+    pass
+"""
+
+
+def _write_migrations(path: Path) -> Path:
+    """A migrations dir with kelt's env.py and two revisions, r1 -> r2."""
+    versions = path / "versions"
+    versions.mkdir(parents=True)
+    shutil.copy(Path(llm_kelt.__file__).parent / "migrations" / "env.py", path / "env.py")
+    (path / "alembic.ini").write_text("[alembic]\nscript_location = %(here)s\n")
+    for rev, down in (("r1", "None"), ("r2", '"r1"')):
+        (versions / f"{rev}.py").write_text(_REVISION.format(rev=rev, down=down))
+    return path
+
+
+@pytest.mark.xdist_group("schema")
+class TestUpgrade:
+    """Upgrades across a revision, through kelt's env.py."""
+
+    _SCHEMA = "kelt_upgrade_test"
+
+    def _stamp(self, engine, revision: str) -> None:
+        schema = self._SCHEMA
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+            conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+            conn.execute(
+                text(
+                    f'CREATE TABLE "{schema}"."{_VERSION_TABLE_NAME}" '
+                    f"(version_num VARCHAR(32) PRIMARY KEY)"
+                )
+            )
+            conn.execute(
+                text(f'INSERT INTO "{schema}"."{_VERSION_TABLE_NAME}" VALUES (:rev)'),
+                {"rev": revision},
+            )
+
+    def test_upgrade_runs_on_the_managers_engine(
+        self, logger, pg_with_tables, tmp_path, monkeypatch
+    ):
+        """The upgrade runs and commits on SchemaManager's engine.
+
+        A second engine built from a URL would not reproduce the manager's connection
+        settings, so creating one fails the test.
+        """
+        engine = pg_with_tables.engine
+        migrations = _write_migrations(tmp_path / "migrations")
+        manager = SchemaManager(
+            logger, engine, migrations_path=migrations, schema_name=self._SCHEMA
+        )
+        self._stamp(engine, "r1")
+
+        def no_engine(*args, **kwargs):
+            raise AssertionError("migration created an engine of its own")
+
+        try:
+            monkeypatch.setattr(sqlalchemy, "create_engine", no_engine)
+            assert manager.get_status().state == SchemaState.NEEDS_UPGRADE
+            status = manager.ensure_schema()
+            monkeypatch.undo()
+
+            assert status.state == SchemaState.CURRENT
+            assert status.current_version == "r2"
+            with engine.connect() as conn:
+                tables = sqlalchemy.inspect(conn).get_table_names(schema=self._SCHEMA)
+            assert "upgrade_probe_r2" in tables
+        finally:
+            monkeypatch.undo()
+            with engine.begin() as conn:
+                conn.execute(text(f'DROP SCHEMA IF EXISTS "{self._SCHEMA}" CASCADE'))
 
 
 @pytest.mark.xdist_group("schema")

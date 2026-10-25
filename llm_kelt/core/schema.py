@@ -144,7 +144,6 @@ class SchemaManager:
         alembic_ini = self._migrations_path / "alembic.ini"
         config = AlembicConfig(str(alembic_ini))
         config.set_main_option("script_location", str(self._migrations_path))
-        config.set_main_option("sqlalchemy.url", str(self._engine.url))
         # Tell Alembic which schema + table to use for the version bookkeeping row.
         config.set_main_option("version_table_schema", self._schema_name)
         config.set_main_option("version_table", _VERSION_TABLE_NAME)
@@ -318,10 +317,17 @@ class SchemaManager:
         )
 
     def _run_upgrade(self) -> None:
-        """Run Alembic upgrade to head."""
+        """Run Alembic upgrade to head.
+
+        The migrations run on a connection of this engine, passed to env.py, inside one
+        transaction committed here. env.py must not build its own engine from a URL: it
+        would not reproduce this engine's connection settings.
+        """
         self._lg.info("running schema upgrade to head")
         config = self._get_alembic_config()
-        command.upgrade(config, "head")
+        with self._engine.begin() as conn:
+            config.attributes["connection"] = conn
+            command.upgrade(config, "head")
         self._lg.info("schema upgrade complete")
 
     def _check_version_compatible(self, status: SchemaStatus) -> None:
