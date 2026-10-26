@@ -34,7 +34,7 @@ class QuantizationFormat(Enum):
 
     def table_name(self, dimensions: int) -> str:
         """Generate table name for this format and dimension."""
-        return f"embeddings_{dimensions}_{self.value}"
+        return f"kelt_embeddings_{dimensions}_{self.value}"
 
 
 @dataclass
@@ -80,8 +80,8 @@ class Config:
         format: Quantization format (F32, F16, I8, I4).
         dimensions: Vector dimensions.
         prefix: Optional table prefix for custom tables. Results in
-            embeddings_{prefix}_{dimensions}_{format}. If None, uses
-            embeddings_{dimensions}_{format}.
+            kelt_embeddings_{prefix}_{dimensions}_{format}. If None, uses
+            kelt_embeddings_{dimensions}_{format}.
         schema: Optional Postgres schema for the embedding table. When set,
             the ORM model is bound to this schema so every read, write, and
             CREATE names it explicitly instead of falling back through
@@ -110,8 +110,8 @@ class Config:
     def table_name(self) -> str:
         """Get unqualified table name for this config."""
         if self.prefix:
-            return f"embeddings_{self.prefix}_{self.dimensions}_{self.format.value}"
-        return f"embeddings_{self.dimensions}_{self.format.value}"
+            return f"kelt_embeddings_{self.prefix}_{self.dimensions}_{self.format.value}"
+        return f"kelt_embeddings_{self.dimensions}_{self.format.value}"
 
     @property
     def qualified_table_name(self) -> str:

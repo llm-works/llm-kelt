@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   weights, a series, or an adapter key. Replace deploys never leave the key undeployed.
 
 ### Changed
+- **Breaking:** every kelt table is renamed to `kelt_<name>` (`kelt_atomic_facts`,
+  `kelt_embeddings_384_f16`, ...), with its indexes, constraints and sequences. Schema
+  revision 007 applies the rename on the next `ensure_schema()`; all processes sharing a
+  schema must upgrade together, and SQL naming kelt tables must use the new names.
 - **Breaking:** the `training` extra requires current releases: `transformers>=5.18`,
   `trl>=1.14`, `peft>=0.21`, `torch>=2.13`, `accelerate>=1.15`, `datasets>=5.0`,
   `bitsandbytes>=0.50`. transformers 4.x is no longer supported.
@@ -60,6 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `kv_cache_scheme` is ignored at load, since training does not use it.
 - Schema upgrades of an existing database run on the client's own database connection and
   its configured settings, instead of a separate connection that could fail to connect.
+- `alembic downgrade` from the head revision runs the downgrade; it was skipped as
+  "already at head".
 
 ## [0.4.5] - 2026-09-07
 

@@ -95,7 +95,7 @@ def setup_facts(kelt: Client):
 
     print(
         f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(kelt)} -c "SELECT id, category, content '
-        f"FROM atomic_facts WHERE context_key='{kelt.context_key}' AND active=true;\""
+        f"FROM kelt_atomic_facts WHERE context_key='{kelt.context_key}' AND active=true;\""
     )
 
 
@@ -222,7 +222,7 @@ def demo_fact_management(kelt: Client):
 
     print(
         f'\n  {CMD}▸ Verify:{RESET} {psql_cmd(kelt)} -c "SELECT id, active, content '
-        f'FROM atomic_facts WHERE id={fact.id};"'
+        f'FROM kelt_atomic_facts WHERE id={fact.id};"'
     )
 
 

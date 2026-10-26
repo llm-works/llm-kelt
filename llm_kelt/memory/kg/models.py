@@ -75,7 +75,7 @@ class Entity(ScopedMixin, Base):
     Queries resolve hierarchically: scope + ancestors up to global.
     """
 
-    __tablename__ = "kg_entities"
+    __tablename__ = "kelt_kg_entities"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
@@ -97,12 +97,12 @@ class Entity(ScopedMixin, Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "scope_key", "canonical_name", "entity_type", name="uq_kg_entity_identity"
+            "scope_key", "canonical_name", "entity_type", name="uq_kelt_kg_entity_identity"
         ),
-        Index("ix_kg_entities_scope", "scope_key"),
-        Index("ix_kg_entities_scope_type", "scope_key", "entity_type"),
+        Index("ix_kelt_kg_entities_scope", "scope_key"),
+        Index("ix_kelt_kg_entities_scope_type", "scope_key", "entity_type"),
         Index(
-            "ix_kg_entities_scope_prefix",
+            "ix_kelt_kg_entities_scope_prefix",
             "scope_key",
             postgresql_ops={"scope_key": "varchar_pattern_ops"},
         ),
@@ -122,11 +122,11 @@ class EntityAlias(ScopedMixin, Base):
     up the hierarchy to global.
     """
 
-    __tablename__ = "kg_entity_aliases"
+    __tablename__ = "kelt_kg_entity_aliases"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     entity_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("kg_entities.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("kelt_kg_entities.id", ondelete="CASCADE"), nullable=False
     )
 
     alias: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -139,11 +139,11 @@ class EntityAlias(ScopedMixin, Base):
     entity: Mapped[Entity] = relationship(back_populates="aliases")
 
     __table_args__ = (
-        UniqueConstraint("scope_key", "alias_normalized", name="uq_kg_alias_identity"),
-        Index("ix_kg_entity_aliases_scope", "scope_key"),
-        Index("ix_kg_entity_aliases_entity", "entity_id"),
+        UniqueConstraint("scope_key", "alias_normalized", name="uq_kelt_kg_alias_identity"),
+        Index("ix_kelt_kg_entity_aliases_scope", "scope_key"),
+        Index("ix_kelt_kg_entity_aliases_entity", "entity_id"),
         Index(
-            "ix_kg_entity_aliases_scope_prefix",
+            "ix_kelt_kg_entity_aliases_scope_prefix",
             "scope_key",
             postgresql_ops={"scope_key": "varchar_pattern_ops"},
         ),
@@ -160,15 +160,15 @@ class EntityRelationship(ScopedMixin, Base):
     while "Tesla in_my_watchlist" is user-scoped.
     """
 
-    __tablename__ = "kg_entity_relationships"
+    __tablename__ = "kelt_kg_entity_relationships"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
     from_entity_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("kg_entities.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("kelt_kg_entities.id", ondelete="CASCADE"), nullable=False
     )
     to_entity_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("kg_entities.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("kelt_kg_entities.id", ondelete="CASCADE"), nullable=False
     )
     relationship_type: Mapped[str] = mapped_column(String(50), nullable=False)
 
@@ -187,14 +187,14 @@ class EntityRelationship(ScopedMixin, Base):
             "from_entity_id",
             "to_entity_id",
             "relationship_type",
-            name="uq_kg_entity_rel",
+            name="uq_kelt_kg_entity_rel",
         ),
-        Index("ix_kg_entity_relationships_scope", "scope_key"),
-        Index("ix_kg_entity_relationships_from", "from_entity_id"),
-        Index("ix_kg_entity_relationships_to", "to_entity_id"),
-        Index("ix_kg_entity_relationships_type", "from_entity_id", "relationship_type"),
+        Index("ix_kelt_kg_entity_relationships_scope", "scope_key"),
+        Index("ix_kelt_kg_entity_relationships_from", "from_entity_id"),
+        Index("ix_kelt_kg_entity_relationships_to", "to_entity_id"),
+        Index("ix_kelt_kg_entity_relationships_type", "from_entity_id", "relationship_type"),
         Index(
-            "ix_kg_entity_relationships_scope_prefix",
+            "ix_kelt_kg_entity_relationships_scope_prefix",
             "scope_key",
             postgresql_ops={"scope_key": "varchar_pattern_ops"},
         ),
@@ -215,13 +215,13 @@ class FactEntity(ScopedMixin, Base):
     relationship type (subject, object, mentioned, etc.).
     """
 
-    __tablename__ = "kg_fact_entities"
+    __tablename__ = "kelt_kg_fact_entities"
 
     fact_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), primary_key=True
+        BigInteger, ForeignKey("kelt_atomic_facts.id", ondelete="CASCADE"), primary_key=True
     )
     entity_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("kg_entities.id", ondelete="CASCADE"), primary_key=True
+        BigInteger, ForeignKey("kelt_kg_entities.id", ondelete="CASCADE"), primary_key=True
     )
 
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="subject")
@@ -234,11 +234,11 @@ class FactEntity(ScopedMixin, Base):
     entity: Mapped[Entity] = relationship(back_populates="fact_links")
 
     __table_args__ = (
-        Index("ix_kg_fact_entities_scope", "scope_key"),
-        Index("ix_kg_fact_entities_entity", "entity_id"),
-        Index("ix_kg_fact_entities_fact", "fact_id"),
+        Index("ix_kelt_kg_fact_entities_scope", "scope_key"),
+        Index("ix_kelt_kg_fact_entities_entity", "entity_id"),
+        Index("ix_kelt_kg_fact_entities_fact", "fact_id"),
         Index(
-            "ix_kg_fact_entities_scope_prefix",
+            "ix_kelt_kg_fact_entities_scope_prefix",
             "scope_key",
             postgresql_ops={"scope_key": "varchar_pattern_ops"},
         ),
@@ -263,11 +263,11 @@ class EntityRef(ScopedMixin, Base):
     - Build entity importance scores
     """
 
-    __tablename__ = "kg_entity_refs"
+    __tablename__ = "kelt_kg_entity_refs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     entity_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("kg_entities.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("kelt_kg_entities.id", ondelete="CASCADE"), nullable=False
     )
 
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -284,11 +284,11 @@ class EntityRef(ScopedMixin, Base):
     entity: Mapped[Entity] = relationship(back_populates="refs")
 
     __table_args__ = (
-        Index("ix_kg_entity_refs_scope", "scope_key"),
-        Index("ix_kg_entity_refs_entity", "entity_id"),
-        Index("ix_kg_entity_refs_entity_time", "entity_id", "ref_at"),
+        Index("ix_kelt_kg_entity_refs_scope", "scope_key"),
+        Index("ix_kelt_kg_entity_refs_entity", "entity_id"),
+        Index("ix_kelt_kg_entity_refs_entity_time", "entity_id", "ref_at"),
         Index(
-            "ix_kg_entity_refs_scope_prefix",
+            "ix_kelt_kg_entity_refs_scope_prefix",
             "scope_key",
             postgresql_ops={"scope_key": "varchar_pattern_ops"},
         ),

@@ -168,12 +168,12 @@ def record_sample_data(kelt: Client):
 
     print(
         f'\n  {CMD}▸ Verify feedback:{RESET} {psql_cmd(kelt)} -c "SELECT f.id, d.signal, d.strength '
-        f"FROM atomic_facts f JOIN atomic_feedback_details d ON f.id = d.fact_id "
+        f"FROM kelt_atomic_facts f JOIN kelt_atomic_feedback_details d ON f.id = d.fact_id "
         f"WHERE f.context_key='{kelt.context_key}' LIMIT 5;\""
     )
     print(
         f'  {CMD}▸ Verify preferences:{RESET} {psql_cmd(kelt)} -c "SELECT f.id, f.category, d.margin '
-        f"FROM atomic_facts f JOIN atomic_preference_details d ON f.id = d.fact_id "
+        f"FROM kelt_atomic_facts f JOIN kelt_atomic_preference_details d ON f.id = d.fact_id "
         f"WHERE f.context_key='{kelt.context_key}' LIMIT 5;\""
     )
 

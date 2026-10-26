@@ -407,7 +407,7 @@ def clean_tables(database, test_context):
 
         # Also clean dynamic embedding tables (not in Base.metadata)
         for table_name in existing_tables:
-            if table_name.startswith("embeddings_"):
+            if table_name.startswith("kelt_embeddings_"):
                 try:
                     session.execute(text(f"DELETE FROM {table_name}"))
                 except ProgrammingError:

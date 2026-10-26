@@ -23,11 +23,11 @@ class FactClient(Generic[T]):
     Base client for atomic memory collections.
 
     Handles the fact + details pattern where each record consists of:
-    - A base fact record (in atomic_facts)
-    - A details record (in atomic_*_details)
+    - A base fact record (in kelt_atomic_facts)
+    - A details record (in kelt_atomic_*_details)
 
     Subclasses must set:
-    - fact_type: The type string for atomic_facts.type
+    - fact_type: The type string for kelt_atomic_facts.type
     - details_model: The SQLAlchemy model for the details table
     - details_relationship: The relationship name on Fact model
     """

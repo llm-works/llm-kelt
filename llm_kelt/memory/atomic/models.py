@@ -4,7 +4,7 @@
 """Atomic memory model - fact-based knowledge storage.
 
 All knowledge is stored as facts with type-specific detail tables.
-Table names are prefixed with atomic_ for schema versioning.
+Table names are prefixed with kelt_atomic_.
 
 This is a unified model where every piece of knowledge is a "fact" with
 a type discriminator and optional type-specific details.
@@ -82,7 +82,7 @@ class Fact(Base):
         - preference: DPO training pairs
     """
 
-    __tablename__ = "atomic_facts"
+    __tablename__ = "kelt_atomic_facts"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     context_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
@@ -135,21 +135,21 @@ class Fact(Base):
     )
 
     __table_args__ = (
-        Index("idx_atomic_facts_context", "context_key"),
-        Index("idx_atomic_facts_context_type", "context_key", "type"),
-        Index("idx_atomic_facts_category", "category"),
-        Index("idx_atomic_facts_context_active", "context_key", "active"),
-        Index("idx_atomic_facts_created", "created_at"),
+        Index("idx_kelt_atomic_facts_context", "context_key"),
+        Index("idx_kelt_atomic_facts_context_type", "context_key", "type"),
+        Index("idx_kelt_atomic_facts_category", "category"),
+        Index("idx_kelt_atomic_facts_context_active", "context_key", "active"),
+        Index("idx_kelt_atomic_facts_created", "created_at"),
         # Prefix index for efficient LIKE queries (pattern matching)
         Index(
-            "idx_atomic_facts_context_prefix",
+            "idx_kelt_atomic_facts_context_prefix",
             "context_key",
             postgresql_ops={"context_key": "varchar_pattern_ops"},
         ),
         # Partial unique index for NULL context_key to ensure deduplication works
         # When context_key IS NULL, (type, content_hash) must be unique per fact type
         Index(
-            "uq_atomic_facts_null_context_hash",
+            "uq_kelt_atomic_facts_null_context_hash",
             "type",
             "content_hash",
             unique=True,
@@ -176,11 +176,11 @@ class SolutionDetails(Base):
     - answer: What the agent produced
     """
 
-    __tablename__ = "atomic_solution_details"
+    __tablename__ = "kelt_atomic_solution_details"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     fact_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("kelt_atomic_facts.id", ondelete="CASCADE"), nullable=False
     )
 
     # Problem (input)
@@ -201,9 +201,9 @@ class SolutionDetails(Base):
     fact: Mapped["Fact"] = relationship(back_populates="solution_details")
 
     __table_args__ = (
-        UniqueConstraint("fact_id", name="uq_atomic_solution_fact"),
-        Index("idx_atomic_solution_fact", "fact_id"),
-        Index("idx_atomic_solution_agent", "agent_name"),
+        UniqueConstraint("fact_id", name="uq_kelt_atomic_solution_fact"),
+        Index("idx_kelt_atomic_solution_fact", "fact_id"),
+        Index("idx_kelt_atomic_solution_agent", "agent_name"),
     )
 
     def __repr__(self) -> str:
@@ -217,11 +217,11 @@ class PredictionDetails(Base):
     Predictions have resolution criteria and outcome tracking for calibration.
     """
 
-    __tablename__ = "atomic_prediction_details"
+    __tablename__ = "kelt_atomic_prediction_details"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     fact_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("kelt_atomic_facts.id", ondelete="CASCADE"), nullable=False
     )
 
     # Resolution criteria
@@ -248,10 +248,10 @@ class PredictionDetails(Base):
     fact: Mapped["Fact"] = relationship(back_populates="prediction_details")
 
     __table_args__ = (
-        UniqueConstraint("fact_id", name="uq_atomic_prediction_fact"),
-        Index("idx_atomic_prediction_fact", "fact_id"),
-        Index("idx_atomic_prediction_status", "status"),
-        Index("idx_atomic_prediction_resolution_date", "resolution_date"),
+        UniqueConstraint("fact_id", name="uq_kelt_atomic_prediction_fact"),
+        Index("idx_kelt_atomic_prediction_fact", "fact_id"),
+        Index("idx_kelt_atomic_prediction_status", "status"),
+        Index("idx_kelt_atomic_prediction_resolution_date", "resolution_date"),
     )
 
     def __repr__(self) -> str:
@@ -263,15 +263,15 @@ class FeedbackDetails(Base):
     Details for feedback facts (explicit user signals on content).
     """
 
-    __tablename__ = "atomic_feedback_details"
+    __tablename__ = "kelt_atomic_feedback_details"
 
     # Keys
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     fact_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("kelt_atomic_facts.id", ondelete="CASCADE"), nullable=False
     )
     content_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("content.id"), nullable=True
+        BigInteger, ForeignKey("kelt_content.id"), nullable=True
     )
 
     # Core feedback
@@ -292,13 +292,13 @@ class FeedbackDetails(Base):
     fact: Mapped["Fact"] = relationship(back_populates="feedback_details")
 
     __table_args__ = (
-        UniqueConstraint("fact_id", name="uq_atomic_feedback_fact"),
-        Index("idx_atomic_feedback_fact", "fact_id"),
-        Index("idx_atomic_feedback_content", "content_id"),
-        Index("idx_atomic_feedback_signal", "signal"),
-        Index("idx_atomic_feedback_provider_type", "provider_type"),
-        Index("idx_atomic_feedback_provider", "provider"),
-        Index("idx_atomic_feedback_at", "feedback_at"),
+        UniqueConstraint("fact_id", name="uq_kelt_atomic_feedback_fact"),
+        Index("idx_kelt_atomic_feedback_fact", "fact_id"),
+        Index("idx_kelt_atomic_feedback_content", "content_id"),
+        Index("idx_kelt_atomic_feedback_signal", "signal"),
+        Index("idx_kelt_atomic_feedback_provider_type", "provider_type"),
+        Index("idx_kelt_atomic_feedback_provider", "provider"),
+        Index("idx_kelt_atomic_feedback_at", "feedback_at"),
     )
 
     def __repr__(self) -> str:
@@ -310,11 +310,11 @@ class DirectiveDetails(Base):
     Details for directive facts (standing instructions/rules).
     """
 
-    __tablename__ = "atomic_directive_details"
+    __tablename__ = "kelt_atomic_directive_details"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     fact_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("kelt_atomic_facts.id", ondelete="CASCADE"), nullable=False
     )
 
     directive_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -326,9 +326,9 @@ class DirectiveDetails(Base):
     fact: Mapped["Fact"] = relationship(back_populates="directive_details")
 
     __table_args__ = (
-        UniqueConstraint("fact_id", name="uq_atomic_directive_fact"),
-        Index("idx_atomic_directive_fact", "fact_id"),
-        Index("idx_atomic_directive_status", "status"),
+        UniqueConstraint("fact_id", name="uq_kelt_atomic_directive_fact"),
+        Index("idx_kelt_atomic_directive_fact", "fact_id"),
+        Index("idx_kelt_atomic_directive_status", "status"),
     )
 
     def __repr__(self) -> str:
@@ -340,14 +340,14 @@ class InteractionDetails(Base):
     Details for interaction facts (implicit behavioral signals).
     """
 
-    __tablename__ = "atomic_interaction_details"
+    __tablename__ = "kelt_atomic_interaction_details"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     fact_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("kelt_atomic_facts.id", ondelete="CASCADE"), nullable=False
     )
     content_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("content.id"), nullable=True
+        BigInteger, ForeignKey("kelt_content.id"), nullable=True
     )
 
     interaction_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -359,10 +359,10 @@ class InteractionDetails(Base):
     fact: Mapped["Fact"] = relationship(back_populates="interaction_details")
 
     __table_args__ = (
-        UniqueConstraint("fact_id", name="uq_atomic_interaction_fact"),
-        Index("idx_atomic_interaction_fact", "fact_id"),
-        Index("idx_atomic_interaction_content", "content_id"),
-        Index("idx_atomic_interaction_type", "interaction_type"),
+        UniqueConstraint("fact_id", name="uq_kelt_atomic_interaction_fact"),
+        Index("idx_kelt_atomic_interaction_fact", "fact_id"),
+        Index("idx_kelt_atomic_interaction_content", "content_id"),
+        Index("idx_kelt_atomic_interaction_type", "interaction_type"),
     )
 
     def __repr__(self) -> str:
@@ -374,11 +374,11 @@ class PreferenceDetails(Base):
     Details for preference facts (DPO training pairs).
     """
 
-    __tablename__ = "atomic_preference_details"
+    __tablename__ = "kelt_atomic_preference_details"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     fact_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("kelt_atomic_facts.id", ondelete="CASCADE"), nullable=False
     )
 
     context: Mapped[str] = mapped_column(Text, nullable=False)
@@ -391,8 +391,8 @@ class PreferenceDetails(Base):
     fact: Mapped["Fact"] = relationship(back_populates="preference_details")
 
     __table_args__ = (
-        UniqueConstraint("fact_id", name="uq_atomic_preference_fact"),
-        Index("idx_atomic_preference_fact", "fact_id"),
+        UniqueConstraint("fact_id", name="uq_kelt_atomic_preference_fact"),
+        Index("idx_kelt_atomic_preference_fact", "fact_id"),
     )
 
     def __repr__(self) -> str:
@@ -447,14 +447,14 @@ class FactRelationship(Base):
     normalized ID ordering so the unique constraint prevents duplicate edges.
     """
 
-    __tablename__ = "atomic_fact_relationships"
+    __tablename__ = "kelt_atomic_fact_relationships"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     source_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("kelt_atomic_facts.id", ondelete="CASCADE"), nullable=False
     )
     target_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("atomic_facts.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("kelt_atomic_facts.id", ondelete="CASCADE"), nullable=False
     )
     relationship_type: Mapped[str] = mapped_column(String(50), nullable=False)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -478,23 +478,23 @@ class FactRelationship(Base):
             "target_id",
             "relationship_type",
             "context_key",
-            name="uq_atomic_rel_src_tgt_type_ctx",
+            name="uq_kelt_atomic_rel_src_tgt_type_ctx",
         ),
         # Partial unique index for NULL context_key — PostgreSQL treats
         # NULL != NULL in regular unique constraints, so without this
         # duplicates slip through in the single-tenant (no context) case.
         Index(
-            "uq_atomic_rel_null_ctx",
+            "uq_kelt_atomic_rel_null_ctx",
             "source_id",
             "target_id",
             "relationship_type",
             unique=True,
             postgresql_where=text("context_key IS NULL"),
         ),
-        Index("idx_atomic_rel_source_type", "source_id", "relationship_type"),
-        Index("idx_atomic_rel_target_type", "target_id", "relationship_type"),
-        Index("idx_atomic_rel_context", "context_key"),
-        Index("idx_atomic_rel_type", "relationship_type"),
+        Index("idx_kelt_atomic_rel_source_type", "source_id", "relationship_type"),
+        Index("idx_kelt_atomic_rel_target_type", "target_id", "relationship_type"),
+        Index("idx_kelt_atomic_rel_context", "context_key"),
+        Index("idx_kelt_atomic_rel_type", "relationship_type"),
     )
 
     def __repr__(self) -> str:

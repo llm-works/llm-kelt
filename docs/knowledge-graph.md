@@ -326,5 +326,6 @@ kg.embeddings.search_similar(
 | "Both — facts *about* entities?" | Both — link with `kg.fact_entities.link()` |
 
 Nothing prevents you from using only atomic memory. The KG side is opt-in and adds tables
-(`kg_entities`, `kg_aliases`, `kg_refs`, `kg_relationships`, `kg_fact_entities`) that stay
+(`kelt_kg_entities`, `kelt_kg_entity_aliases`, `kelt_kg_entity_refs`,
+`kelt_kg_entity_relationships`, `kelt_kg_fact_entities`) that stay
 empty until you write to them.

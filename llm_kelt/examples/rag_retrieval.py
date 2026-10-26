@@ -117,7 +117,7 @@ def populate_facts(kelt: Client):
         print(f"    {INFO}[{cat}]{RESET} {len(facts)} facts")
 
     print(
-        f"\n  {CMD}▸ Verify:{RESET} {psql_cmd(kelt)} -c \"SELECT id, category, content FROM atomic_facts WHERE context_key='{kelt.context_key}' AND active=true;\""
+        f"\n  {CMD}▸ Verify:{RESET} {psql_cmd(kelt)} -c \"SELECT id, category, content FROM kelt_atomic_facts WHERE context_key='{kelt.context_key}' AND active=true;\""
     )
 
 
@@ -146,7 +146,7 @@ async def embed_facts(lg: Logger, kelt: Client, config: Config) -> EmbeddingClie
             print(f"  {WARN}⚠ {result.failed} failed{RESET}")
 
         print(
-            f"\n  {CMD}▸ Verify embeddings:{RESET} {psql_cmd(kelt)} -c \"SELECT id, content, (embedding IS NOT NULL) as has_embedding FROM atomic_facts WHERE context_key='{kelt.context_key}' LIMIT 5;\""
+            f"\n  {CMD}▸ Verify embeddings:{RESET} {psql_cmd(kelt)} -c \"SELECT id, content, (embedding IS NOT NULL) as has_embedding FROM kelt_atomic_facts WHERE context_key='{kelt.context_key}' LIMIT 5;\""
         )
         return embedder
     except (ConnectError, ConnectTimeout, OSError):
