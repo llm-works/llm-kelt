@@ -12,10 +12,12 @@ from urllib.parse import urlparse
 import pytest
 from appinfra.config import Config
 from appinfra.log import LogConfig, LoggerFactory
+from sqlalchemy.orm import DeclarativeBase
 
 from llm_kelt.client import Client
 from llm_kelt.core.database import Database
 from llm_kelt.core.models import Base
+from llm_kelt.core.schema import SchemaManager
 
 # Import atomic memory models so they're registered with Base for migrations
 from llm_kelt.memory.atomic import models as atomic_models  # noqa: F401
@@ -333,10 +335,19 @@ def pg_test_config(config):
     return db_cfg
 
 
+class _NoTables(DeclarativeBase):
+    """A base without tables: SchemaManager creates the schema, as it does for clients.
+
+    Tables created by create_all() before ensure_schema() would leave kelt tables without
+    a version table, which ensure_schema() refuses.
+    """
+
+
 @pytest.fixture(scope="session")
-def pg_with_tables(pg_migrate_factory):
-    """PG instance with schema isolation and migrations applied."""
-    with pg_migrate_factory(Base, extensions=["vector"]) as pg:
+def pg_with_tables(pg_migrate_factory, pg_test_logger):
+    """PG instance with schema isolation, set up at head by SchemaManager."""
+    with pg_migrate_factory(_NoTables, extensions=["vector"]) as pg:
+        SchemaManager(pg_test_logger, pg.engine, schema_name=pg.schema).ensure_schema()
         yield pg
 
 

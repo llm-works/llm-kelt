@@ -67,7 +67,7 @@ from httpx import ConnectError, ConnectTimeout
 from llm_infer.client import EmbeddingClient
 from llm_infer.client import Factory as LLMClientFactory
 
-from llm_kelt import Client, ClientFactory
+from llm_kelt import Client, ClientFactory, QuantizationFormat
 from llm_kelt.inference import (
     ContextBuilder,
     ContextQuery,
@@ -145,8 +145,10 @@ async def embed_facts(lg: Logger, kelt: Client, config: Config) -> EmbeddingClie
         if result.failed:
             print(f"  {WARN}⚠ {result.failed} failed{RESET}")
 
+        # Client stores embeddings in the f16 format, one table per dimension count
+        table = QuantizationFormat.F16.table_name(384)
         print(
-            f"\n  {CMD}▸ Verify embeddings:{RESET} {psql_cmd(kelt)} -c \"SELECT id, content, (embedding IS NOT NULL) as has_embedding FROM kelt_atomic_facts WHERE context_key='{kelt.context_key}' LIMIT 5;\""
+            f"\n  {CMD}▸ Verify embeddings:{RESET} {psql_cmd(kelt)} -c \"SELECT f.id, f.content FROM kelt_atomic_facts f JOIN {table} e ON e.entity_type = 'atomic.fact' AND e.entity_id = f.id::text WHERE f.context_key='{kelt.context_key}' LIMIT 5;\""
         )
         return embedder
     except (ConnectError, ConnectTimeout, OSError):

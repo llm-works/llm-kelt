@@ -43,7 +43,13 @@ from .compaction import (
 )
 from .factory import ConversationFactory
 from .session import Config, Conversation
-from .storage import FileSessionStorage, SessionStorage, SessionSummary, StoredSession
+from .storage import (
+    DbSessionStorage,
+    FileSessionStorage,
+    SessionStorage,
+    SessionSummary,
+    StoredSession,
+)
 from .tokens import Tokenizer, estimate_message_tokens, estimate_tokens
 from .types import Message, Role, ToolCall
 
@@ -67,6 +73,7 @@ __all__ = [
     "SessionStorage",
     "StoredSession",
     "SessionSummary",
+    "DbSessionStorage",
     "FileSessionStorage",
     # Tokens
     "Tokenizer",

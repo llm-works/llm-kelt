@@ -99,7 +99,6 @@ class Entity(ScopedMixin, Base):
         UniqueConstraint(
             "scope_key", "canonical_name", "entity_type", name="uq_kelt_kg_entity_identity"
         ),
-        Index("ix_kelt_kg_entities_scope", "scope_key"),
         Index("ix_kelt_kg_entities_scope_type", "scope_key", "entity_type"),
         Index(
             "ix_kelt_kg_entities_scope_prefix",
@@ -140,7 +139,6 @@ class EntityAlias(ScopedMixin, Base):
 
     __table_args__ = (
         UniqueConstraint("scope_key", "alias_normalized", name="uq_kelt_kg_alias_identity"),
-        Index("ix_kelt_kg_entity_aliases_scope", "scope_key"),
         Index("ix_kelt_kg_entity_aliases_entity", "entity_id"),
         Index(
             "ix_kelt_kg_entity_aliases_scope_prefix",
@@ -189,8 +187,6 @@ class EntityRelationship(ScopedMixin, Base):
             "relationship_type",
             name="uq_kelt_kg_entity_rel",
         ),
-        Index("ix_kelt_kg_entity_relationships_scope", "scope_key"),
-        Index("ix_kelt_kg_entity_relationships_from", "from_entity_id"),
         Index("ix_kelt_kg_entity_relationships_to", "to_entity_id"),
         Index("ix_kelt_kg_entity_relationships_type", "from_entity_id", "relationship_type"),
         Index(
@@ -236,7 +232,6 @@ class FactEntity(ScopedMixin, Base):
     __table_args__ = (
         Index("ix_kelt_kg_fact_entities_scope", "scope_key"),
         Index("ix_kelt_kg_fact_entities_entity", "entity_id"),
-        Index("ix_kelt_kg_fact_entities_fact", "fact_id"),
         Index(
             "ix_kelt_kg_fact_entities_scope_prefix",
             "scope_key",
@@ -285,7 +280,6 @@ class EntityRef(ScopedMixin, Base):
 
     __table_args__ = (
         Index("ix_kelt_kg_entity_refs_scope", "scope_key"),
-        Index("ix_kelt_kg_entity_refs_entity", "entity_id"),
         Index("ix_kelt_kg_entity_refs_entity_time", "entity_id", "ref_at"),
         Index(
             "ix_kelt_kg_entity_refs_scope_prefix",

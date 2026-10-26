@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `kelt_embeddings_384_f16`, ...), with its indexes, constraints and sequences. Schema
   revision 007 applies the rename on the next `ensure_schema()`; all processes sharing a
   schema must upgrade together, and SQL naming kelt tables must use the new names.
+- Revision 007 also changes `kelt_content.id` to bigint, the type of the columns referencing
+  it (rewriting the table under an exclusive lock), and drops 17 indexes, plus one per
+  embedding table, whose columns lead another index of the same table.
+- `ensure_schema()` raises `ConflictError` on a schema with kelt tables but no version table,
+  instead of using the tables. Create schemas with `ensure_schema()`, not `create_all()`.
+- Revisions before 005 are removed: new schemas are created only by `ensure_schema()`, and a
+  schema at an older revision must be recreated.
 - **Breaking:** the `training` extra requires current releases: `transformers>=5.18`,
   `trl>=1.14`, `peft>=0.21`, `torch>=2.13`, `accelerate>=1.15`, `datasets>=5.0`,
   `bitsandbytes>=0.50`. transformers 4.x is no longer supported.
@@ -66,6 +73,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its configured settings, instead of a separate connection that could fail to connect.
 - `alembic downgrade` from the head revision runs the downgrade; it was skipped as
   "already at head".
+- `ensure_schema()` creates `kelt_conv_sessions`, which it skipped unless
+  `llm_kelt.conversation.storage.db` was imported first; revision 007 adds it where missing.
+  `DbSessionStorage` is exported from `llm_kelt.conversation`.
+- Revision 006 drops `fact_embeddings` only in the schema being upgraded, not in `public`.
 
 ## [0.4.5] - 2026-09-07
 

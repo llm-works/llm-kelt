@@ -85,7 +85,7 @@ class Fact(Base):
     __tablename__ = "kelt_atomic_facts"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    context_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    context_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     type: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -135,7 +135,6 @@ class Fact(Base):
     )
 
     __table_args__ = (
-        Index("idx_kelt_atomic_facts_context", "context_key"),
         Index("idx_kelt_atomic_facts_context_type", "context_key", "type"),
         Index("idx_kelt_atomic_facts_category", "category"),
         Index("idx_kelt_atomic_facts_context_active", "context_key", "active"),
@@ -202,7 +201,6 @@ class SolutionDetails(Base):
 
     __table_args__ = (
         UniqueConstraint("fact_id", name="uq_kelt_atomic_solution_fact"),
-        Index("idx_kelt_atomic_solution_fact", "fact_id"),
         Index("idx_kelt_atomic_solution_agent", "agent_name"),
     )
 
@@ -249,7 +247,6 @@ class PredictionDetails(Base):
 
     __table_args__ = (
         UniqueConstraint("fact_id", name="uq_kelt_atomic_prediction_fact"),
-        Index("idx_kelt_atomic_prediction_fact", "fact_id"),
         Index("idx_kelt_atomic_prediction_status", "status"),
         Index("idx_kelt_atomic_prediction_resolution_date", "resolution_date"),
     )
@@ -293,7 +290,6 @@ class FeedbackDetails(Base):
 
     __table_args__ = (
         UniqueConstraint("fact_id", name="uq_kelt_atomic_feedback_fact"),
-        Index("idx_kelt_atomic_feedback_fact", "fact_id"),
         Index("idx_kelt_atomic_feedback_content", "content_id"),
         Index("idx_kelt_atomic_feedback_signal", "signal"),
         Index("idx_kelt_atomic_feedback_provider_type", "provider_type"),
@@ -327,7 +323,6 @@ class DirectiveDetails(Base):
 
     __table_args__ = (
         UniqueConstraint("fact_id", name="uq_kelt_atomic_directive_fact"),
-        Index("idx_kelt_atomic_directive_fact", "fact_id"),
         Index("idx_kelt_atomic_directive_status", "status"),
     )
 
@@ -360,7 +355,6 @@ class InteractionDetails(Base):
 
     __table_args__ = (
         UniqueConstraint("fact_id", name="uq_kelt_atomic_interaction_fact"),
-        Index("idx_kelt_atomic_interaction_fact", "fact_id"),
         Index("idx_kelt_atomic_interaction_content", "content_id"),
         Index("idx_kelt_atomic_interaction_type", "interaction_type"),
     )
@@ -390,10 +384,7 @@ class PreferenceDetails(Base):
     # Relationships
     fact: Mapped["Fact"] = relationship(back_populates="preference_details")
 
-    __table_args__ = (
-        UniqueConstraint("fact_id", name="uq_kelt_atomic_preference_fact"),
-        Index("idx_kelt_atomic_preference_fact", "fact_id"),
-    )
+    __table_args__ = (UniqueConstraint("fact_id", name="uq_kelt_atomic_preference_fact"),)
 
     def __repr__(self) -> str:
         return f"<PreferenceDetails(id={self.id})>"

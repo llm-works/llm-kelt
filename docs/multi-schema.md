@@ -189,8 +189,9 @@ status = kelt.get_schema_status()
 - `CURRENT` — matches library expectation.
 - `NEEDS_UPGRADE` — schema exists but is behind. `ENSURE` runs migrations to head; `VERIFY`
   raises.
-- `TOO_NEW` — schema is ahead of what this library version knows. Always raises. Fix by
-  upgrading the library.
+- `TOO_NEW` — schema revision is unknown to this library version. Always raises. A newer
+  schema needs a newer library; a schema older than the library's oldest revision must be
+  recreated.
 
 `get_schema_status()` on a SKIP client raises `RuntimeError` — SKIP means alembic modules
 weren't imported at all.

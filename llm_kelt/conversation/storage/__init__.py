@@ -8,11 +8,13 @@ for file-based and database-backed storage.
 """
 
 from .base import SessionStorage, SessionSummary, StoredSession
+from .db import DbSessionStorage
 from .file import FileSessionStorage
 
 __all__ = [
     "SessionStorage",
     "StoredSession",
     "SessionSummary",
+    "DbSessionStorage",
     "FileSessionStorage",
 ]

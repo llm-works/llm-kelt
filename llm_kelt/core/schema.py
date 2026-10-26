@@ -18,9 +18,9 @@ from alembic.config import Config as AlembicConfig
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from appinfra.log import LoggerFactory
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
-from .errors import SchemaVersionError
+from .errors import ConflictError, SchemaVersionError
 from .models import Base
 
 if TYPE_CHECKING:
@@ -38,6 +38,9 @@ _ADVISORY_LOCK_KEY = 7829104563218907456
 # Postgres schema (e.g. appware.monetize) can run its own alembic against the default
 # `alembic_version` row without colliding with kelt's revisions.
 _VERSION_TABLE_NAME = "alembic_version_kelt"
+
+# Every table kelt creates, from the models or at runtime, carries this prefix
+_TABLE_PREFIX = "kelt_"
 
 # Schema name validation pattern - must be a valid SQL identifier.
 # Must start with lowercase letter, can contain lowercase letters, numbers, and underscores.
@@ -208,7 +211,7 @@ class SchemaManager:
         elif self._is_version_in_chain(current_version):
             state = SchemaState.NEEDS_UPGRADE
         else:
-            # Version not in our chain - likely newer than library
+            # Not in the chain: newer than this library, or older than its oldest revision
             state = SchemaState.TOO_NEW
 
         return SchemaStatus(
@@ -284,6 +287,21 @@ class SchemaManager:
             for table in Base.metadata.tables.values():
                 table.schema = original_schemas.get(table.name)
 
+    def _check_no_kelt_tables(self, conn) -> None:
+        """Fail when the schema holds kelt tables, though it has no version table.
+
+        kelt creates its tables and the version table in one transaction, so kelt tables
+        without it are a broken schema, or tables kelt did not create. create_all() would
+        skip them and the bootstrap would use them as they are.
+        """
+        tables = inspect(conn).get_table_names(schema=self._schema_name)
+        kelt_tables = sorted(t for t in tables if t.startswith(_TABLE_PREFIX))
+        if kelt_tables:
+            raise ConflictError(
+                f"schema '{self._schema_name}' has kelt tables {kelt_tables} but no "
+                f"{_VERSION_TABLE_NAME} table; restore the version table or recreate the schema"
+            )
+
     def _bootstrap_fresh_database(self) -> None:
         """Bootstrap a fresh database with schema from models."""
         self._lg.debug("creating db schema...", extra={"schema": self._schema_name})
@@ -292,6 +310,7 @@ class SchemaManager:
         with self._engine.connect() as conn:
             self._set_search_path(conn)
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            self._check_no_kelt_tables(conn)
             self._create_tables_in_schema(conn)
             self._stamp_alembic_version(conn, head_version)
             conn.commit()
@@ -334,9 +353,10 @@ class SchemaManager:
         """Raise SchemaVersionError if schema is too new."""
         if status.state == SchemaState.TOO_NEW:
             raise SchemaVersionError(
-                f"Database schema version '{status.current_version}' is newer than "
-                f"library version '{status.head_version}'. Cannot downgrade. "
-                "Please upgrade the llm-kelt package."
+                f"Database schema version '{status.current_version}' is unknown to this "
+                f"library (head '{status.head_version}'). A newer schema needs a newer "
+                "llm-kelt package; a schema older than the library's oldest revision "
+                "cannot be upgraded and must be recreated."
             )
 
     def _apply_migration(self, status: SchemaStatus) -> None:
