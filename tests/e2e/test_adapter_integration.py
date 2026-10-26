@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.gpu
+
 # Skip if standalone mode (training-only tests)
 if os.environ.get("STANDALONE_TRAINING"):
     pytest.skip("Skipping integration tests in standalone mode", allow_module_level=True)

@@ -308,8 +308,8 @@ class TestCustomTablePrefix:
         client_b = factory.create(database.session, config_b)
 
         # Verify table names
-        assert config_a.table_name == "embeddings_tenant_a_3_f32"
-        assert config_b.table_name == "embeddings_tenant_b_3_f32"
+        assert config_a.table_name == "kelt_embeddings_tenant_a_3_f32"
+        assert config_b.table_name == "kelt_embeddings_tenant_b_3_f32"
 
         # Store in tenant_a
         client_a.store("doc", "1", [1.0, 0.0, 0.0], "test-model")
@@ -336,7 +336,7 @@ class TestCustomTablePrefix:
             format=QuantizationFormat.F16,
             dimensions=384,
         )
-        assert config.table_name == "embeddings_384_f16"
+        assert config.table_name == "kelt_embeddings_384_f16"
 
         config_with_prefix = Config(
             context_key="_test",
@@ -344,4 +344,4 @@ class TestCustomTablePrefix:
             dimensions=384,
             prefix="custom",
         )
-        assert config_with_prefix.table_name == "embeddings_custom_384_f16"
+        assert config_with_prefix.table_name == "kelt_embeddings_custom_384_f16"

@@ -23,7 +23,8 @@ dependencies = [
     "appinfra>=0.11.0",
 
     # Storage
-    "sqlalchemy>=2.0,<3.0",
+    # SQLAlchemy 2.1 made ScalarAttributeImpl private, which breaks sqlalchemy-utils
+    "sqlalchemy>=2.0,<2.1",
     "sqlalchemy-utils>=0.42,<1.0",
     "psycopg2-binary>=2.9,<3.0",
     "pgvector>=0.3,<1.0",
@@ -135,6 +136,7 @@ markers = [
     "e2e: marks tests as end-to-end tests (require full system)",
     "llm: marks tests as requiring a running LLM (deselect with '-m \"not llm\"')",
     "training: marks tests requiring training dependencies (torch, transformers, peft, trl)",
+    "gpu: marks tests using the local GPU; its memory is released after each test",
 ]
 
 [tool.coverage.run]

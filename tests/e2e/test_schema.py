@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
 import llm_kelt
-from llm_kelt.core.errors import SchemaVersionError
+from llm_kelt.core.errors import ConflictError, SchemaVersionError
 from llm_kelt.core.schema import _VERSION_TABLE_NAME, SchemaManager, SchemaState
 
 
@@ -151,7 +151,7 @@ class TestSchemaManager:
             status = manager.get_status()
             assert status.state == SchemaState.TOO_NEW
 
-            with pytest.raises(SchemaVersionError, match="newer than"):
+            with pytest.raises(SchemaVersionError, match="unknown to this library"):
                 manager.ensure_schema()
         finally:
             # Always restore correct version, even if test fails
@@ -331,6 +331,63 @@ class TestUpgrade:
         finally:
             with engine.begin() as conn:
                 conn.execute(text(f'DROP SCHEMA IF EXISTS "{self._SCHEMA}" CASCADE'))
+
+
+@pytest.mark.xdist_group("schema")
+class TestBootstrapExistingTables:
+    """Bootstrap of a schema that holds tables but no version table."""
+
+    _SCHEMA = "kelt_bootstrap_existing_test"
+
+    @pytest.fixture
+    def engine(self, pg_with_tables):
+        engine = pg_with_tables.engine
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{self._SCHEMA}" CASCADE'))
+            conn.execute(text(f'CREATE SCHEMA "{self._SCHEMA}"'))
+        yield engine
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{self._SCHEMA}" CASCADE'))
+
+    def _tables(self, engine) -> set[str]:
+        with engine.connect() as conn:
+            return set(sqlalchemy.inspect(conn).get_table_names(schema=self._SCHEMA))
+
+    def test_other_table_names_untouched(self, logger, engine):
+        """A table named like no kelt table stays as it is; kelt creates its own."""
+        with engine.begin() as conn:
+            conn.execute(text(f'CREATE TABLE "{self._SCHEMA}".content (body text)'))
+            conn.execute(text(f"INSERT INTO \"{self._SCHEMA}\".content VALUES ('theirs')"))
+
+        status = SchemaManager(logger, engine, schema_name=self._SCHEMA).ensure_schema()
+
+        assert status.state == SchemaState.CURRENT
+        assert {"content", "kelt_content"} <= self._tables(engine)
+        with engine.connect() as conn:
+            rows = conn.execute(text(f'SELECT body FROM "{self._SCHEMA}".content')).all()
+        assert rows == [("theirs",)]
+
+    @pytest.mark.parametrize("from_models", [False, True], ids=["other-columns", "kelt-columns"])
+    def test_kelt_tables_without_version_table_refused(self, logger, engine, from_models):
+        """kelt tables without the version table fail the bootstrap; nothing is created.
+
+        Whether created by someone else or left after the version table was dropped.
+        """
+        manager = SchemaManager(logger, engine, schema_name=self._SCHEMA)
+        if from_models:
+            manager.ensure_schema()
+            setup_sql = f'DROP TABLE "{self._SCHEMA}"."{_VERSION_TABLE_NAME}"'
+        else:
+            setup_sql = f'CREATE TABLE "{self._SCHEMA}".kelt_content (body text)'
+        with engine.begin() as conn:
+            conn.execute(text(setup_sql))
+        before = self._tables(engine)
+
+        with pytest.raises(ConflictError, match=r"has kelt tables \['kelt_\w+'.* but no"):
+            manager.ensure_schema()
+
+        assert "kelt_content" in before
+        assert self._tables(engine) == before
 
 
 @pytest.mark.xdist_group("schema")

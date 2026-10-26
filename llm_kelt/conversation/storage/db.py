@@ -4,7 +4,7 @@
 """Database-backed session storage.
 
 Stores sessions in PostgreSQL using SQLAlchemy. Messages are stored as JSONB
-for efficient querying. Requires the ``conv_sessions`` table to exist (see migrations).
+for efficient querying, in the ``kelt_conv_sessions`` table.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
 from sqlalchemy import DateTime, Index, Integer, String, UniqueConstraint, desc, func, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...core.base import Base
@@ -24,25 +25,16 @@ from .base import SessionStorage, SessionSummary, StoredSession
 if TYPE_CHECKING:
     from ..session import Conversation
 
-# Conditional JSONB import — this module requires psycopg2 at import time (the
-# Session model uses JSONB columns). The guard only prevents cascading failures
-# when storage/__init__.py imports just the file backend.
-try:
-    from sqlalchemy.dialects.postgresql import JSONB
-except ImportError:  # pragma: no cover
-    JSONB = None  # type: ignore[assignment,misc]
-
 _PREVIEW_MAX_LEN = 80
 
 
 class Session(Base):
     """SQLAlchemy model for conversation sessions."""
 
-    __tablename__ = "conv_sessions"
+    __tablename__ = "kelt_conv_sessions"
     __table_args__ = (
-        UniqueConstraint("session_id", name="uq_conv_sessions_session_id"),
-        Index("idx_conv_sessions_session_id", "session_id"),
-        Index("idx_conv_sessions_updated_at", "updated_at"),
+        UniqueConstraint("session_id", name="uq_kelt_conv_sessions_session_id"),
+        Index("idx_kelt_conv_sessions_updated_at", "updated_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -62,7 +54,7 @@ class Session(Base):
 class DbSessionStorage(SessionStorage):
     """PostgreSQL-backed session storage.
 
-    Uses the ``conv_sessions`` table with JSONB columns for messages, config,
+    Uses the ``kelt_conv_sessions`` table with JSONB columns for messages, config,
     and extra. Follows kelt's session_factory pattern.
 
     Args:

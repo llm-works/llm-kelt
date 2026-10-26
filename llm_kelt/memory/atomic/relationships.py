@@ -131,10 +131,11 @@ class RelationshipsClient:
 
     def _build_chain_sql(self, ctx_clause: str) -> Any:
         """Build the recursive CTE SQL for get_chain()."""
+        table = FactRelationship.__tablename__
         return text(f"""
             WITH RECURSIVE chain AS (
                 SELECT r.id, r.source_id, r.target_id, 1 AS depth
-                FROM atomic_fact_relationships r
+                FROM {table} r
                 WHERE r.source_id = :fact_id
                   AND r.relationship_type = :rel_type
                   {ctx_clause}
@@ -142,7 +143,7 @@ class RelationshipsClient:
                 UNION ALL
 
                 SELECT r.id, r.source_id, r.target_id, c.depth + 1
-                FROM atomic_fact_relationships r
+                FROM {table} r
                 JOIN chain c ON r.source_id = c.target_id
                 WHERE r.relationship_type = :rel_type
                   AND c.depth < :max_depth

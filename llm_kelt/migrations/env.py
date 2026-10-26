@@ -96,22 +96,16 @@ def _current_revision(connection: Connection, schema_name: str) -> str | None:
 
 def _run_migrations(connection: Connection, schema_name: str) -> None:
     """Run the migrations on ``connection``, inside its owner's transaction."""
-    from alembic.script import ScriptDirectory
-
     # Set search_path for DDL operations in target schema
     connection.execute(text(f'SET LOCAL search_path TO "{schema_name}", public'))
 
     # Ensure pgvector extension exists (required for embeddings table)
     connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
-    head_rev = ScriptDirectory.from_config(config).get_current_head()
+    # Alembic runs nothing when the database is already at the target revision
     current_rev = _current_revision(connection, schema_name)
-    _lg.info("migration state", extra={"current_revision": current_rev, "head_revision": head_rev})
-    if current_rev == head_rev:
-        _lg.info("database already at head revision, nothing to do")
-        return
-
-    _lg.info("running migrations", extra={"from_revision": current_rev, "to_revision": head_rev})
+    target_rev = context.get_revision_argument()
+    _lg.info("running migrations", extra={"from_revision": current_rev, "to_revision": target_rev})
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
