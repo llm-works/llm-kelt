@@ -10,13 +10,16 @@ pgvector/numpy at import time.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+import llm_kelt
 from llm_kelt import ClientContext, SchemaMode
 from llm_kelt.client import Client
 from llm_kelt.core.errors import SchemaVersionError
@@ -167,11 +170,17 @@ def test_read_only_client_does_not_import_numpy(tmp_path):
     script = tmp_path / "reader.py"
     script.write_text(_SUBPROCESS_SCRIPT)
 
+    # Point the child at the llm_kelt this process imported (the tree under
+    # test), so the check holds whether or not the package is installed.
+    pkg_root = str(Path(llm_kelt.__file__).resolve().parent.parent)
+    pythonpath = os.pathsep.join(p for p in (pkg_root, os.environ.get("PYTHONPATH")) if p)
+
     result = subprocess.run(
         [sys.executable, str(script)],
         capture_output=True,
         text=True,
         timeout=30,
+        env={**os.environ, "PYTHONPATH": pythonpath},
     )
 
     assert result.returncode == 0, (

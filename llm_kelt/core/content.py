@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from appinfra.db.utils import detach, detach_all
-from sqlalchemy import DateTime, Index, String, Text, UniqueConstraint, select, text
+from sqlalchemy import BigInteger, DateTime, Index, String, Text, UniqueConstraint, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
@@ -31,10 +31,10 @@ class Content(Base):
     is ingested twice, only one record is created.
     """
 
-    __tablename__ = "content"
+    __tablename__ = "kelt_content"
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    context_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    context_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source: Mapped[str] = mapped_column(String(100), nullable=False)
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -50,21 +50,20 @@ class Content(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("context_key", "content_hash", name="uq_content_context_hash"),
-        Index("idx_content_context", "context_key"),
-        Index("idx_content_source", "source"),
-        Index("idx_content_created", "created_at"),
-        Index("idx_content_external_id", "external_id"),
+        UniqueConstraint("context_key", "content_hash", name="uq_kelt_content_context_hash"),
+        Index("idx_kelt_content_source", "source"),
+        Index("idx_kelt_content_created", "created_at"),
+        Index("idx_kelt_content_external_id", "external_id"),
         # Prefix index for efficient LIKE queries (pattern matching)
         Index(
-            "idx_content_context_prefix",
+            "idx_kelt_content_context_prefix",
             "context_key",
             postgresql_ops={"context_key": "text_pattern_ops"},
         ),
         # Partial unique index for NULL context_key to ensure deduplication works
         # When context_key IS NULL, content_hash must be unique (global scope deduplication)
         Index(
-            "uq_content_null_context_hash",
+            "uq_kelt_content_null_context_hash",
             "content_hash",
             unique=True,
             postgresql_where=text("context_key IS NULL"),

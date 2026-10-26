@@ -6,10 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
-
-if TYPE_CHECKING:
-    from peft import PromptTuningConfig as PeftPromptTuningConfig
+from typing import Literal
 
 
 @dataclass
@@ -48,40 +45,3 @@ class Config:
             raise ValueError("prompt_tuning_init_text is required when prompt_tuning_init='TEXT'")
         if self.task_type not in ("CAUSAL_LM", "SEQ_CLS", "SEQ_2_SEQ_LM", "TOKEN_CLS"):
             raise ValueError(f"Invalid task_type: {self.task_type}")
-
-    def to_peft_config(self, tokenizer_name_or_path: str) -> PeftPromptTuningConfig:
-        """Convert to PEFT PromptTuningConfig for training.
-
-        Args:
-            tokenizer_name_or_path: HuggingFace model ID or path for tokenizer.
-                Required for TEXT initialization to tokenize the init text.
-
-        Returns:
-            peft.PromptTuningConfig instance ready for get_peft_model()
-        """
-        from peft import PromptTuningConfig as PeftPromptTuningConfig
-        from peft import PromptTuningInit, TaskType
-
-        task_type_map = {
-            "CAUSAL_LM": TaskType.CAUSAL_LM,
-            "SEQ_CLS": TaskType.SEQ_CLS,
-            "SEQ_2_SEQ_LM": TaskType.SEQ_2_SEQ_LM,
-            "TOKEN_CLS": TaskType.TOKEN_CLS,
-        }
-
-        init_map = {
-            "TEXT": PromptTuningInit.TEXT,
-            "RANDOM": PromptTuningInit.RANDOM,
-        }
-
-        kwargs: dict = {
-            "task_type": task_type_map[self.task_type],
-            "num_virtual_tokens": self.num_virtual_tokens,
-            "prompt_tuning_init": init_map[self.prompt_tuning_init],
-        }
-
-        if self.prompt_tuning_init == "TEXT":
-            kwargs["prompt_tuning_init_text"] = self.prompt_tuning_init_text
-            kwargs["tokenizer_name_or_path"] = tokenizer_name_or_path
-
-        return PeftPromptTuningConfig(**kwargs)

@@ -327,6 +327,28 @@ kelt train run manifests/coding-v1.yaml --model Qwen/Qwen2.5-14B-Instruct --lora
 
 `--skip-register` runs training but skips the registry write, useful for dry runs.
 
+### Train the queue
+
+`kelt train run --pending` (or `runner.run_pending()`) trains every manifest in
+`<registry>/pending/`, oldest submission first. Each one is claimed by an atomic move to
+`running/`, then lands in `completed/` or, on any error, in `failed/` with
+`output.status: failed` and `output.error`. One failure does not stop the batch; the
+command exits 1 if any manifest failed. Failed manifests stay in `failed/` until resubmitted.
+
+A producer submits with `kelt.train.manifest.submit(manifest)` and polls the result:
+
+```python
+status = kelt.train.manifest.status("coding-v1")  # → QueueStatus | None
+status.state  # "pending" | "running" | "completed" | "failed"
+status.created_at  # identifies the submission
+status.output.adapter.md5  # completed: the trained adapter's version id
+status.output.error  # failed: the reason
+```
+
+`status()` reads manifest metadata only, never the training data. A manifest still queued
+for the key wins over finished runs; among finished runs the newest wins. A manifest left in
+`running/` by a killed process stays there until removed by hand.
+
 ### Query the manifest store
 
 ```python
@@ -338,6 +360,108 @@ kelt.train.manifest.get_manifest("a1b2c3d4e5f6")  # by md5
 kelt.train.manifest.find_adapter("a1b2c3d4e5f6")  # → Adapter | None
 kelt.train.manifest.get_latest_completed(adapter="coding-v1")
 ```
+
+### Series: training sets that accumulate
+
+A manifest with `series` set holds a new training *set* of that series, not a full training
+job. Each build of a series trains from the base model on every set submitted to it, oldest
+first, and writes a new version of the adapter; no weights carry over between builds.
+
+```python
+manifest = kelt.train.manifest.create(
+    adapter="coding-v1",
+    method="sft",
+    model="Qwen/Qwen2.5-7B-Instruct",
+    data=todays_records,
+    series="main",
+)
+result = kelt.train.manifest.submit(manifest)
+result.commit  # the lineage commit holding this set
+result.created  # False: the set was already in the series, nothing was added
+result.root  # True: this set started the series
+```
+
+- The history works like git. The adapter key is a repository in `<registry>/cas/` and a
+  series is a branch of it. Each set becomes a commit, identified by the hash of its records
+  (in any order) and templates. A set is in a series' history at most once, so resubmitting
+  it adds nothing.
+- A series' first submit fixes its base model and recipe (method, `lora`, `training`, method
+  config). A later submit with different ones is rejected; start a new series to change them.
+  The runner rejects `--model` and `--lora-profile` overrides for series builds.
+- A series has at most one pending build, of its tip: the runner trains whatever the tip is
+  when it claims the build. Resubmitting a set re-queues the tip if its last build failed.
+  Series `main` queues under the adapter key; another series under `<adapter>+<series>`
+  (`status(adapter, series=...)`), so series of one adapter build independently.
+- Only series `main` deploys when a build completes; other series need deployment policy
+  `skip` and are deployed by commit (see below). `parent` is not supported on series
+  manifests.
+- `kelt.train.manifest.fork(adapter, series, new_series, commit=None)` starts a series at a
+  commit of another (default: its tip), sharing that history and its builds.
+- Completed series manifests record the `commit` they trained and keep no records; the sets
+  stay in the store.
+
+```python
+info = kelt.train.manifest.series("coding-v1")  # → SeriesInfo | None
+info.tip, info.base_model, info.recipe
+info.current_build  # newest SetEntry with a completed build
+for entry in info.sets:  # oldest first
+    entry.commit, entry.set_id, entry.submitted_at, entry.annotations
+    entry.build  # state (completed, failed, pruned), md5, error, annotations
+kelt.train.manifest.find_set(set_id)  # → [(adapter, series), ...]
+```
+
+An adapter version's series and commit are in its `config.yaml` (`series`, `commit`) and in
+its completed manifest: `kelt.train.manifest.get_manifest(md5).series` / `.commit`.
+
+#### Starting over and deploying a series
+
+Starting over from the base model, with a new recipe or on new data only, is a new series of
+the same adapter key: submit sets with `series="v2"`. The key keeps serving its deployed
+version while the new series trains; deploying one of its builds switches the key over.
+
+```python
+kelt.train.manifest.deploy("coding-v1", "v2", commit=None)  # default: v2's current build
+kelt.train.manifest.active("coding-v1")  # → ActiveSeries(series, commit, version_id, md5)
+```
+
+- `deploy` replaces the key's deployed versions; it links the new version before removing
+  the old ones, so the key is never left undeployed.
+- The active series is the series of the deployed version. "Latest version" (`deploy`
+  without a version, `get_adapter`) considers versions of `main` and of the active series.
+- An older series stays as history: its sets, build records and weights remain.
+
+#### Annotations
+
+Sets and builds carry annotations: small JSON objects (at most 64 KiB each), mutable, kept
+outside the content-addressed store so they never change an id.
+
+```python
+kelt.train.manifest.create(..., series="v2", annotations={"prompt": "v3"})  # the set's
+kelt.train.manifest.annotate_set("coding-v1", set_id, {"note": "use with caution"})
+kelt.train.manifest.annotate_build("coding-v1", commit, {"gate": "passed", "eval_loss": 0.41})
+```
+
+Annotations merge key by key. A set's start as those of its first submit. A build's survive
+pruning its weights and are reset when the commit is rebuilt.
+
+#### Pruning
+
+- `prune(adapter, series)` deletes the weights of the series' builds except deployed ones.
+  The sets stay; each build stays recorded as `pruned` with its md5 and annotations, and a
+  resubmit of a pruned tip rebuilds it. Builds a series shares with a fork are pruned for
+  both.
+- `drop(adapter, series)` deletes the series with the sets, builds, weights and annotations
+  only it holds; its training data is gone afterwards. Refused while the series is deployed
+  or a build of it runs.
+- `wipe(adapter)` deletes everything of the key: series, sets, builds, weights and
+  deployments. Completed and failed manifests stay.
+
+The CLI covers the same: `kelt train series coding-v1 [--series main]`,
+`kelt train series --set <set id>`, `kelt train series --md5 <md5>`,
+`kelt train series coding-v1 --fork trial [--commit <commit>]`,
+`kelt train series coding-v1 --annotate '<json>' (--commit <commit> | --set <set id>)`,
+`kelt train series coding-v1 -s v1 --prune | --drop`, `kelt train series coding-v1 --wipe`
+and `kelt train deploy coding-v1 --series v2 [--commit <commit>]`.
 
 ### Continue-training from a parent adapter
 
@@ -395,22 +519,48 @@ training:
 Only `method_config` differs from an SFT manifest. Init from text vs random with
 `prompt_tuning_init`.
 
+## Supported models
+
+SFT (LoRA), DPO and prompt tuning are tested on these model families:
+
+| Family | `model_type` | Default LoRA targets |
+|---|---|---|
+| Qwen2.5 | `qwen2` | `q/k/v/o_proj`, `gate/up/down_proj` |
+| Qwen3.5, Qwen3.8 | `qwen3_5` | the above plus `in_proj_qkv`, `in_proj_z`, `out_proj` (linear-attention layers); vision tower and multi-token-prediction head excluded |
+
+Other families fall back to the Qwen2.5 targets; set `target_modules` for them.
+
+The model is loaded with the class its checkpoint was saved with (`config.architectures`), so a
+multimodal checkpoint such as `Qwen3_5ForConditionalGeneration` keeps its layer names; the adapter
+then matches what an inference server loads for that checkpoint. Training uses text only.
+
+Checkpoint formats:
+
+| Format | How kelt loads it |
+|---|---|
+| bf16 / fp16 | quantized to 4-bit with bitsandbytes (QLoRA) unless `quantize=False` |
+| bitsandbytes 4-bit | as stored |
+| compressed-tensors (e.g. llm-compressor W4A16) | dequantized to the model dtype at load; LoRA trains on dense weights, so memory is that of the unquantized model. Needs the `compressed-tensors` package and a local checkpoint path |
+
+GPTQ and AWQ checkpoints are not supported for training. `kelt train merge` supports
+bitsandbytes 4-bit bases only.
+
 ## LoRA config
 
 ```python
 class Config:  # llm_kelt.training.lora.Config
-    r: int
-    lora_alpha: int
+    r: int = 16
+    lora_alpha: int = 32
     lora_dropout: float = 0.05
-    target_modules: list[str] | Literal["all-linear"] = "all-linear"
+    target_modules: list[str] | None = None  # None = model family default
+    exclude_modules: str | None = None  # regex; None = model family default
     bias: Literal["none", "all", "lora_only"] = "none"
     task_type: str = "CAUSAL_LM"
     use_rslora: bool = False  # rank-stabilized: alpha/sqrt(r) scaling
-    modules_to_save: list[str] | None = None
 ```
 
-`target_modules="all-linear"` lets PEFT auto-select every linear layer. Explicit lists (`["q_proj",
-"v_proj"]`) are still supported for older PEFT versions.
+Unset `target_modules` / `exclude_modules` are filled in from the loaded model's `model_type`
+(see Supported models); the resolved list is recorded in the run's `config.lora`.
 
 `use_rslora=True` (from Kalajdzievski 2023) makes higher-rank adapters trainable without
 needing to sqrt-scale `lora_alpha` yourself.
@@ -476,9 +626,11 @@ TRAINING_DEFAULTS = DotDict(
 Merged in this order: `TRAINING_DEFAULTS` ← profile ← manifest `training` ← CLI/keyword
 overrides. Later values win.
 
-> **Note:** On Ampere+ GPUs (RTX 30xx, A100, etc.), models typically load in bf16. Pass
-> `bf16=True, fp16=False` to keep trainer precision aligned — the default `fp16=True` can
-> trigger a grad-scaler error when the model weights are bf16.
+`fp16` and `bf16` that the manifest's `training` section leaves unset follow the local
+checkpoint's `config.json`: bfloat16 weights train with `bf16=True, fp16=False` (fp16's grad
+scaler cannot unscale bfloat16 gradients), and pre-quantized models train with both off. A
+manifest that enables one of them picks the precision: the other is off unless the manifest
+sets it too.
 
 ## Adapter registry
 
@@ -543,8 +695,10 @@ For deployment to systems that don't natively load LoRA:
 kelt train merge coding-v1 --model Qwen/Qwen2.5-7B-Instruct --output ./merged/ --dtype bfloat16
 ```
 
-Programmatically → `llm_kelt.training.merge` (`merge_lora_adapter(...)`). Produces a full
-checkpoint at `--output`. `--overwrite` replaces existing files.
+`kelt train merge` merges with PEFT's `merge_and_unload()`. Sharded bitsandbytes checkpoints
+are merged layer by layer instead (`llm_kelt.training.runtime.merge.merge_layerwise`) and
+re-quantized afterwards; there is no single programmatic equivalent of the command.
+Produces a full checkpoint at `--output`. `--overwrite` replaces existing files.
 
 ## Stability detection
 
@@ -570,6 +724,11 @@ kelt train adapters                     # registered adapters
 kelt train adapters --deployed
 kelt train deploy coding-v1 --policy replace
 kelt train deploy coding-v1 --clear     # undeploy
+kelt train deploy coding-v1 --series v2 # deploy series v2's current build
+kelt train series coding-v1             # sets and builds of series main
+kelt train series --set <set id>        # series containing a set
+kelt train series --md5 <md5>           # series and commit of an adapter version
+kelt train series coding-v1 --fork trial
 kelt train merge coding-v1 --model … --output ./merged
 ```
 

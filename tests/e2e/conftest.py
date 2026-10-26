@@ -25,8 +25,11 @@ def _get_gpu_memory_mb() -> float:
 
 
 @pytest.fixture(autouse=True)
-def cleanup_gpu_memory():
-    """Clear GPU memory after each test to prevent OOM in subsequent tests."""
+def cleanup_gpu_memory(request):
+    """Clear GPU memory after each test marked gpu to prevent OOM in subsequent tests."""
+    if request.node.get_closest_marker("gpu") is None:
+        yield
+        return
     # Record baseline before test (inference server memory is expected)
     baseline_mb = _get_gpu_memory_mb()
     yield
@@ -192,6 +195,24 @@ def local_model_path(model_resolver) -> Path:
     if path is None:
         pytest.skip("Model 'qwen2.5-0.5b-instruct' not found in local cache")
     return path
+
+
+@pytest.fixture(scope="session")
+def tiny_qwen35_bf16(local_model_path: Path, tmp_path_factory) -> Path:
+    """Tiny random Qwen3.5 (bf16), using the local Qwen2.5 tokenizer."""
+    from .tiny_qwen35 import build_bf16
+
+    return build_bf16(local_model_path, tmp_path_factory.mktemp("qwen35") / "tiny-qwen35")
+
+
+@pytest.fixture(scope="session")
+def tiny_qwen35_compressed(tiny_qwen35_bf16: Path, tmp_path_factory) -> Path:
+    """compressed-tensors W4A16 copy of the tiny Qwen3.5, laid out like the published ones."""
+    pytest.importorskip("compressed_tensors")
+    from .tiny_qwen35 import build_compressed
+
+    dst = tmp_path_factory.mktemp("qwen35") / "tiny-qwen35-w4a16"
+    return build_compressed(tiny_qwen35_bf16, dst)
 
 
 @pytest.fixture(scope="session")

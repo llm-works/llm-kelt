@@ -20,7 +20,7 @@ class AssertionsClient(FactClient[None]):
     Client for simple assertions (facts about the user).
 
     Assertions are facts that don't need a details table - they just use
-    the base atomic_facts table with type='assertion'.
+    the base kelt_atomic_facts table with type='assertion'.
 
     Examples:
     - "User prefers concise explanations"

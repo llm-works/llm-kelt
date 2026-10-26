@@ -66,7 +66,7 @@ Then re-run: python -m llm_kelt.examples.quickstart
 
 Stops with `appinfra pg down`. Alternatives (repo Makefile target, existing
 Postgres, custom DATABASE_URL): see docs/quickstart.md section 1 —
-https://github.com/serendip-ml/llm-kelt/blob/main/docs/quickstart.md
+https://github.com/llm-works/llm-kelt/blob/main/docs/quickstart.md
 """.rstrip(),
         file=sys.stderr,
     )

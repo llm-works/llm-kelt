@@ -17,7 +17,7 @@ The fix threads the effective schema from ``Database`` down through
 ``__table_args__ = {"schema": ...}`` so every read, write, and CREATE
 names the intended schema explicitly.
 
-This test plants a poisoned ``public.embeddings_8_f16`` with rows for
+This test plants a poisoned ``public.kelt_embeddings_8_f16`` with rows for
 entity_ids '1', '2', '3', then runs the batch-fetch flow inside an
 isolated schema and asserts:
   1. The test's writes land in the configured schema, not ``public``.
@@ -39,14 +39,14 @@ class TestEmbeddingSchemaQualified:
     """Bare-name search_path fallback is closed."""
 
     def _plant_public_poison(self, database: Any, dims: int) -> None:
-        """Recreate the shape reported from prod: ``public.embeddings_{dims}_f16``
+        """Recreate the shape reported from prod: ``public.kelt_embeddings_{dims}_f16``
         with rows for the same entity_ids the test will use."""
         with database.session() as sess:
             conn = sess.connection()
-            conn.execute(text(f"DROP TABLE IF EXISTS public.embeddings_{dims}_f16 CASCADE"))
+            conn.execute(text(f"DROP TABLE IF EXISTS public.kelt_embeddings_{dims}_f16 CASCADE"))
             conn.execute(
                 text(
-                    f"CREATE TABLE public.embeddings_{dims}_f16 ("
+                    f"CREATE TABLE public.kelt_embeddings_{dims}_f16 ("
                     " id BIGSERIAL PRIMARY KEY,"
                     " entity_type VARCHAR(50) NOT NULL,"
                     " entity_id VARCHAR(64) NOT NULL,"
@@ -60,7 +60,7 @@ class TestEmbeddingSchemaQualified:
             for eid in ("1", "2", "3"):
                 conn.execute(
                     text(
-                        f"INSERT INTO public.embeddings_{dims}_f16"
+                        f"INSERT INTO public.kelt_embeddings_{dims}_f16"
                         " (entity_type, entity_id, model_name, embedding)"
                         f" VALUES ('atomic.fact', :eid, 'test-embed',"
                         f" CAST(:vec AS halfvec))"
@@ -72,7 +72,7 @@ class TestEmbeddingSchemaQualified:
     def _drop_public_poison(self, database: Any, dims: int) -> None:
         with database.session() as sess:
             sess.connection().execute(
-                text(f"DROP TABLE IF EXISTS public.embeddings_{dims}_f16 CASCADE")
+                text(f"DROP TABLE IF EXISTS public.kelt_embeddings_{dims}_f16 CASCADE")
             )
             sess.commit()
 
@@ -103,9 +103,9 @@ class TestEmbeddingSchemaQualified:
             # Assert against ``database.schema`` (worker-scoped) rather than
             # ``public`` — the latter is shared across xdist workers and any
             # concurrent test with the ``clean_tables`` fixture would race us
-            # by DELETE'ing from unqualified ``embeddings_%`` tables.
+            # by DELETE'ing from unqualified ``kelt_embeddings_%`` tables.
             #
-            # Fact IDs aren't hard-coded: ``atomic_facts.id`` is a session-scoped
+            # Fact IDs aren't hard-coded: ``kelt_atomic_facts.id`` is a session-scoped
             # BIGSERIAL that other integration tests within the same worker also
             # advance, so we pin against the actual ``f1``/``f2`` we got back
             # from ``assertions.add``.
@@ -117,7 +117,7 @@ class TestEmbeddingSchemaQualified:
                     .execute(
                         text(
                             f"SELECT entity_id, LEFT(embedding::text, 8) "
-                            f'FROM "{configured}".embeddings_{dims}_f16 '
+                            f'FROM "{configured}".kelt_embeddings_{dims}_f16 '
                             "WHERE entity_id = ANY(:ids) "
                             "ORDER BY entity_id::int"
                         ),
@@ -126,7 +126,7 @@ class TestEmbeddingSchemaQualified:
                     .all()
                 )
                 assert rows == [(str(f1), "[0.09997"), (str(f2), "[0.19995")], (
-                    f"expected only f1/f2 in {configured}.embeddings_{dims}_f16; "
+                    f"expected only f1/f2 in {configured}.kelt_embeddings_{dims}_f16; "
                     f"got {rows}. A row for f_missing or a leading 0.5 means the "
                     "write resolved through search_path to public."
                 )

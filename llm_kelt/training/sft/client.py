@@ -8,15 +8,19 @@ Provides methods to train adapters using Supervised Fine-Tuning.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from appinfra import DotDict
 from appinfra.log import Logger
 
+from ...core.export.jsonl import load_jsonl
 from ..manifest.schema import Manifest, get_deploy_setting
+from ..manifest.templates import render_records, validate_templates
+from ..runtime import load
 from ..schema import RunResult
-from ..storage import Storage
+from ..storage import Storage, queue_key
 
 if TYPE_CHECKING:
     from ..lora.config import Config
@@ -78,8 +82,8 @@ class Client:
         """Validate SFT record structure."""
         errors: list[str] = []
         for i, record in enumerate(manifest.data.records):
-            if "instruction" not in record and "prompt" not in record:
-                errors.append(f"SFT record {i} missing 'instruction' or 'prompt' field")
+            if not any(k in record for k in ("instruction", "prompt", "template")):
+                errors.append(f"SFT record {i} missing 'instruction', 'prompt' or 'template' field")
             if "output" not in record and "response" not in record:
                 errors.append(f"SFT record {i} missing 'output' or 'response' field")
         if errors:
@@ -100,10 +104,35 @@ class Client:
         )
         return config
 
+    def _render_templates(self, manifest: Manifest, work_dir: Path, data_path: Path) -> Path:
+        """Render templated records into a plain JSONL file; return data_path if none."""
+        templates = manifest.data.templates
+        if not templates:
+            return data_path
+
+        errors = validate_templates(templates)
+        if errors:
+            raise ValueError(f"Invalid SFT templates: {'; '.join(errors)}")
+
+        records = render_records(templates, load_jsonl(data_path))
+        rendered_path = work_dir / f"{manifest.adapter}-rendered.jsonl"
+        with rendered_path.open("w", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        self._lg.info(
+            "rendered templated records",
+            extra={"templates": len(templates), "records": len(records)},
+        )
+        return rendered_path
+
     def _prepare_training(self, manifest: Manifest) -> tuple[Path, Path]:
         """Prepare training: resolve work dir and data path."""
-        work_dir = self._storage.create_work_area(manifest.adapter, clean=True)
+        work_dir = self._storage.create_work_area(
+            queue_key(manifest.adapter, manifest.series), clean=True
+        )
         data_path = self._storage.resolve_data_path(manifest, work_dir)
+        data_path = self._render_templates(manifest, work_dir, data_path)
         self._lg.info("resolved data", extra={"path": str(data_path)})
 
         self._validate_parent(manifest)
@@ -126,15 +155,13 @@ class Client:
         data_path: Path,
     ) -> RunResult:
         """Execute SFT training."""
-        from ..lora.trainer import train_lora
-
         base_model = self._get_base_model(manifest)
         self._lg.info(
             "starting SFT training",
             extra={"adapter": manifest.adapter, "model": base_model},
         )
 
-        result = train_lora(
+        result: RunResult = load("lora").train_lora(
             lg=self._lg,
             data_path=data_path,
             output_dir=work_dir,
@@ -164,6 +191,7 @@ class Client:
 
         description = (manifest.source.description if manifest.source else None) or "SFT adapter"
         deploy = get_deploy_setting(manifest)
+        result.series, result.commit = manifest.series, manifest.commit
         info = self.registry.register(
             training_result=result,
             key=manifest.adapter,

@@ -171,6 +171,7 @@ def build_lora_config(
         ),
         lora_dropout=lora.get("lora_dropout", static_defaults.lora_dropout),
         target_modules=lora.get("target_modules", static_defaults.target_modules),
+        exclude_modules=lora.get("exclude_modules", static_defaults.exclude_modules),
         bias=lora.get("bias", static_defaults.bias),
         task_type=lora.get("task_type", static_defaults.task_type),
         use_rslora=lora.get("use_rslora", static_defaults.use_rslora),

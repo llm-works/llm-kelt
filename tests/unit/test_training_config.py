@@ -3,12 +3,15 @@
 
 """Unit tests for training configuration."""
 
+import json
 from datetime import datetime
 
 import pytest
+from appinfra import DotDict
 
 from llm_kelt.training import TRAINING_DEFAULTS, RunResult
 from llm_kelt.training.lora import Config as LoraConfig
+from llm_kelt.training.runtime.model import _apply_precision_settings, compute_warmup_steps
 
 
 class TestLoraConfig:
@@ -23,8 +26,9 @@ class TestLoraConfig:
         assert config.lora_dropout == 0.05
         assert config.bias == "none"
         assert config.task_type == "CAUSAL_LM"
-        assert "q_proj" in config.target_modules
-        assert "v_proj" in config.target_modules
+        # Targets come from the model family once the model is loaded
+        assert config.target_modules is None
+        assert config.exclude_modules is None
 
     def test_custom_values(self):
         """Test creating config with custom values."""
@@ -67,6 +71,57 @@ class TestLoraConfig:
         """Test that empty target_modules raises ValueError."""
         with pytest.raises(ValueError, match="target_modules cannot be empty"):
             LoraConfig(target_modules=[])
+
+
+class TestLoraFamilyDefaults:
+    """Model-family LoRA targets resolved from the loaded model's model_type."""
+
+    def test_qwen2_keeps_attention_and_mlp_targets(self):
+        config = LoraConfig().resolve("qwen2")
+        assert config.target_modules == [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ]
+        assert config.exclude_modules is None
+
+    @pytest.mark.parametrize("model_type", ["qwen3_5", "qwen3_5_text"])
+    def test_qwen3_5_adds_linear_attention_and_excludes_vision_and_mtp(self, model_type: str):
+        config = LoraConfig().resolve(model_type)
+        assert {"in_proj_qkv", "in_proj_z", "out_proj", "q_proj", "down_proj"} <= set(
+            config.target_modules
+        )
+        assert "in_proj_a" not in config.target_modules
+
+        import re
+
+        exclude = re.compile(config.exclude_modules)
+        assert exclude.fullmatch("model.visual.blocks.0.attn.qkv")
+        assert exclude.fullmatch("mtp.layers.0.mlp.down_proj")
+        assert not exclude.fullmatch("model.language_model.layers.0.linear_attn.in_proj_qkv")
+        assert not exclude.fullmatch("model.layers.3.self_attn.q_proj")
+
+    def test_unknown_family_falls_back_to_qwen2_targets(self):
+        assert (
+            LoraConfig().resolve("llama").target_modules
+            == LoraConfig().resolve("qwen2").target_modules
+        )
+
+    def test_explicit_settings_win(self):
+        config = LoraConfig(target_modules=["q_proj"], exclude_modules="none").resolve("qwen3_5")
+        assert config.target_modules == ["q_proj"]
+        assert config.exclude_modules == "none"
+
+    def test_unresolved_config_cannot_build_peft_config(self):
+        pytest.importorskip("peft")
+        from llm_kelt.training.runtime.peft_config import lora_peft_config
+
+        with pytest.raises(ValueError, match="resolve"):
+            lora_peft_config(LoraConfig())
 
     def test_invalid_bias(self):
         """Test that invalid bias raises ValueError."""
@@ -112,6 +167,90 @@ class TestTrainingDefaults:
         # Should work with both attribute and dict access
         assert TRAINING_DEFAULTS.num_epochs == TRAINING_DEFAULTS["num_epochs"]
         assert TRAINING_DEFAULTS.learning_rate == TRAINING_DEFAULTS["learning_rate"]
+
+
+class TestPrecisionSettings:
+    """AMP precision picked from the checkpoint's config.json."""
+
+    @staticmethod
+    def _apply(lg, tmp_path, model_config: dict, overrides: dict | None = None) -> dict:
+        (tmp_path / "config.json").write_text(json.dumps(model_config))
+        overrides = overrides or {}
+        config = {"fp16": True, "bf16": False, **overrides}
+        _apply_precision_settings(lg, str(tmp_path), config, overrides)
+        return config
+
+    @pytest.mark.parametrize("key", ["dtype", "torch_dtype"])
+    def test_bfloat16_weights_use_bf16(self, lg, tmp_path, key: str):
+        config = self._apply(lg, tmp_path, {key: "bfloat16"})
+        assert (config["fp16"], config["bf16"]) == (False, True)
+
+    def test_float32_weights_keep_defaults(self, lg, tmp_path):
+        config = self._apply(lg, tmp_path, {"dtype": "float32"})
+        assert (config["fp16"], config["bf16"]) == (True, False)
+
+    def test_quantized_model_disables_amp(self, lg, tmp_path):
+        model_config = {"dtype": "bfloat16", "quantization_config": {"quant_method": "gptq"}}
+        config = self._apply(lg, tmp_path, model_config)
+        assert (config["fp16"], config["bf16"]) == (False, False)
+
+    def test_explicit_fp16_turns_bf16_off(self, lg, tmp_path):
+        config = self._apply(lg, tmp_path, {"dtype": "bfloat16"}, {"fp16": True})
+        assert (config["fp16"], config["bf16"]) == (True, False)
+
+    def test_explicit_bf16_turns_default_fp16_off(self, lg, tmp_path):
+        config = self._apply(lg, tmp_path, {"dtype": "float32"}, {"bf16": True})
+        assert (config["fp16"], config["bf16"]) == (False, True)
+
+    def test_explicit_fp16_off_leaves_bf16_to_checkpoint(self, lg, tmp_path):
+        config = self._apply(lg, tmp_path, {"dtype": "bfloat16"}, {"fp16": False})
+        assert (config["fp16"], config["bf16"]) == (False, True)
+
+    def test_no_local_checkpoint_keeps_defaults(self, lg, tmp_path):
+        config = {"fp16": True, "bf16": False}
+        _apply_precision_settings(lg, str(tmp_path / "missing"), config, {})
+        assert (config["fp16"], config["bf16"]) == (True, False)
+
+    def test_malformed_json_keeps_defaults(self, lg, tmp_path):
+        # get_model_metadata raises JSONDecodeError (a ValueError) before dtype is read
+        (tmp_path / "config.json").write_text("not valid json {")
+        config = {"fp16": True, "bf16": False}
+        _apply_precision_settings(lg, str(tmp_path), config, {})
+        assert (config["fp16"], config["bf16"]) == (True, False)
+
+
+class TestComputeWarmupSteps:
+    """Test warmup_ratio -> warmup_steps conversion."""
+
+    @staticmethod
+    def _tc(warmup_ratio: float, batch_size: int = 4, grad_accum: int = 4) -> DotDict:
+        return DotDict(
+            num_epochs=3,
+            batch_size=batch_size,
+            gradient_accumulation_steps=grad_accum,
+            warmup_ratio=warmup_ratio,
+        )
+
+    def test_ratio_of_total_steps_rounds_up(self):
+        # ceil(1000 / 16) = 63 steps/epoch * 3 epochs = 189; ceil(189 * 0.1) = 19
+        assert compute_warmup_steps(1000, self._tc(0.1)) == 19
+
+    def test_small_ratio_rounds_up_to_one_step(self):
+        # ceil(100 / 16) = 7 * 3 = 21; ceil(21 * 0.03) = ceil(0.63) = 1
+        assert compute_warmup_steps(100, self._tc(0.03)) == 1
+
+    def test_zero_ratio_means_no_warmup(self):
+        assert compute_warmup_steps(1000, self._tc(0.0)) == 0
+
+    @pytest.mark.parametrize("batch_size,grad_accum", [(0, 4), (4, 0)])
+    def test_rejects_non_positive_batching(self, batch_size, grad_accum):
+        with pytest.raises(ValueError, match="must be positive"):
+            compute_warmup_steps(100, self._tc(0.1, batch_size, grad_accum))
+
+    @pytest.mark.parametrize("ratio", [-0.1, 1.5, 2.0])
+    def test_rejects_out_of_range_warmup_ratio(self, ratio):
+        with pytest.raises(ValueError, match=r"warmup_ratio must be in range \[0, 1\]"):
+            compute_warmup_steps(100, self._tc(ratio))
 
 
 class TestRunResult:

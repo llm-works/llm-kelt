@@ -69,10 +69,10 @@ class ModelCache:
     @staticmethod
     def _table_args(table_name: str, schema: str | None) -> tuple:
         args: tuple = (
+            # Its index also serves lookups by (entity_type, entity_id)
             UniqueConstraint(
                 "entity_type", "entity_id", "model_name", name=f"uq_{table_name}_entity_model"
             ),
-            Index(f"idx_{table_name}_entity", "entity_type", "entity_id"),
             Index(f"idx_{table_name}_model", "model_name"),
         )
         if schema is not None:

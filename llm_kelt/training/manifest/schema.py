@@ -39,6 +39,9 @@ class Data(FieldDict):
     records: list[dict[str, Any]] = field(default_factory=list)
     # Path to JSONL file, relative to manifest (for external format)
     path: str | None = None
+    # Shared prompt templates for SFT records, keyed by template id (see templates.py).
+    # Applies to inline and external records.
+    templates: dict[str, str] = field(default_factory=dict)
 
 
 class Deployment(FieldDict):
@@ -57,6 +60,13 @@ class Manifest(FieldDict):
     method: Literal["dpo", "sft", "prompt"]
     # Training data specification
     data: Data
+    # Series of the adapter this manifest's data is a new set of (see training/lineage.py).
+    # Unset: a one-off training on this data alone.
+    series: str | None = None
+    # Lineage commit a series build trains, set when the build is claimed
+    commit: str | None = None
+    # Annotations of this manifest's set (a small JSON object, series manifests only)
+    annotations: dict[str, Any] = field(default_factory=dict)
     # Deployment configuration
     deployment: Deployment | None = None
     # Schema version for forward compatibility

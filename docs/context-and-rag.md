@@ -296,7 +296,7 @@ for sf in scored:
 
 ## Batch retrieval — avoid N+1
 
-Reading many facts by ID? Use the batch method (added in #83):
+Reading many facts by ID? Use the batch method:
 
 ```python
 ids = [12, 34, 56, 78]
@@ -317,7 +317,7 @@ This is one SQL round-trip instead of one per fact.
 
 ## Quantization and dimensions
 
-Embeddings are stored in a per-format, per-dimension table (e.g. `embeddings_f16_384`). The
+Embeddings are stored in a per-format, per-dimension table (e.g. `kelt_embeddings_384_f16`). The
 default is `F16` (half-vec, 2× smaller than `F32`) at 384 dimensions.
 
 To change the format globally, override `EmbeddingConfig` when constructing the `Client`

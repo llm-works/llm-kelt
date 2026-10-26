@@ -10,6 +10,9 @@ Provides:
 - AdapterRegistry: Adapter registration with llm-infer
 """
 
+from typing import Any
+
+from ..runtime import load
 from ..schema import AdapterInfo
 from .config import Config
 from .registry import AdapterRegistry
@@ -23,14 +26,8 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
-    """Lazy import training classes that require optional dependencies."""
-    if name == "Trainer":
-        from .trainer import Trainer
-
-        return Trainer
-    if name == "train_lora":
-        from .trainer import train_lora
-
-        return train_lora
+def __getattr__(name: str) -> Any:
+    """Trainer and train_lora, loaded on first use from the training runtime."""
+    if name in ("Trainer", "train_lora"):
+        return getattr(load("lora"), name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -8,19 +8,17 @@ Trains the model to prefer "chosen" responses over "rejected" ones.
 """
 
 import json
-import math
 from datetime import UTC, datetime
 from pathlib import Path
 
 from appinfra import DotDict
 from appinfra.log import Logger
 
-from ..lora import Config as LoraConfig
-from ..model import build_training_config
+from ..lora.config import Config as LoraConfig
 from ..schema import TRAINING_CONFIG_KEYS, Adapter, RunResult
 from ..stability import check_training_stability, log_stability_warnings
-
-DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+from .model import build_training_config, compute_warmup_steps
+from .peft_config import lora_peft_config
 
 
 def _to_chat_format(record: dict) -> dict:
@@ -72,7 +70,7 @@ class Trainer:
         lg: Logger,
         data_path: str | Path,
         output_dir: str | Path,
-        base_model: str = DEFAULT_BASE_MODEL,
+        base_model: str,
         lora_config: LoraConfig | None = None,
         training_config: DotDict | None = None,
         beta: float = 0.1,
@@ -98,7 +96,6 @@ class Trainer:
         self.trainer = None
         self.train_dataset = None
         self.eval_dataset = None
-        self._quant_config = None
         self._is_quantized = False
         self._use_stacked_adapters = False  # True when parent adapter is stacked with DPO
 
@@ -135,36 +132,28 @@ class Trainer:
             self._use_stacked_adapters = True
             self.model.set_adapter("default")  # Ensure default is active
         else:
-            peft_config = self.lora_config.to_peft_config()
+            self.lora_config = self.lora_config.resolve(self.model.config.model_type)
+            peft_config = lora_peft_config(self.lora_config)
             self.model = get_peft_model(self.model, peft_config)
 
         trainable, total = self.model.get_nb_trainable_parameters()
-        self._lg.info(
-            f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
-        )
+        pct = 100 * trainable / total if total > 0 else 0.0
+        self._lg.info(f"Trainable params: {trainable:,} / {total:,} ({pct:.2f}%)")
 
     def _load_model(self):
         """Load base model with auto-detected quantization and apply LoRA."""
         import torch
         from peft import prepare_model_for_kbit_training
-        from transformers import AutoModelForCausalLM
 
-        from ..model import get_quantization_config
+        from .model import is_kbit_loaded, load_base_model
 
         self._lg.info(f"loading base model: {self.base_model}")
         self._load_tokenizer()
 
-        self._quant_config, _ = get_quantization_config(
-            self._lg, self.base_model, self._quantize_override
+        self.model = load_base_model(
+            self._lg, self.base_model, self._quantize_override, dtype=torch.bfloat16
         )
-        self._is_quantized = self._quant_config is not None
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.base_model,
-            quantization_config=self._quant_config,
-            device_map="auto",
-            torch_dtype=torch.bfloat16 if self._quant_config is None else None,
-            trust_remote_code=True,
-        )
+        self._is_quantized = is_kbit_loaded(self.model)
 
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
@@ -194,22 +183,6 @@ class Trainer:
         if self.eval_dataset:
             self._lg.info(f"loaded {len(self.eval_dataset)} eval pairs")
 
-    def _calculate_warmup_steps(self) -> int:
-        """Calculate warmup steps from warmup ratio and training config."""
-        tc = self.training_config
-        if tc.batch_size <= 0 or tc.gradient_accumulation_steps <= 0:
-            raise ValueError("batch_size and gradient_accumulation_steps must be positive")
-
-        steps_per_epoch = max(
-            1, math.ceil(len(self.train_dataset) / (tc.batch_size * tc.gradient_accumulation_steps))
-        )
-        total_steps = steps_per_epoch * tc.num_epochs
-        warmup_steps = int(total_steps * tc.warmup_ratio)
-        # Ensure at least 1 warmup step when ratio > 0
-        if tc.warmup_ratio > 0 and warmup_steps == 0:
-            warmup_steps = 1
-        return warmup_steps
-
     def _base_training_args(self) -> dict:
         """Build base training arguments from config."""
         tc = self.training_config
@@ -219,7 +192,7 @@ class Trainer:
             per_device_train_batch_size=tc.batch_size,
             gradient_accumulation_steps=tc.gradient_accumulation_steps,
             learning_rate=tc.learning_rate,
-            warmup_steps=self._calculate_warmup_steps(),
+            warmup_steps=compute_warmup_steps(len(self.train_dataset), tc),
             max_grad_norm=tc.max_grad_norm,
             logging_steps=tc.logging_steps,
             save_steps=tc.save_steps,
@@ -382,6 +355,7 @@ class Trainer:
                     "lora_alpha": self.lora_config.lora_alpha,
                     "lora_dropout": self.lora_config.lora_dropout,
                     "target_modules": self.lora_config.target_modules,
+                    "exclude_modules": self.lora_config.exclude_modules,
                     "use_rslora": self.lora_config.use_rslora,
                 },
                 "training": {k: self.training_config[k] for k in TRAINING_CONFIG_KEYS},
@@ -419,7 +393,7 @@ def train_dpo(
     lg: Logger,
     data_path: str | Path,
     output_dir: str | Path,
-    base_model: str = DEFAULT_BASE_MODEL,
+    base_model: str,
     lora_config: LoraConfig | None = None,
     training_config: DotDict | None = None,
     beta: float = 0.1,
@@ -432,7 +406,7 @@ def train_dpo(
         lg: Logger instance.
         data_path: Path to JSONL file with {"prompt", "chosen", "rejected"} records.
         output_dir: Directory to save the trained adapter.
-        base_model: HuggingFace model ID. Defaults to Qwen2.5-7B-Instruct.
+        base_model: HuggingFace model ID or local path.
         lora_config: LoRA hyperparameters. Uses sensible defaults if not provided.
         training_config: Training hyperparameters. Uses sensible defaults if not provided.
         beta: DPO beta parameter (higher = more conservative).

@@ -10,6 +10,9 @@ Provides:
 - export_preferences: Export atomic preferences to DPO format
 """
 
+from typing import Any
+
+from ..runtime import load
 from .client import Client
 from .export import ExportResult, export_preferences
 
@@ -22,14 +25,8 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
-    """Lazy import training classes that require optional dependencies."""
-    if name == "Trainer":
-        from .trainer import Trainer
-
-        return Trainer
-    if name == "train_dpo":
-        from .trainer import train_dpo
-
-        return train_dpo
+def __getattr__(name: str) -> Any:
+    """Trainer and train_dpo, loaded on first use from the training runtime."""
+    if name in ("Trainer", "train_dpo"):
+        return getattr(load("dpo"), name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -25,7 +25,7 @@ class TestEmbeddingFilter:
         assert clause is not None
         # Verify it compiles to valid SQL
         stmt = select(Fact).where(clause)
-        assert "atomic_facts.type" in str(stmt)
+        assert "kelt_atomic_facts.type" in str(stmt)
 
     def test_categories_filter(self):
         """categories() should filter by Fact.category IN (...)."""
@@ -35,7 +35,7 @@ class TestEmbeddingFilter:
         assert clause is not None
         stmt = select(Fact).where(clause)
         compiled = str(stmt)
-        assert "atomic_facts.category" in compiled
+        assert "kelt_atomic_facts.category" in compiled
         assert "IN" in compiled
 
     def test_where_clause(self):
@@ -45,7 +45,7 @@ class TestEmbeddingFilter:
         clause = f.build()
         assert clause is not None
         stmt = select(Fact).where(clause)
-        assert "atomic_facts.confidence" in str(stmt)
+        assert "kelt_atomic_facts.confidence" in str(stmt)
 
     def test_combined_filters(self):
         """Multiple filters should be ANDed together."""
@@ -54,9 +54,9 @@ class TestEmbeddingFilter:
         assert clause is not None
         stmt = select(Fact).where(clause)
         compiled = str(stmt)
-        assert "atomic_facts.type" in compiled
-        assert "atomic_facts.category" in compiled
-        assert "atomic_facts.confidence" in compiled
+        assert "kelt_atomic_facts.type" in compiled
+        assert "kelt_atomic_facts.category" in compiled
+        assert "kelt_atomic_facts.confidence" in compiled
 
     def test_multiple_where_clauses(self):
         """Multiple where() calls should be ANDed."""
@@ -65,8 +65,8 @@ class TestEmbeddingFilter:
         assert clause is not None
         stmt = select(Fact).where(clause)
         compiled = str(stmt)
-        assert "atomic_facts.confidence" in compiled
-        assert "atomic_facts.active" in compiled
+        assert "kelt_atomic_facts.confidence" in compiled
+        assert "kelt_atomic_facts.active" in compiled
 
     def test_method_chaining(self):
         """All methods should return self for chaining."""

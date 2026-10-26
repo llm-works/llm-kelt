@@ -152,10 +152,10 @@ class TestQuantizationFormat:
 
     def test_table_name(self) -> None:
         """Check table name generation."""
-        assert QuantizationFormat.F32.table_name(384) == "embeddings_384_f32"
-        assert QuantizationFormat.F16.table_name(1536) == "embeddings_1536_f16"
-        assert QuantizationFormat.I8.table_name(384) == "embeddings_384_i8"
-        assert QuantizationFormat.I4.table_name(768) == "embeddings_768_i4"
+        assert QuantizationFormat.F32.table_name(384) == "kelt_embeddings_384_f32"
+        assert QuantizationFormat.F16.table_name(1536) == "kelt_embeddings_1536_f16"
+        assert QuantizationFormat.I8.table_name(384) == "kelt_embeddings_384_i8"
+        assert QuantizationFormat.I4.table_name(768) == "kelt_embeddings_768_i4"
 
 
 class TestConfig:
@@ -174,7 +174,7 @@ class TestConfig:
             format=QuantizationFormat.I8,
             dimensions=1536,
         )
-        assert config.table_name == "embeddings_1536_i8"
+        assert config.table_name == "kelt_embeddings_1536_i8"
 
     def test_custom_format(self) -> None:
         """Config with custom format."""
@@ -185,4 +185,4 @@ class TestConfig:
         )
         assert config.format == QuantizationFormat.F32
         assert config.dimensions == 768
-        assert config.table_name == "embeddings_768_f32"
+        assert config.table_name == "kelt_embeddings_768_f32"

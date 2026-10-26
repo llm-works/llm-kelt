@@ -4,7 +4,7 @@
 """Abstract base class for training storage.
 
 Defines the interface for storing and retrieving training artifacts:
-- Manifests (pending and completed)
+- Manifests (pending, running, completed, failed)
 - Adapters (with versioning and deployment)
 - Training work areas (temporary, for HuggingFace)
 
@@ -17,9 +17,12 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from ..lineage import DEFAULT_SERIES
+
 if TYPE_CHECKING:
+    from ..lineage import Lineage
     from ..manifest.schema import Manifest
-    from ..schema import AdapterInfo, RunResult, SubmitResult
+    from ..schema import ActiveSeries, AdapterInfo, QueueStatus, RunResult, SubmitResult
 
 
 class DupAdapterError(ValueError):
@@ -31,6 +34,21 @@ class DupAdapterError(ValueError):
         super().__init__(
             f"Adapter '{key}' already exists with md5 {md5}. Use overwrite=True to return existing."
         )
+
+
+SERIES_SEPARATOR = "+"
+
+
+def queue_key(adapter: str, series: str | None) -> str:
+    """Return the key of a manifest's queue files and work area.
+
+    The adapter key, for a one-off manifest and series "main"; ``<adapter>+<series>`` for
+    another series, so series of one adapter queue and train independently. ``+`` is not
+    allowed in adapter keys, so the key is unambiguous.
+    """
+    if series is None or series == DEFAULT_SERIES:
+        return adapter
+    return f"{adapter}{SERIES_SEPARATOR}{series}"
 
 
 def extract_md5(version_id: str) -> str:
@@ -65,7 +83,15 @@ class Storage(ABC):
     Training work areas must provide real filesystem paths because
     HuggingFace/TRL libraries require disk access. Everything else
     can be stored abstractly.
+
+    Queue and work area methods take a queue key (see ``queue_key``): the adapter key, or
+    ``<adapter>+<series>`` for a series other than "main".
     """
+
+    @property
+    @abstractmethod
+    def lineage(self) -> Lineage:
+        """Series of training sets per adapter key (see training/lineage.py)."""
 
     # =========================================================================
     # Manifest Operations
@@ -75,14 +101,21 @@ class Storage(ABC):
     def submit_manifest(self, manifest: Manifest) -> SubmitResult:
         """Submit a manifest to the pending queue.
 
+        A manifest with ``series`` set adds its data as a new set of that series and
+        queues a build of the series' tip, unless one is already pending or the tip is
+        built. Submitting a set already in the series adds nothing.
+
         Args:
             manifest: Manifest to submit.
 
         Returns:
-            SubmitResult with adapter key, timestamp, and storage location.
+            SubmitResult with adapter key, timestamp, storage location and, for a series
+            manifest, the commit holding the set and whether the submit started the
+            series.
 
         Raises:
-            ValueError: If manifest with same adapter key already pending.
+            ValueError: If a manifest with the same queue key is already pending (for a
+                series manifest: a one-off one), or a series manifest is invalid.
         """
 
     @abstractmethod
@@ -105,6 +138,18 @@ class Storage(ABC):
         """
 
     @abstractmethod
+    def list_pending_keys(self) -> list[str]:
+        """List adapter keys of pending manifests, oldest submission first.
+
+        Returns:
+            Adapter keys.
+        """
+
+    @abstractmethod
+    def list_running_keys(self) -> list[str]:
+        """List queue keys of running manifests."""
+
+    @abstractmethod
     def remove_pending_manifest(self, adapter: str) -> None:
         """Remove a manifest from pending queue.
 
@@ -113,6 +158,46 @@ class Storage(ABC):
 
         Raises:
             FileNotFoundError: If manifest not found.
+        """
+
+    @abstractmethod
+    def claim_pending_manifest(self, adapter: str) -> Manifest:
+        """Atomically move a pending manifest to the running state and return it.
+
+        Args:
+            adapter: Adapter key.
+
+        Returns:
+            The claimed manifest.
+
+        Raises:
+            FileNotFoundError: If no manifest is pending for the key.
+            FileExistsError: If a manifest for the key is already running.
+            ValueError: If the claimed manifest cannot be parsed (it stays running).
+        """
+
+    @abstractmethod
+    def fail_running_manifest(self, adapter: str, result: RunResult) -> Path:
+        """Move a running manifest to failed storage, with result as its output.
+
+        Args:
+            adapter: Adapter key.
+            result: Failed RunResult (status "failed", error set).
+
+        Returns:
+            Location of the failed manifest.
+        """
+
+    @abstractmethod
+    def get_queue_status(self, adapter: str) -> QueueStatus | None:
+        """Return the state of the latest submission for an adapter key.
+
+        Args:
+            adapter: Adapter key.
+
+        Returns:
+            QueueStatus (pending, running, completed or failed), or None if the key was
+            never submitted.
         """
 
     @abstractmethod
@@ -292,6 +377,76 @@ class Storage(ABC):
 
         Returns:
             Path to deployed adapter, or None if not deployed.
+        """
+
+    # =========================================================================
+    # Series Deployment and Retention
+    # =========================================================================
+
+    @abstractmethod
+    def deploy_series(
+        self,
+        adapter: str,
+        series: str,
+        commit: str | None = None,
+        *,
+        policy: Literal["add", "replace"] = "replace",
+    ) -> str:
+        """Deploy the adapter version built from a commit of a series.
+
+        Deploying makes the series the one the adapter key serves (see active_series).
+        "replace" links the new version before removing the others, so the key is never
+        left undeployed.
+
+        Args:
+            adapter: Adapter key.
+            series: Series name.
+            commit: Commit of the series (default: its current build).
+            policy: As for deploy_adapter.
+
+        Returns:
+            The deployed version id.
+
+        Raises:
+            ValueError: The series or commit does not exist, or the commit has no completed
+                build (never built, failed, or its weights were pruned).
+        """
+
+    @abstractmethod
+    def active_series(self, adapter: str) -> ActiveSeries | None:
+        """Return the series the adapter key serves: that of its deployed version.
+
+        None if nothing is deployed or the deployed version is a one-off training.
+        """
+
+    @abstractmethod
+    def prune_series_adapters(self, adapter: str, series: str) -> list[str]:
+        """Delete the adapter versions of a series' builds, except deployed ones.
+
+        Sets and build records stay; each build is marked pruned and can be rebuilt.
+
+        Returns:
+            The commits whose builds were pruned, oldest first.
+        """
+
+    @abstractmethod
+    def drop_series(self, adapter: str, series: str) -> list[str]:
+        """Delete a series with the sets, builds and adapter versions only it holds.
+
+        Returns:
+            The dropped commits, oldest first.
+
+        Raises:
+            ValueError: The series is active or has a deployed build, or a build of it is
+                running.
+        """
+
+    @abstractmethod
+    def wipe_adapter(self, adapter: str) -> None:
+        """Delete every series, set, build, version and deployment of an adapter key.
+
+        Raises:
+            ValueError: A build of the key is running.
         """
 
     # =========================================================================

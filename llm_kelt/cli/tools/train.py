@@ -12,11 +12,13 @@ from appinfra.app.tools import Tool, ToolConfig
 from llm_infer import compute_adapter_metadata
 from llm_infer.models import ModelResolver
 
+from ...training.lineage import DEFAULT_SERIES, SeriesInfo
 from ...training.lora import AdapterRegistry
 from ...training.lora import Config as LoraConfig
 from ...training.manifest.loader import load_manifest
 from ...training.profiles import build_training_config, get_registry_path, load_default_profile
 from ...training.runner import Runner
+from ...training.runtime import load
 from ...training.schema import Adapter
 from ...training.storage import FileStorage, extract_md5, md5_matches
 
@@ -330,6 +332,11 @@ class RunTool(_ConfigMixin, Tool):
 
     def add_args(self, parser) -> None:
         parser.add_argument("manifest", nargs="?", help="Manifest path (interactive if omitted)")
+        parser.add_argument(
+            "--pending",
+            action="store_true",
+            help="Train all pending manifests, non-interactive; exit 1 if any failed",
+        )
         parser.add_argument("--model", "-m", help="Override model (path, HF ID, or name)")
         parser.add_argument(
             "--list-models", action="store_true", help="List available models and exit"
@@ -362,7 +369,7 @@ class RunTool(_ConfigMixin, Tool):
                 return None
             idx = int(choice) - 1
             return manifests[idx] if 0 <= idx < len(manifests) else None
-        except (ValueError, KeyboardInterrupt, IndexError):
+        except (ValueError, KeyboardInterrupt, IndexError, EOFError):
             return None
 
     def _get_manifest_path(self, registry_path: Path) -> Path | None:
@@ -375,6 +382,30 @@ class RunTool(_ConfigMixin, Tool):
             return path
         return self._select_interactive(registry_path / "pending")
 
+    def _run_pending(self, registry_path: Path) -> int:
+        """Train all pending manifests; 1 if any failed, 0 otherwise (also when none)."""
+        storage = FileStorage(self.lg, registry_path)
+        runner = Runner(self.lg, storage, model_locations=self._model_locations())
+        results = runner.run_pending(
+            skip_registration=self.args.skip_register,
+            model_override=getattr(self.args, "model", None),
+            lora_profile=getattr(self.args, "lora_profile", None),
+        )
+        if not results:
+            print("No pending manifests")
+            return 0
+
+        failed = 0
+        for adapter, result in results:
+            if result.status == "failed":
+                failed += 1
+                print(f"  FAILED  {adapter}: {result.error}")
+            else:
+                md5 = result.adapter.md5 if result.adapter else "unknown"
+                print(f"  OK      {adapter}: adapter {md5[:12]} ({result.duration_seconds:.0f}s)")
+        print(f"\n{len(results) - failed} trained, {failed} failed")
+        return 1 if failed else 0
+
     def run(self, **kwargs: Any) -> int:
         if self.args.list_models:
             return self._list_models()
@@ -385,6 +416,23 @@ class RunTool(_ConfigMixin, Tool):
             self.lg.error(str(e))
             return 1
 
+        if self.args.pending:
+            return self._run_queue(registry_path)
+        return self._run_manifest(registry_path)
+
+    def _run_queue(self, registry_path: Path) -> int:
+        """Handle --pending: train the queue, reporting errors that stop the whole batch."""
+        if self.args.manifest:
+            self.lg.error("--pending trains the queue; do not pass a manifest path")
+            return 1
+        try:
+            return self._run_pending(registry_path)
+        except Exception as e:
+            self.lg.error(f"Training queue failed: {e}")
+            return 1
+
+    def _run_manifest(self, registry_path: Path) -> int:
+        """Train one manifest, given as a path or picked interactively from pending/."""
         manifest_path = self._get_manifest_path(registry_path)
         if manifest_path is None:
             return 0 if not self.args.manifest else 1
@@ -435,6 +483,8 @@ class DeployTool(_ConfigMixin, Tool):
         parser.add_argument(
             "--clear", "-c", action="store_true", help="Remove all deployments for adapter"
         )
+        parser.add_argument("--series", "-s", help="Deploy a build of this series")
+        parser.add_argument("--commit", help="Commit of --series (default: its current build)")
 
     def _resolve_version(
         self, storage: FileStorage, adapter: str, version: str | None
@@ -461,6 +511,18 @@ class DeployTool(_ConfigMixin, Tool):
 
         raise ValueError(f"Version '{version}' not found for adapter '{adapter}'")
 
+    def _deploy(self, storage: FileStorage, adapter: str) -> None:
+        """Deploy a series build (--series) or a version (--version, default: latest)."""
+        if self.args.series:
+            if self.args.version:
+                raise ValueError("Give --version or --series, not both")
+            storage.deploy_series(
+                adapter, self.args.series, self.args.commit, policy=self.args.policy
+            )
+            return
+        version_id = self._resolve_version(storage, adapter, self.args.version)
+        storage.deploy_adapter(adapter, version_id, policy=self.args.policy)
+
     def _print_deployed(self, storage: FileStorage, adapter: str) -> None:
         """Print currently deployed versions."""
         deployed = storage.list_deployed(adapter)
@@ -484,8 +546,7 @@ class DeployTool(_ConfigMixin, Tool):
                 print(f"\nCleared all deployments for {adapter}")
                 return 0
 
-            version_id = self._resolve_version(storage, adapter, self.args.version)
-            storage.deploy_adapter(adapter, version_id, policy=self.args.policy)
+            self._deploy(storage, adapter)
             self._print_deployed(storage, adapter)
             return 0
         except ValueError as e:
@@ -531,6 +592,116 @@ class AdaptersTool(_ConfigMixin, Tool):
                 print(f"    {a.description}")
         print()
         return 0
+
+
+class SeriesTool(_ConfigMixin, Tool):
+    """Show, fork, annotate, prune or drop a training series; find a set's or version's."""
+
+    def __init__(self, parent: Any = None) -> None:
+        super().__init__(parent, ToolConfig(name="series", help_text="Show a training series"))
+
+    def add_args(self, parser) -> None:
+        parser.add_argument("adapter", nargs="?", help="Adapter key")
+        parser.add_argument("--series", "-s", default=DEFAULT_SERIES, help="Series name")
+        parser.add_argument("--set", help="Find the series containing this set id")
+        parser.add_argument("--md5", help="Show the series and commit of an adapter version")
+        parser.add_argument("--fork", metavar="NEW", help="Start series NEW at --commit")
+        parser.add_argument("--commit", help="Commit to fork at (default: the series' tip)")
+        parser.add_argument(
+            "--annotate", metavar="JSON", help="Merge a JSON object into --commit's build or --set"
+        )
+        parser.add_argument(
+            "--prune", action="store_true", help="Delete the series' undeployed weights"
+        )
+        parser.add_argument(
+            "--drop", action="store_true", help="Delete the series with its sets and weights"
+        )
+        parser.add_argument(
+            "--wipe", action="store_true", help="Delete everything of the adapter key"
+        )
+
+    def run(self, **kwargs: Any) -> int:
+        try:
+            storage = FileStorage(self.lg, self._registry_path())
+            if self.args.annotate:
+                return self._annotate(storage, json.loads(self.args.annotate))
+            if self.args.set:
+                for adapter, series in storage.lineage.find_set(self.args.set):
+                    print(f"{adapter}/{series}")
+                return 0
+            if self.args.md5:
+                return self._print_version(storage, self.args.md5)
+            if not self.args.adapter:
+                raise ValueError("Give an adapter key, --set or --md5")
+            return self._run_on_adapter(storage)
+        except (ValueError, json.JSONDecodeError) as e:
+            self.lg.error(str(e))
+            return 1
+
+    def _run_on_adapter(self, storage: FileStorage) -> int:
+        adapter, series = self.args.adapter, self.args.series
+        if self.args.fork:
+            storage.validate_key(self.args.fork)
+            commit = storage.lineage.fork(adapter, series, self.args.fork, self.args.commit)
+            print(f"Started {adapter}/{self.args.fork} at {commit[:12]}")
+        elif self.args.prune:
+            pruned = storage.prune_series_adapters(adapter, series)
+            print(f"Pruned the builds of {len(pruned)} commits of {adapter}/{series}")
+        elif self.args.drop:
+            dropped = storage.drop_series(adapter, series)
+            print(f"Dropped {adapter}/{series} ({len(dropped)} commits only it held)")
+        elif self.args.wipe:
+            storage.wipe_adapter(adapter)
+            print(f"Wiped {adapter}")
+        else:
+            return self._show(storage)
+        return 0
+
+    def _annotate(self, storage: FileStorage, annotations: Any) -> int:
+        if not self.args.adapter or bool(self.args.commit) == bool(self.args.set):
+            raise ValueError("--annotate needs an adapter key and one of --commit or --set")
+        if self.args.commit:
+            storage.lineage.annotate_build(self.args.adapter, self.args.commit, annotations)
+        else:
+            storage.lineage.annotate_set(self.args.adapter, self.args.set, annotations)
+        return 0
+
+    def _show(self, storage: FileStorage) -> int:
+        info = storage.lineage.series(self.args.adapter, self.args.series)
+        if info is None:
+            print(f"No series {self.args.adapter}/{self.args.series}")
+            return 1
+        active = storage.active_series(self.args.adapter)
+        self._print_series(info, active.commit if active and active.series == info.series else None)
+        return 0
+
+    def _print_version(self, storage: FileStorage, md5: str) -> int:
+        manifest = storage.find_adapter_by_md5(md5)
+        if manifest is None:
+            print(f"No completed training for adapter version {md5}")
+            return 1
+        if not manifest.series:
+            print(f"{manifest.adapter}: one-off training, not part of a series")
+            return 0
+        print(f"{manifest.adapter}/{manifest.series} at commit {manifest.commit}")
+        return 0
+
+    def _print_series(self, info: SeriesInfo, deployed: str | None) -> None:
+        current = info.current_build
+        print(f"\nSeries {info.adapter}/{info.series}: {info.recipe['method'].upper()}")
+        print(f"  Base model: {info.base_model}")
+        print(f"  Tip: {info.tip}, current build: {current.commit if current else '-'}")
+        print(f"  Active: {'yes, deployed ' + deployed if deployed else 'no'}")
+        print("\n  Sets (oldest first):")
+        for entry in info.sets:
+            date = entry.submitted_at.isoformat(timespec="seconds") if entry.submitted_at else "-"
+            build = entry.build.state if entry.build else "not built"
+            print(f"    {entry.commit}  set {entry.set_id}  {date}  {build}")
+            if entry.annotations:
+                print(f"      set: {json.dumps(entry.annotations)}")
+            if entry.build and entry.build.annotations:
+                print(f"      build: {json.dumps(entry.build.annotations)}")
+        print()
 
 
 class MergeTool(_ConfigMixin, Tool):
@@ -761,25 +932,21 @@ class MergeTool(_ConfigMixin, Tool):
         """Re-quantize a fp16 model to BNB 4-bit in place using layerwise quantization."""
         import tempfile
 
-        from ...training.merge import quantize_layerwise
-
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp) / "model"
-            quantize_layerwise(self.lg, model_path, tmp_path)
+            load("merge").quantize_layerwise(self.lg, model_path, tmp_path)
             self._replace_safetensors(model_path, tmp_path)
 
     def _do_merge(
         self, model_path: Path, adapter_path: Path, output_path: Path, dtype: Any
     ) -> bool:
         """Merge adapter into model. Returns True if layerwise merge was used."""
-        from ...training.merge import merge_layerwise
-
         # Use layerwise merge only for sharded BNB models (non-sharded fall back to standard)
         use_layerwise = self._is_bnb_model_path(model_path) and self._is_sharded_model(model_path)
 
         if use_layerwise:
             self.lg.info("using layerwise merge for BNB quantized model")
-            merge_layerwise(self.lg, model_path, adapter_path, output_path, dtype)
+            load("merge").merge_layerwise(self.lg, model_path, adapter_path, output_path, dtype)
         else:
             merged = self._load_and_merge(model_path, adapter_path, dtype)
             self.lg.info("saving merged model", extra={"output": str(output_path)})
@@ -841,6 +1008,7 @@ class TrainTool(Tool):
         self.add_tool(SftTool(self))
         self.add_tool(AdaptersTool(self))
         self.add_tool(DeployTool(self))
+        self.add_tool(SeriesTool(self))
         self.add_tool(MergeTool(self))
 
     def run(self, **kwargs: Any) -> int:

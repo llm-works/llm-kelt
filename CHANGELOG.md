@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-25
+
+### Added
+- `llm_kelt.conversation.ConversationFactory`: bundles `lg`/`config`/`compactor`
+  and satisfies saia's `ConversationFactory` Protocol (`create()`,
+  `create_from_state()`). `Conversation` also inherits
+  `SerializableConversationLike`.
+- SFT manifests can store shared prompt text once in `data.templates` (keyed by
+  `template_id(text)`, its SHA-256, in full or as the first 32 hex characters); records
+  carry `{template, slots, output}` and are rendered to plain instructions before training.
+- `completion_only_loss` training option (SFT and prompt tuning): excludes prompt
+  tokens from the loss. Default off.
+- `kelt train run --pending` trains the whole manifest queue without prompting; manifests
+  move through `running/` to `completed/` or `failed/` (error recorded), exit 1 on any failure.
+- `kelt.train.manifest.status(adapter)` returns the latest submission's state and result,
+  reading manifest metadata only.
+- SFT, DPO and prompt tuning support Qwen3.5/Qwen3.8 and compressed-tensors checkpoints
+  (dequantized at load). Models load with their saved class; LoRA targets default per family.
+- Training series: a manifest with `series` set adds its data as a set of that series; each
+  build retrains from the base model on all of the series' sets. Lookups via
+  `kelt.train.manifest.series()` / `find_set()` and `kelt train series`. See docs/training.md.
+- Any training series can be deployed by commit (`kelt.train.manifest.deploy()`, `active()`);
+  sets and builds take JSON annotations; `prune()` / `drop()` / `wipe()` delete a series'
+  weights, a series, or an adapter key. Replace deploys never leave the key undeployed.
+
+### Changed
+- **Breaking:** every kelt table is renamed to `kelt_<name>` (`kelt_atomic_facts`,
+  `kelt_embeddings_384_f16`, ...), with its indexes, constraints and sequences. Schema
+  revision 007 applies the rename on the next `ensure_schema()`; all processes sharing a
+  schema must upgrade together, and SQL naming kelt tables must use the new names.
+- Revision 007 also changes `kelt_content.id` to bigint, the type of the columns referencing
+  it (rewriting the table under an exclusive lock), and drops 17 indexes, plus one per
+  embedding table, whose columns lead another index of the same table.
+- `ensure_schema()` raises `ConflictError` on a schema with kelt tables but no version table,
+  instead of using the tables. Create schemas with `ensure_schema()`, not `create_all()`.
+- Revisions before 005 are removed: new schemas are created only by `ensure_schema()`, and a
+  schema at an older revision must be recreated.
+- The `training` extra requires current releases: `transformers>=5.18`,
+  `trl>=1.14`, `peft>=0.21`, `torch>=2.13`, `accelerate>=1.15`, `datasets>=5.0`,
+  `bitsandbytes>=0.50`. transformers 4.x is no longer supported.
+- The trainers and all ML-stack code moved to `llm_kelt.training.runtime`
+  (`lora`, `dpo`, `prompt`, `model`, `dataset`, `merge`, `peft_config`), so type-checking
+  against the training API no longer analyses torch, transformers, peft, trl or datasets.
+  **Breaking:** trainers require `base_model`; `Config.to_peft_config()` moved to
+  `runtime.peft_config`.
+- Minimum `appinfra` raised to 0.13.0 (`appinfra.cas`, used by training lineage).
+- LoRA `target_modules` defaults to the model family's set (resolved after loading) instead of
+  a fixed Qwen2.5 list. A pre-quantized checkpoint always loads with its stored config, also
+  with `quantize=False`.
+- `dev` extra allows pytest-asyncio 1.x (was `<1.0`).
+- `sqlalchemy` is capped below 2.1, which breaks `sqlalchemy-utils`.
+- Manifest submit is atomic: `pending/` never holds a partially written manifest, and a
+  concurrent submit for the same key fails instead of overwriting.
+- SFT and prompt-tuning data are tokenized from the chat template directly, which
+  drops a stray end-of-turn token TRL appended after templates ending in a newline
+  (e.g. Qwen). The LoRA trainer now also accepts `prompt`/`response` record fields.
+
+### Fixed
+- Saving a manifest whose inline records contain nested objects no longer fails
+  after the manifest was loaded from YAML.
+- LoRA and prompt-tuning training work on transformers 5 (which removed
+  `warmup_ratio`); `warmup_ratio` is converted to warmup steps, rounded up as
+  transformers does, so DPO runs may get one more warmup step than before.
+- Training a model with bfloat16 weights no longer crashes in the fp16 grad scaler:
+  a manifest that sets neither `fp16` nor `bf16` trains such models in bf16.
+- Compressed-tensors checkpoints with a quantized KV cache load for training; the
+  `kv_cache_scheme` is ignored at load, since training does not use it.
+- Schema upgrades of an existing database run on the client's own database connection and
+  its configured settings, instead of a separate connection that could fail to connect.
+- `alembic downgrade` from the head revision runs the downgrade; it was skipped as
+  "already at head".
+- `ensure_schema()` creates `kelt_conv_sessions`, which it skipped unless
+  `llm_kelt.conversation.storage.db` was imported first; revision 007 adds it where missing.
+  `DbSessionStorage` is exported from `llm_kelt.conversation`.
+- Revision 006 drops `fact_embeddings` only in the schema being upgraded, not in `public`.
+
 ## [0.4.5] - 2026-09-07
 
 ### Changed
@@ -345,7 +421,8 @@ Config keys: `model_name` → `model`, added `type` (provider: "openai"/"google"
 - Example scripts for common workflows
 - API reference documentation in README
 
-[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/llm-works/llm-kelt/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/llm-works/llm-kelt/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/llm-works/llm-kelt/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/llm-works/llm-kelt/compare/v0.4.2...v0.4.3

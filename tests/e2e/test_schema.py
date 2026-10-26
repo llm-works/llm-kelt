@@ -3,14 +3,18 @@
 
 """Tests for schema management and migrations."""
 
+import shutil
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 import pytest
+import sqlalchemy
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
-from llm_kelt.core.errors import SchemaVersionError
+import llm_kelt
+from llm_kelt.core.errors import ConflictError, SchemaVersionError
 from llm_kelt.core.schema import _VERSION_TABLE_NAME, SchemaManager, SchemaState
 
 
@@ -147,7 +151,7 @@ class TestSchemaManager:
             status = manager.get_status()
             assert status.state == SchemaState.TOO_NEW
 
-            with pytest.raises(SchemaVersionError, match="newer than"):
+            with pytest.raises(SchemaVersionError, match="unknown to this library"):
                 manager.ensure_schema()
         finally:
             # Always restore correct version, even if test fails
@@ -208,6 +212,182 @@ class TestSchemaManager:
             finally:
                 holder_conn.execute(text(f"SELECT pg_advisory_unlock({_ADVISORY_LOCK_KEY})"))
                 holder_conn.commit()
+
+
+_REVISION = """\
+from alembic import op
+
+revision = "{rev}"
+down_revision = {down}
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    op.execute({sql!r})
+
+
+def downgrade():
+    pass
+"""
+
+
+def _write_migrations(path: Path, revisions: dict[str, str]) -> Path:
+    """A migrations dir with kelt's env.py and a chain of revisions, each running its SQL."""
+    versions = path / "versions"
+    versions.mkdir(parents=True)
+    shutil.copy(Path(llm_kelt.__file__).parent / "migrations" / "env.py", path / "env.py")
+    (path / "alembic.ini").write_text("[alembic]\nscript_location = %(here)s\n")
+    down = None
+    for rev, sql in revisions.items():
+        source = _REVISION.format(rev=rev, down=repr(down), sql=sql)
+        (versions / f"{rev}.py").write_text(source)
+        down = rev
+    return path
+
+
+@pytest.mark.xdist_group("schema")
+class TestUpgrade:
+    """Upgrades across a revision, through kelt's env.py."""
+
+    _SCHEMA = "kelt_upgrade_test"
+
+    def _stamp(self, engine, revision: str) -> None:
+        schema = self._SCHEMA
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+            conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+            conn.execute(
+                text(
+                    f'CREATE TABLE "{schema}"."{_VERSION_TABLE_NAME}" '
+                    f"(version_num VARCHAR(32) PRIMARY KEY)"
+                )
+            )
+            conn.execute(
+                text(f'INSERT INTO "{schema}"."{_VERSION_TABLE_NAME}" VALUES (:rev)'),
+                {"rev": revision},
+            )
+
+    def test_upgrade_runs_on_the_managers_engine(
+        self, logger, pg_with_tables, tmp_path, monkeypatch
+    ):
+        """The upgrade runs and commits on SchemaManager's engine.
+
+        A second engine built from a URL would not reproduce the manager's connection
+        settings, so creating one fails the test.
+        """
+        engine = pg_with_tables.engine
+        revisions = {"r1": "SELECT 1", "r2": "CREATE TABLE upgrade_probe_r2 (id integer)"}
+        migrations = _write_migrations(tmp_path / "migrations", revisions)
+        manager = SchemaManager(
+            logger, engine, migrations_path=migrations, schema_name=self._SCHEMA
+        )
+        self._stamp(engine, "r1")
+
+        def no_engine(*args, **kwargs):
+            raise AssertionError("migration created an engine of its own")
+
+        try:
+            monkeypatch.setattr(sqlalchemy, "create_engine", no_engine)
+            assert manager.get_status().state == SchemaState.NEEDS_UPGRADE
+            status = manager.ensure_schema()
+            monkeypatch.undo()
+
+            assert status.state == SchemaState.CURRENT
+            assert status.current_version == "r2"
+            with engine.connect() as conn:
+                tables = sqlalchemy.inspect(conn).get_table_names(schema=self._SCHEMA)
+            assert "upgrade_probe_r2" in tables
+        finally:
+            monkeypatch.undo()
+            with engine.begin() as conn:
+                conn.execute(text(f'DROP SCHEMA IF EXISTS "{self._SCHEMA}" CASCADE'))
+
+    def test_failed_upgrade_rolls_back(self, logger, pg_with_tables, tmp_path):
+        """A revision failing mid-upgrade rolls back the revisions before it with it."""
+        engine = pg_with_tables.engine
+        revisions = {
+            "r1": "SELECT 1",
+            "r2": "CREATE TABLE upgrade_probe_r2 (id integer)",
+            "r3": "SELECT * FROM upgrade_probe_missing",
+        }
+        migrations = _write_migrations(tmp_path / "migrations", revisions)
+        manager = SchemaManager(
+            logger, engine, migrations_path=migrations, schema_name=self._SCHEMA
+        )
+        self._stamp(engine, "r1")
+
+        try:
+            with pytest.raises(ProgrammingError):
+                manager.ensure_schema()
+
+            with engine.connect() as conn:
+                tables = sqlalchemy.inspect(conn).get_table_names(schema=self._SCHEMA)
+                version = conn.execute(
+                    text(f'SELECT version_num FROM "{self._SCHEMA}"."{_VERSION_TABLE_NAME}"')
+                ).scalar()
+            assert "upgrade_probe_r2" not in tables
+            assert version == "r1"
+        finally:
+            with engine.begin() as conn:
+                conn.execute(text(f'DROP SCHEMA IF EXISTS "{self._SCHEMA}" CASCADE'))
+
+
+@pytest.mark.xdist_group("schema")
+class TestBootstrapExistingTables:
+    """Bootstrap of a schema that holds tables but no version table."""
+
+    _SCHEMA = "kelt_bootstrap_existing_test"
+
+    @pytest.fixture
+    def engine(self, pg_with_tables):
+        engine = pg_with_tables.engine
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{self._SCHEMA}" CASCADE'))
+            conn.execute(text(f'CREATE SCHEMA "{self._SCHEMA}"'))
+        yield engine
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{self._SCHEMA}" CASCADE'))
+
+    def _tables(self, engine) -> set[str]:
+        with engine.connect() as conn:
+            return set(sqlalchemy.inspect(conn).get_table_names(schema=self._SCHEMA))
+
+    def test_other_table_names_untouched(self, logger, engine):
+        """A table named like no kelt table stays as it is; kelt creates its own."""
+        with engine.begin() as conn:
+            conn.execute(text(f'CREATE TABLE "{self._SCHEMA}".content (body text)'))
+            conn.execute(text(f"INSERT INTO \"{self._SCHEMA}\".content VALUES ('theirs')"))
+
+        status = SchemaManager(logger, engine, schema_name=self._SCHEMA).ensure_schema()
+
+        assert status.state == SchemaState.CURRENT
+        assert {"content", "kelt_content"} <= self._tables(engine)
+        with engine.connect() as conn:
+            rows = conn.execute(text(f'SELECT body FROM "{self._SCHEMA}".content')).all()
+        assert rows == [("theirs",)]
+
+    @pytest.mark.parametrize("from_models", [False, True], ids=["other-columns", "kelt-columns"])
+    def test_kelt_tables_without_version_table_refused(self, logger, engine, from_models):
+        """kelt tables without the version table fail the bootstrap; nothing is created.
+
+        Whether created by someone else or left after the version table was dropped.
+        """
+        manager = SchemaManager(logger, engine, schema_name=self._SCHEMA)
+        if from_models:
+            manager.ensure_schema()
+            setup_sql = f'DROP TABLE "{self._SCHEMA}"."{_VERSION_TABLE_NAME}"'
+        else:
+            setup_sql = f'CREATE TABLE "{self._SCHEMA}".kelt_content (body text)'
+        with engine.begin() as conn:
+            conn.execute(text(setup_sql))
+        before = self._tables(engine)
+
+        with pytest.raises(ConflictError, match=r"has kelt tables \['kelt_\w+'.* but no"):
+            manager.ensure_schema()
+
+        assert "kelt_content" in before
+        assert self._tables(engine) == before
 
 
 @pytest.mark.xdist_group("schema")

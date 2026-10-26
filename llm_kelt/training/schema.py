@@ -42,6 +42,27 @@ class SubmitResult(FieldDict):
     timestamp: datetime
     # Storage location (path for file, URI for DB, etc.)
     location: str
+    # Lineage commit holding the submitted set (series manifests only)
+    commit: str | None = None
+    # Whether the submit added the set; False when it was already in the series
+    created: bool = True
+    # Whether the submit started the series (series manifests only)
+    root: bool = False
+
+
+class ActiveSeries(FieldDict):
+    """The series an adapter key serves: the series of its deployed version."""
+
+    # Adapter key
+    adapter: str
+    # Series name
+    series: str
+    # Commit the deployed version was built from
+    commit: str
+    # Deployed version
+    version_id: str
+    # MD5 hash of the deployed weights
+    md5: str
 
 
 # Training hyperparameter defaults
@@ -63,6 +84,9 @@ TRAINING_DEFAULTS = DotDict(
     # NEFTune: adds noise to embeddings during training. Improves instruction following
     # and helps prevent overfitting on small datasets. None = disabled. See arXiv:2310.05914.
     neftune_noise_alpha=None,
+    # SFT and prompt tuning: compute the loss on the completion only, excluding the prompt
+    # tokens. False = loss on the whole sequence (prompt and completion).
+    completion_only_loss=False,
 )
 
 # Keys to persist in completed manifests for reproducibility.
@@ -104,6 +128,9 @@ class RunResult(FieldDict):
     adapter: Adapter | None = None
     # Parent adapter this was trained from (for lineage tracking)
     parent: Adapter | None = None
+    # Series and lineage commit the run built (see training/lineage.py); None for a one-off run
+    series: str | None = None
+    commit: str | None = None
     # Error message if status is "failed"
     error: str | None = None
 
@@ -111,3 +138,16 @@ class RunResult(FieldDict):
     def duration_seconds(self) -> float:
         """Calculate training duration in seconds."""
         return float((self.completed_at - self.started_at).total_seconds())
+
+
+class QueueStatus(FieldDict):
+    """State of the latest submission for an adapter key in the training queue."""
+
+    # Adapter key
+    adapter: str
+    # "pending", "running", "completed" or "failed"
+    state: str
+    # Manifest creation time; identifies which submission this status belongs to
+    created_at: datetime | None = None
+    # Training result (completed or failed), with adapter identity or error
+    output: RunResult | None = None

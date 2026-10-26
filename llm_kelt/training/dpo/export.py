@@ -11,6 +11,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -81,7 +82,10 @@ def export_preferences(
     with session_factory() as session:
         count = 0
         with output_path.open("w", encoding="utf-8") as f:
-            for _, details in session.execute(stmt):
+            for row in session.execute(stmt):
+                # Rows are (Fact, PreferenceDetails). The cast keeps the type independent of
+                # SQLAlchemy's stubs: 2.0 types these rows as Any, 2.1 as object.
+                details = cast(PreferenceDetails, row[1])
                 record = {
                     "prompt": details.context,
                     "chosen": details.chosen,

@@ -29,9 +29,8 @@ INFRA_DEV_CHECK_EXAMPLES := true
 INFRA_DEV_CQ_EXCLUDE := llm_kelt/examples/*
 
 # Skip built-in targets (we define custom ones below)
-# - type: examples import torch/transformers which cause mypy to hang
 # - test.e2e: GPU tests must run sequentially to avoid OOM
-INFRA_DEV_SKIP_TARGETS := type test.e2e
+INFRA_DEV_SKIP_TARGETS := test.e2e
 
 # PostgreSQL configuration
 INFRA_PG_CONFIG_FILE := pg.yaml
@@ -47,12 +46,6 @@ include $(infra)/make/Makefile.dev
 include $(infra)/make/Makefile.pytest
 include $(infra)/make/Makefile.clean
 include $(infra)/make/Makefile.install
-
-# Custom type checking: core package needs full checking, examples need --follow-imports=skip
-# (examples import torch/transformers which cause mypy to hang without this flag)
-type::
-	@$(PYTHON) -m mypy $(INFRA_DEV_PKG_NAME)/ --exclude 'examples/'
-	@if [ -d "examples" ]; then $(PYTHON) -m mypy examples/ --follow-imports=skip --ignore-missing-imports; fi
 
 # Custom e2e tests: run sequentially (-n 0) because GPU tests can't share GPU memory
 # Note: single colon overrides the infra target (double colon would append)

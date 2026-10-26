@@ -17,6 +17,7 @@ New embedding tables are created on-demand by the application:
 from collections.abc import Sequence
 
 from alembic import op
+from sqlalchemy import text
 
 revision: str = "006"
 down_revision: str = "005"
@@ -25,11 +26,16 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # Use IF EXISTS - indexes/table may not exist on all deployments
-    op.execute("DROP INDEX IF EXISTS idx_fact_embeddings_vector_1536")
-    op.execute("DROP INDEX IF EXISTS idx_fact_embedding_model")
-    op.execute("DROP INDEX IF EXISTS idx_fact_embedding_entity")
-    op.execute("DROP TABLE IF EXISTS fact_embeddings")
+    # Schema-qualified: unqualified, a name missing from the schema resolves through the
+    # rest of the search_path (public). IF EXISTS: not every deployment has these objects.
+    schema = op.get_bind().execute(text("SELECT current_schema()")).scalar_one()
+    for kind, name in (
+        ("INDEX", "idx_fact_embeddings_vector_1536"),
+        ("INDEX", "idx_fact_embedding_model"),
+        ("INDEX", "idx_fact_embedding_entity"),
+        ("TABLE", "fact_embeddings"),
+    ):
+        op.execute(f'DROP {kind} IF EXISTS "{schema}"."{name}"')
 
 
 def downgrade() -> None:
