@@ -135,6 +135,7 @@ markers = [
     "e2e: marks tests as end-to-end tests (require full system)",
     "llm: marks tests as requiring a running LLM (deselect with '-m \"not llm\"')",
     "training: marks tests requiring training dependencies (torch, transformers, peft, trl)",
+    "gpu: marks tests using the local GPU; its memory is released after each test",
 ]
 
 [tool.coverage.run]

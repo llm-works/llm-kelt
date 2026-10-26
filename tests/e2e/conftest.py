@@ -25,8 +25,11 @@ def _get_gpu_memory_mb() -> float:
 
 
 @pytest.fixture(autouse=True)
-def cleanup_gpu_memory():
-    """Clear GPU memory after each test to prevent OOM in subsequent tests."""
+def cleanup_gpu_memory(request):
+    """Clear GPU memory after each test marked gpu to prevent OOM in subsequent tests."""
+    if request.node.get_closest_marker("gpu") is None:
+        yield
+        return
     # Record baseline before test (inference server memory is expected)
     baseline_mb = _get_gpu_memory_mb()
     yield

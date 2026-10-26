@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.gpu
+
 SFT_RECORDS = [{"instruction": f"Say the word foo{i}.", "output": f"foo{i}"} for i in range(8)]
 DPO_RECORDS = [
     {"prompt": f"Say the word foo{i}.", "chosen": f"foo{i}", "rejected": "bar"} for i in range(8)
