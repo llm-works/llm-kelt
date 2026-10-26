@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a fixed Qwen2.5 list. A pre-quantized checkpoint always loads with its stored config, also
   with `quantize=False`.
 - `dev` extra allows pytest-asyncio 1.x (was `<1.0`).
+- `sqlalchemy` is capped below 2.1, which breaks `sqlalchemy-utils`.
 - Manifest submit is atomic: `pending/` never holds a partially written manifest, and a
   concurrent submit for the same key fails instead of overwriting.
 - SFT and prompt-tuning data are tokenized from the chat template directly, which

@@ -23,7 +23,8 @@ dependencies = [
     "appinfra>=0.11.0",
 
     # Storage
-    "sqlalchemy>=2.0,<3.0",
+    # SQLAlchemy 2.1 made ScalarAttributeImpl private, which breaks sqlalchemy-utils
+    "sqlalchemy>=2.0,<2.1",
     "sqlalchemy-utils>=0.42,<1.0",
     "psycopg2-binary>=2.9,<3.0",
     "pgvector>=0.3,<1.0",
