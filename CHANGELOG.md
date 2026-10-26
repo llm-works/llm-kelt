@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-25
+
 ### Added
 - `llm_kelt.conversation.ConversationFactory`: bundles `lg`/`config`/`compactor`
   and satisfies saia's `ConversationFactory` Protocol (`create()`,
@@ -42,13 +44,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of using the tables. Create schemas with `ensure_schema()`, not `create_all()`.
 - Revisions before 005 are removed: new schemas are created only by `ensure_schema()`, and a
   schema at an older revision must be recreated.
-- **Breaking:** the `training` extra requires current releases: `transformers>=5.18`,
+- The `training` extra requires current releases: `transformers>=5.18`,
   `trl>=1.14`, `peft>=0.21`, `torch>=2.13`, `accelerate>=1.15`, `datasets>=5.0`,
   `bitsandbytes>=0.50`. transformers 4.x is no longer supported.
-- **Breaking:** the trainers and all ML-stack code moved to `llm_kelt.training.runtime`
+- The trainers and all ML-stack code moved to `llm_kelt.training.runtime`
   (`lora`, `dpo`, `prompt`, `model`, `dataset`, `merge`, `peft_config`), so type-checking
   against the training API no longer analyses torch, transformers, peft, trl or datasets.
-  `Config.to_peft_config()` moved to `runtime.peft_config`; trainers require `base_model`.
+  **Breaking:** trainers require `base_model`; `Config.to_peft_config()` moved to
+  `runtime.peft_config`.
+- Minimum `appinfra` raised to 0.13.0 (`appinfra.cas`, used by training lineage).
 - LoRA `target_modules` defaults to the model family's set (resolved after loading) instead of
   a fixed Qwen2.5 list. A pre-quantized checkpoint always loads with its stored config, also
   with `quantize=False`.
@@ -417,7 +421,8 @@ Config keys: `model_name` → `model`, added `type` (provider: "openai"/"google"
 - Example scripts for common workflows
 - API reference documentation in README
 
-[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/llm-works/llm-kelt/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/llm-works/llm-kelt/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/llm-works/llm-kelt/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/llm-works/llm-kelt/compare/v0.4.2...v0.4.3
