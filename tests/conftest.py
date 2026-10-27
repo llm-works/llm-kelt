@@ -68,12 +68,11 @@ def pytest_cmdline_main(config):
     """
     # Check if running e2e tests
     markexpr = config.getoption("-m", default="")
-    if "e2e" in markexpr:
-        # Force sequential execution by setting numprocesses to 0
-        if hasattr(config.option, "numprocesses") and config.option.numprocesses:
-            original = config.option.numprocesses
-            config.option.numprocesses = 0
-            print(f"\n*** E2E detected: forcing sequential (was -n {original}) ***\n")
+    # Force sequential execution by setting numprocesses to 0
+    if "e2e" in markexpr and getattr(config.option, "numprocesses", None):
+        original = config.option.numprocesses
+        config.option.numprocesses = 0
+        print(f"\n*** E2E detected: forcing sequential (was -n {original}) ***\n")
 
 
 def pytest_configure(config):
@@ -429,14 +428,13 @@ def clean_tables(database, test_context):
 @pytest.fixture
 def sample_content(kelt_client, clean_tables):
     """Create sample content for testing."""
-    content_id = kelt_client.content.create(
+    return kelt_client.content.create(
         content_text="This is a test article about AI and machine learning.",
         source="test",
         external_id="test_001",
         title="Test Article",
         extra={"category": "tech"},
     )
-    return content_id
 
 
 @pytest.fixture
@@ -447,13 +445,12 @@ def sample_feedback(kelt_client, clean_tables):
         content_text="Sample content for feedback",
         source="test",
     )
-    feedback_id = kelt_client.atomic.feedback.record(
+    return kelt_client.atomic.feedback.record(
         signal="positive",
         content_id=content_id,
         strength=0.9,
         tags=["interesting"],
     )
-    return feedback_id
 
 
 # Default embedding dimensions (matches default EmbeddingConfig)

@@ -300,18 +300,7 @@ class AssertionsClient(FactClient[None]):
         Returns:
             List of distinct category names (excluding None).
         """
-        with self._session_factory() as session:
-            stmt = select(Fact.category).where(
-                Fact.type == self.fact_type,
-                Fact.category.isnot(None),
-            )
-
-            context_filter = self._build_context_filter(Fact.context_key)
-            if context_filter is not None:
-                stmt = stmt.where(context_filter)
-
-            stmt = stmt.distinct().order_by(Fact.category)
-            return [c for c in session.scalars(stmt).all() if c is not None]
+        return self._list_categories()
 
     def list_active(
         self,
@@ -366,5 +355,4 @@ class AssertionsClient(FactClient[None]):
                 stmt = stmt.where(context_filter)
 
             stmt = stmt.group_by(Fact.category)
-            results = session.execute(stmt).all()
-            return {cat: count for cat, count in results}
+            return dict(session.execute(stmt).tuples().all())

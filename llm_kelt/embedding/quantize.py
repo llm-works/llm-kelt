@@ -156,14 +156,13 @@ def quantize(
     """
     if fmt == QuantizationFormat.F32:
         return embedding
-    elif fmt == QuantizationFormat.F16:
+    if fmt == QuantizationFormat.F16:
         return embedding  # pgvector handles conversion
-    elif fmt == QuantizationFormat.I8:
+    if fmt == QuantizationFormat.I8:
         return quantize_int8(embedding, calibration)
-    elif fmt == QuantizationFormat.I4:
+    if fmt == QuantizationFormat.I4:
         return quantize_int4(embedding, calibration)
-    else:
-        raise ValueError(f"Unknown format: {fmt}")
+    raise ValueError(f"Unknown format: {fmt}")
 
 
 def dequantize(qemb: QuantizedEmbedding) -> list[float]:
@@ -177,10 +176,9 @@ def dequantize(qemb: QuantizedEmbedding) -> list[float]:
     """
     if qemb.format == QuantizationFormat.I8:
         return dequantize_int8(qemb)
-    elif qemb.format == QuantizationFormat.I4:
+    if qemb.format == QuantizationFormat.I4:
         return dequantize_int4(qemb)
-    else:
-        raise ValueError(f"Cannot dequantize format: {qemb.format}")
+    raise ValueError(f"Cannot dequantize format: {qemb.format}")
 
 
 def pack_scale_offset(scale: float, offset: float) -> bytes:

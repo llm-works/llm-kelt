@@ -603,9 +603,13 @@ class EntityRelationshipStore:
             for rel in rels:
                 if direction in ("from", "both") and rel.from_entity_id in results:
                     results[rel.from_entity_id].append(rel)
-                if direction in ("to", "both") and rel.to_entity_id in results:
-                    if rel.to_entity_id != rel.from_entity_id or direction == "to":
-                        results[rel.to_entity_id].append(rel)
+                # Under "both", a self-loop is already listed by the "from" branch
+                if (
+                    direction in ("to", "both")
+                    and rel.to_entity_id in results
+                    and (rel.to_entity_id != rel.from_entity_id or direction == "to")
+                ):
+                    results[rel.to_entity_id].append(rel)
             detach_all(rels, s)
             return results
 

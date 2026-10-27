@@ -20,7 +20,12 @@ from typing import TYPE_CHECKING, Any
 
 from ..tokens import Tokenizer, estimate_message_tokens, estimate_tokens
 from ..types import Message, Role
-from ._helpers import build_compacted_messages, check_guards, format_messages_for_summary
+from ._helpers import (
+    build_compacted_messages,
+    build_guard_context,
+    check_guards,
+    format_messages_for_summary,
+)
 from .base import AsyncCompactor, Compactor
 from .guard import CompactionContext, CompactionGuard
 
@@ -175,32 +180,6 @@ class _TieredMixin:
             kwargs["model"] = self._model
         return llm_messages, kwargs
 
-    def _build_guard_context(
-        self,
-        preserved: list[Message],
-        before_messages: list[Message],
-        summary: str,
-        before_tokens: int,
-        attempt: int,
-        tokenizer: Tokenizer | None,
-    ) -> CompactionContext:
-        """Build context for guard validation."""
-        after_messages = build_compacted_messages(preserved, summary)
-        after_tokens = sum(
-            estimate_message_tokens(m.role, m.content, m.tool_calls, tokenizer=tokenizer)
-            for m in after_messages
-        )
-        summary_tokens = estimate_tokens(summary, tokenizer=tokenizer)
-        return CompactionContext(
-            before_messages=before_messages,
-            after_messages=after_messages,
-            before_tokens=before_tokens,
-            after_tokens=after_tokens,
-            summary=summary,
-            summary_tokens=summary_tokens,
-            attempt=attempt,
-        )
-
 
 class TieredCompactor(_TieredMixin, Compactor):
     """Two-phase compaction: trim tool outputs first, summarize later.
@@ -280,14 +259,14 @@ class TieredCompactor(_TieredMixin, Compactor):
         tokenizer: Tokenizer | None,
     ) -> str:
         """Generate summary with guard validation and retry logic."""
-        guard_attempts: dict[int, int] = {i: 0 for i in range(len(self._guards))}
+        guard_attempts: dict[int, int] = dict.fromkeys(range(len(self._guards)), 0)
         feedback: str | None = None
         attempt = 0
 
         # Empty guards: check_guards returns None immediately, loop exits first iteration.
         while True:
             summary = self._call_llm(to_compact, feedback, attempt)
-            ctx = self._build_guard_context(
+            ctx = build_guard_context(
                 preserved, before_messages, summary, before_tokens, attempt, tokenizer
             )
             feedback = check_guards(self._guards, ctx, guard_attempts)
@@ -385,14 +364,14 @@ class AsyncTieredCompactor(_TieredMixin, AsyncCompactor):
         tokenizer: Tokenizer | None,
     ) -> str:
         """Generate summary with guard validation and retry logic."""
-        guard_attempts: dict[int, int] = {i: 0 for i in range(len(self._guards))}
+        guard_attempts: dict[int, int] = dict.fromkeys(range(len(self._guards)), 0)
         feedback: str | None = None
         attempt = 0
 
         # Empty guards: check_guards returns None immediately, loop exits first iteration.
         while True:
             summary = await self._call_llm(to_compact, feedback, attempt)
-            ctx = self._build_guard_context(
+            ctx = build_guard_context(
                 preserved, before_messages, summary, before_tokens, attempt, tokenizer
             )
             feedback = check_guards(self._guards, ctx, guard_attempts)
@@ -525,14 +504,13 @@ def _extract_summary(tool_name: str, content: str) -> str:
     """Extract a useful summary from tool output."""
     if tool_name == "web_search":
         return _summarize_search_results(content)
-    elif tool_name == "web_fetch":
+    if tool_name == "web_fetch":
         return _summarize_fetch_result(content)
-    else:
-        # Generic: head + tail with middle trimmed
-        threshold = _SUMMARY_HEAD_CHARS + _SUMMARY_TAIL_CHARS + 100
-        if len(content) > threshold:
-            return f"{content[:_SUMMARY_HEAD_CHARS]}\n...[trimmed]...\n{content[-_SUMMARY_TAIL_CHARS:]}"
-        return content[: _SUMMARY_HEAD_CHARS + _SUMMARY_TAIL_CHARS]
+    # Generic: head + tail with middle trimmed
+    threshold = _SUMMARY_HEAD_CHARS + _SUMMARY_TAIL_CHARS + 100
+    if len(content) > threshold:
+        return f"{content[:_SUMMARY_HEAD_CHARS]}\n...[trimmed]...\n{content[-_SUMMARY_TAIL_CHARS:]}"
+    return content[: _SUMMARY_HEAD_CHARS + _SUMMARY_TAIL_CHARS]
 
 
 def _summarize_search_results(content: str) -> str:

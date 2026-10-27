@@ -46,7 +46,7 @@ llm-kelt = "llm_kelt.cli:main"
 [project.optional-dependencies]
 dev = [
     "coverage>=7.0.0,<8.0.0",
-    "ruff>=0.1.0,<1.0.0",
+    "ruff>=0.16.0,<1.0.0",  # 0.16 formats code blocks in Markdown, as CI's format check does
     "mypy>=1.0.0,<2.0.0",
     "types-PyYAML>=6.0,<7.0",
     "pytest>=7.0.0,<10.0.0",
@@ -76,13 +76,28 @@ select = [
     "I",   # isort
     "N",   # pep8-naming
     "UP",  # pyupgrade
+    "C90", # mccabe complexity
+    "SIM", # flake8-simplify
+    "RET", # flake8-return
+    "PIE", # flake8-pie
+    "PERF", # perflint
+    "FURB", # refurb
+    "C4",  # flake8-comprehensions
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
 ]
 
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
 [tool.ruff.lint.isort]
 known-first-party = ["llm_kelt"]
+
+[tool.ruff.lint.per-file-ignores]
+"llm_kelt/examples/**/*.py" = [
+    "C90", "SIM", "RET", "PIE", "PERF", "FURB", "C4",  # code-quality rules: core code only
+]
 
 [tool.mypy]
 python_version = "3.11"

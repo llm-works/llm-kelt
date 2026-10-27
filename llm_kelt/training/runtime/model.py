@@ -8,6 +8,7 @@ Provides model detection, quantization config, and training config helpers.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 from pathlib import Path
@@ -228,16 +229,12 @@ def _coerce_types(config: dict[str, Any]) -> dict[str, Any]:
     result = dict(config)
     for key in _INT_KEYS:
         if key in result and result[key] is not None:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 result[key] = int(float(result[key]))
-            except (ValueError, TypeError):
-                pass
     for key in _FLOAT_KEYS:
         if key in result and result[key] is not None:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 result[key] = float(result[key])
-            except (ValueError, TypeError):
-                pass
     return result
 
 
@@ -287,9 +284,8 @@ def _apply_precision_settings(lg: Logger, base_model: str, config: dict, overrid
         for key in ("fp16", "bf16"):
             config[key] = explicit.get(key, False)
         return
-    for key, value in (_checkpoint_precision(lg, base_model) or {}).items():
-        if key not in overrides:
-            config[key] = value
+    detected = _checkpoint_precision(lg, base_model) or {}
+    config.update({key: value for key, value in detected.items() if key not in overrides})
 
 
 def compute_warmup_steps(num_samples: int, tc: DotDict) -> int:

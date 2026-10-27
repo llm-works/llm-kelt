@@ -188,10 +188,7 @@ class SchemaManager:
         script = ScriptDirectory.from_config(config)
         try:
             # walk_revisions yields all revisions from base to head
-            for rev in script.walk_revisions():
-                if rev.revision == version:
-                    return True
-            return False
+            return any(rev.revision == version for rev in script.walk_revisions())
         except Exception:
             return False
 

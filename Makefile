@@ -18,6 +18,13 @@ export KELT_TEST_CONFIG_FILE := $(local)etc/llm-kelt.yaml
 # - false: Report violations but don't fail (development mode)
 INFRA_DEV_CQ_STRICT := true
 
+# No ruff rules reported as warnings only: they are enforced in pyproject's select
+INFRA_DEV_CQ_LINT_SELECT :=
+
+# Fail on duplicated code blocks and unused private definitions
+INFRA_DEV_CQ_DUP := strict
+INFRA_DEV_CQ_DEAD := strict
+
 # Enforce SPDX license headers on all source files
 INFRA_DEV_CQ_SPDX := true
 
