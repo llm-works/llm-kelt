@@ -100,7 +100,7 @@ class TestRole:
     def test_role_string_comparison(self):
         """StrEnum should compare equal to plain strings."""
         assert Role.USER == "user"
-        assert "assistant" == Role.ASSISTANT
+        assert "assistant" == Role.ASSISTANT  # noqa: SIM300 - reflected comparison
 
 
 # =============================================================================

@@ -440,10 +440,6 @@ class Client:
         """
         return self._storage.list_completed_manifests()
 
-    def _validate_adapter_name(self, adapter: str) -> None:
-        """Validate adapter name has no path traversal characters."""
-        self._storage.validate_key(adapter)
-
     def get_pending(self, adapter: str, series: str | None = None) -> Manifest | None:
         """Get a pending manifest by adapter key.
 

@@ -142,7 +142,7 @@ class ContextQuery:
         # Get response
         response = await self._client.chat_async(
             messages=messages,
-            system=system if system else None,
+            system=system or None,
             temperature=temperature if temperature is not None else self._temperature,
             max_tokens=max_tokens,
         )
@@ -170,7 +170,7 @@ class ContextQuery:
         result = await self._embedder.embed_async(question, context=embedder_context)
 
         # Determine model for search
-        model = rag.model if rag.model else self._embedder.model
+        model = rag.model or self._embedder.model
 
         # Search for similar facts (category filtering done in SQL for efficiency)
         scored_facts = self._embedding_adapter.search_similar(

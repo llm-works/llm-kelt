@@ -27,11 +27,8 @@ from ..models import Content
 def _open_output(output: str | Path | TextIO) -> Generator[TextIO, None, None]:
     """Context manager for handling both file paths and file-like objects."""
     if isinstance(output, (str, Path)):
-        f = open(output, "w", encoding="utf-8")
-        try:
+        with open(output, "w", encoding="utf-8") as f:
             yield f
-        finally:
-            f.close()
     else:
         yield output
 

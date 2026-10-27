@@ -18,30 +18,30 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-TEXT_DIMS: dict[str, Any] = dict(
-    hidden_size=128,
-    intermediate_size=256,
-    num_hidden_layers=4,
-    num_attention_heads=4,
-    num_key_value_heads=2,
-    head_dim=32,
-    linear_key_head_dim=16,
-    linear_value_head_dim=16,
-    linear_num_key_heads=2,
-    linear_num_value_heads=4,
-    linear_conv_kernel_dim=4,
-    layer_types=["linear_attention"] * 3 + ["full_attention"],
-    full_attention_interval=4,
-    tie_word_embeddings=False,
-)
-VISION_DIMS: dict[str, Any] = dict(
-    depth=1,
-    hidden_size=32,
-    intermediate_size=64,
-    num_heads=2,
-    out_hidden_size=128,
-    num_position_embeddings=64,
-)
+TEXT_DIMS: dict[str, Any] = {
+    "hidden_size": 128,
+    "intermediate_size": 256,
+    "num_hidden_layers": 4,
+    "num_attention_heads": 4,
+    "num_key_value_heads": 2,
+    "head_dim": 32,
+    "linear_key_head_dim": 16,
+    "linear_value_head_dim": 16,
+    "linear_num_key_heads": 2,
+    "linear_num_value_heads": 4,
+    "linear_conv_kernel_dim": 4,
+    "layer_types": ["linear_attention"] * 3 + ["full_attention"],
+    "full_attention_interval": 4,
+    "tie_word_embeddings": False,
+}
+VISION_DIMS: dict[str, Any] = {
+    "depth": 1,
+    "hidden_size": 32,
+    "intermediate_size": 64,
+    "num_heads": 2,
+    "out_hidden_size": 128,
+    "num_position_embeddings": 64,
+}
 
 
 def _tiny_config(vocab: int, eos_token_id: int) -> Any:

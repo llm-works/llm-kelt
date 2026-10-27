@@ -8,16 +8,15 @@ Trains the model to prefer "chosen" responses over "rejected" ones.
 """
 
 import json
-from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from appinfra import DotDict
 from appinfra.log import Logger
 
 from ..lora.config import Config as LoraConfig
-from ..schema import TRAINING_CONFIG_KEYS, Adapter, RunResult
-from ..stability import check_training_stability, log_stability_warnings
-from .model import build_training_config, compute_warmup_steps
+from ..schema import Adapter, RunResult
+from .base import BaseTrainer, lora_config_summary
 from .peft_config import lora_peft_config
 
 
@@ -62,8 +61,11 @@ def _load_dpo_dataset(data_path: Path, eval_split: float):
     return dataset, None
 
 
-class Trainer:
+class Trainer(BaseTrainer):
     """Trainer for LoRA adapters using Direct Preference Optimization."""
+
+    METHOD = "dpo"
+    LABEL = "DPO training"
 
     def __init__(
         self,
@@ -77,36 +79,16 @@ class Trainer:
         quantize: bool | None = None,
         parent: Adapter | None = None,
     ):
-        self._lg = lg
-        self.data_path = Path(data_path)
-        self.output_dir = Path(output_dir)
-        self.base_model = base_model
+        super().__init__(lg, data_path, output_dir, base_model, training_config, quantize)
         self.lora_config = lora_config or LoraConfig()
-        self.training_config = build_training_config(lg, base_model, training_config)
         self.beta = beta
-        self._quantize_override = quantize  # None = auto-detect
         self.parent = parent
-        self._init_state()
 
-    def _init_state(self):
+    def _init_state(self) -> None:
         """Initialize mutable state to None (set during training)."""
-        self.model = None
-        self.ref_model = None
-        self.tokenizer = None
-        self.trainer = None
-        self.train_dataset = None
-        self.eval_dataset = None
-        self._is_quantized = False
+        super()._init_state()
+        self.ref_model: Any = None
         self._use_stacked_adapters = False  # True when parent adapter is stacked with DPO
-
-    def _load_tokenizer(self):
-        """Load tokenizer for the base model."""
-        from transformers import AutoTokenizer
-
-        # trust_remote_code required for Qwen and other models with custom architectures
-        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model, trust_remote_code=True)
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
 
     def _apply_lora_adapter(self):
         """Apply LoRA adapter - load existing or create new.
@@ -136,31 +118,21 @@ class Trainer:
             peft_config = lora_peft_config(self.lora_config)
             self.model = get_peft_model(self.model, peft_config)
 
-        trainable, total = self.model.get_nb_trainable_parameters()
-        pct = 100 * trainable / total if total > 0 else 0.0
-        self._lg.info(f"Trainable params: {trainable:,} / {total:,} ({pct:.2f}%)")
+        self._log_trainable_params()
 
     def _load_model(self):
         """Load base model with auto-detected quantization and apply LoRA."""
         import torch
         from peft import prepare_model_for_kbit_training
 
-        from .model import is_kbit_loaded, load_base_model
-
-        self._lg.info(f"loading base model: {self.base_model}")
-        self._load_tokenizer()
-
-        self.model = load_base_model(
-            self._lg, self.base_model, self._quantize_override, dtype=torch.bfloat16
-        )
-        self._is_quantized = is_kbit_loaded(self.model)
-
+        self._load_base_model(dtype=torch.bfloat16)
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
         if self._is_quantized:
             self.model = prepare_model_for_kbit_training(self.model)
 
         self._apply_lora_adapter()
+        self._log_reference_strategy()
 
     def _log_reference_strategy(self):
         """Log reference model strategy for DPO.
@@ -183,41 +155,12 @@ class Trainer:
         if self.eval_dataset:
             self._lg.info(f"loaded {len(self.eval_dataset)} eval pairs")
 
-    def _base_training_args(self) -> dict:
-        """Build base training arguments from config."""
-        tc = self.training_config
-        return dict(
-            output_dir=str(self.output_dir),
-            num_train_epochs=tc.num_epochs,
-            per_device_train_batch_size=tc.batch_size,
-            gradient_accumulation_steps=tc.gradient_accumulation_steps,
-            learning_rate=tc.learning_rate,
-            warmup_steps=compute_warmup_steps(len(self.train_dataset), tc),
-            max_grad_norm=tc.max_grad_norm,
-            logging_steps=tc.logging_steps,
-            save_steps=tc.save_steps,
-            save_total_limit=2,
-            fp16=tc.fp16,
-            bf16=tc.bf16,
-            gradient_checkpointing=tc.gradient_checkpointing,
-            seed=tc.seed,
-            report_to="none",
-            optim="paged_adamw_8bit",
-            max_length=tc.max_seq_length,
-            neftune_noise_alpha=tc.neftune_noise_alpha,
-        )
-
     def _create_training_args(self):
         """Create DPO training arguments."""
         from trl import DPOConfig
 
-        config_args = self._base_training_args()
-        config_args.update(
-            eval_strategy="steps" if self.eval_dataset else "no",
-            eval_steps=self.training_config.save_steps if self.eval_dataset else None,
-            load_best_model_at_end=self.eval_dataset is not None,
-            beta=self.beta,
-        )
+        config_args = self._training_args()
+        config_args["beta"] = self.beta
         if self._use_stacked_adapters:
             config_args["model_adapter_name"] = "default"
             config_args["ref_adapter_name"] = "ref"
@@ -292,101 +235,22 @@ class Trainer:
             "loss_start": first_log.get("loss", 0.0),
         }
 
-    def _add_stability_warnings(self, metrics: dict, log_history: list[dict]) -> None:
-        """Check for training instability and add warnings to metrics."""
-        stability_report = check_training_stability(log_history)
-        log_stability_warnings(self._lg, stability_report)
-        if not stability_report.stable:
-            metrics["unstable"] = True
-            metrics["stability_warnings"] = stability_report.warnings
+    def _method_metrics(self, history: list[dict]) -> dict[str, Any]:
+        """DPO reward metrics from the logged training steps."""
+        return self._extract_dpo_metrics([log for log in history if "rewards/accuracies" in log])
 
-    def _collect_metrics(self) -> dict:
-        """Extract training metrics from trainer log history."""
-        if self.trainer is None or not self.trainer.state.log_history:
-            return {}
-
-        log_history = self.trainer.state.log_history
-        capped_history = log_history[-100:]
-        metrics: dict = {"history": capped_history}
-
-        dpo_logs = [log for log in capped_history if "rewards/accuracies" in log]
-        metrics.update(self._extract_dpo_metrics(dpo_logs))
-
-        final_log = log_history[-1]
-        metrics["train_loss"] = final_log.get("train_loss", final_log.get("loss", 0.0))
-        metrics["train_runtime"] = final_log.get("train_runtime", 0.0)
-        metrics["train_samples_per_second"] = final_log.get("train_samples_per_second", 0.0)
-        metrics["epoch"] = final_log.get("epoch", 0.0)
-
-        if self.eval_dataset:
-            metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
-            # Re-capture history to include eval entries added by evaluate()
-            metrics["history"] = self.trainer.state.log_history[-100:]
-
-        self._add_stability_warnings(metrics, log_history)
-        return metrics
-
-    def _save_and_collect_metrics(self) -> tuple[Path, dict]:
-        """Save adapter and collect training metrics."""
-        if self.trainer is None:
-            raise RuntimeError("_create_trainer() must be called first")
-        if self.tokenizer is None:
-            raise RuntimeError("_load_model() must be called first")
-
-        final_path = self.output_dir / "final"
-        self.trainer.save_model(str(final_path))
-        self.tokenizer.save_pretrained(str(final_path))
-        self._lg.info(f"saved adapter to {final_path}")
-
-        return final_path, self._collect_metrics()
-
-    def _build_result(self, adapter_path: Path, metrics: dict, started_at: datetime) -> RunResult:
-        """Build the training result."""
-        # Adapter md5/mtime populated by caller (runner) after training
-        adapter = Adapter(md5="", mtime="", path=str(adapter_path))
-        return RunResult(
-            status="completed",
-            base_model=self.base_model,
-            method="dpo",
-            metrics=metrics,
-            config={
-                "lora": {
-                    "r": self.lora_config.r,
-                    "lora_alpha": self.lora_config.lora_alpha,
-                    "lora_dropout": self.lora_config.lora_dropout,
-                    "target_modules": self.lora_config.target_modules,
-                    "exclude_modules": self.lora_config.exclude_modules,
-                    "use_rslora": self.lora_config.use_rslora,
-                },
-                "training": {k: self.training_config[k] for k in TRAINING_CONFIG_KEYS},
-                "dpo": {"beta": self.beta},
-                "quantized": self._is_quantized,
-            },
-            started_at=started_at,
-            completed_at=datetime.now(UTC),
-            samples_trained=int(len(self.train_dataset) * self.training_config.num_epochs),  # type: ignore[arg-type]
-            adapter=adapter,
-            parent=self.parent,
-        )
+    def _run_config(self) -> dict[str, Any]:
+        """Hyperparameters the run records in its result."""
+        return {
+            "lora": lora_config_summary(self.lora_config),
+            "training": self._training_summary(),
+            "dpo": {"beta": self.beta},
+            "quantized": self._is_quantized,
+        }
 
     def train(self) -> RunResult:
         """Run the full training pipeline."""
-        started_at = datetime.now(UTC)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        self._lg.info(f"starting DPO training: {self.data_path} -> {self.output_dir}")
-
-        self._load_data()
-        self._load_model()
-        self._log_reference_strategy()
-        self._create_trainer()
-        if self.trainer is None:
-            raise RuntimeError("Failed to create trainer")
-
-        self.trainer.train()
-
-        adapter_path, metrics = self._save_and_collect_metrics()
-        return self._build_result(adapter_path, metrics, started_at)
+        return self._train(resume_from=None)
 
 
 def train_dpo(

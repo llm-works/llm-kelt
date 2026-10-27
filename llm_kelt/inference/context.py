@@ -122,10 +122,10 @@ class ContextBuilder:
             if base_prompt:
                 return f"{facts_section}\n\n{base_prompt}"
             return facts_section
-        else:  # append
-            if base_prompt:
-                return f"{base_prompt}\n\n{facts_section}"
-            return facts_section
+        # append
+        if base_prompt:
+            return f"{base_prompt}\n\n{facts_section}"
+        return facts_section
 
     def _format_facts(self, facts: list[Fact]) -> str:
         """
@@ -152,8 +152,7 @@ class ContextBuilder:
 
         # If all facts are uncategorized, just list them
         if len(categorized) == 1 and None in categorized:
-            for fact in facts:
-                lines.append(f"- {fact.content}")
+            lines.extend(f"- {fact.content}" for fact in facts)
         else:
             # Group by category
             for category, cat_facts in sorted(
@@ -161,8 +160,7 @@ class ContextBuilder:
             ):
                 if category:
                     lines.append(f"\n### {category.title()}")
-                for fact in cat_facts:
-                    lines.append(f"- {fact.content}")
+                lines.extend(f"- {fact.content}" for fact in cat_facts)
 
         return "\n".join(lines)
 

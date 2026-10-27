@@ -25,8 +25,6 @@ class EmbeddingBase(DeclarativeBase):
     migrations and ensures test isolation.
     """
 
-    pass
-
 
 class EmbeddingStoreProtocol(Protocol):
     """Protocol for format-specific embedding stores."""

@@ -297,7 +297,7 @@ def _check_layout(conn: Connection) -> None:
 def _is_kelt_table(name: str, columns: set[str]) -> bool:
     if name in _TABLES:
         return True
-    return bool(_EMBEDDING_TABLE.match(name)) and _EMBEDDING_COLUMNS <= columns
+    return bool(_EMBEDDING_TABLE.match(name)) and columns >= _EMBEDDING_COLUMNS
 
 
 def _add_prefix(name: str) -> str:
@@ -382,7 +382,7 @@ def _redundant_indexes(conn: Connection) -> list[tuple[str, str, tuple[str, ...]
         (index, table, columns) for index, (table, columns) in _REDUNDANT_INDEXES.items()
     ]
     for table, columns in _columns(conn).items():
-        if _EMBEDDING_TABLE.match(table) and _EMBEDDING_COLUMNS <= set(columns):
+        if _EMBEDDING_TABLE.match(table) and set(columns) >= _EMBEDDING_COLUMNS:
             indexes.append((f"idx_{table}_entity", table, _EMBEDDING_ENTITY_INDEX))
     return indexes
 
