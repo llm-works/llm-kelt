@@ -25,6 +25,9 @@ APPINFRA_DEV_CQ_LINT_SELECT := false
 APPINFRA_DEV_CQ_DUP := strict
 APPINFRA_DEV_CQ_DEAD := strict
 
+# Report tests that sit in another suite's directory, or leak process-wide state
+APPINFRA_DEV_TEST_HEALTH := warn
+
 # Enforce SPDX license headers on all source files
 APPINFRA_DEV_CQ_SPDX := true
 

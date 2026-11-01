@@ -134,10 +134,8 @@ filterwarnings = [
     # torch's own torch/utils/mkldnn.py uses it; imported via torch.fx by compressed-tensors
     "ignore:`torch.jit.script_method` is deprecated:DeprecationWarning:torch.jit._script",
 ]
+# The suite markers (unit, integration, e2e, ...) come from appinfra.pytest_suites
 markers = [
-    "unit: marks tests as unit tests (fast, no external dependencies)",
-    "integration: marks tests as integration tests (require database)",
-    "e2e: marks tests as end-to-end tests (require full system)",
     "llm: marks tests as requiring a running LLM (deselect with '-m \"not llm\"')",
     "training: marks tests requiring training dependencies (torch, transformers, peft, trl)",
     "gpu: marks tests using the local GPU; its memory is released after each test",
