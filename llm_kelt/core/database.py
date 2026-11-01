@@ -169,6 +169,10 @@ class Database:
         result: dict[str, Any] = self._pg.get_pool_status()
         return result
 
+    def dispose(self) -> None:
+        """Close the pooled connections; sessions opened later reconnect."""
+        self._pg.dispose()
+
     def scoped(self, schema_name: str) -> "ScopedDatabase":
         """
         Get a database view scoped to a specific schema.

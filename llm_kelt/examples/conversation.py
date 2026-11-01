@@ -31,9 +31,9 @@ from pathlib import Path
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-try:
+if __package__:
     from ._helpers import H1, H2, INFO, LLM_A, LLM_Q, MUTED, OK, RESET, WARN
-except ImportError:
+else:
     from _helpers import (  # type: ignore[no-redef]
         H1,
         H2,

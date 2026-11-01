@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import BigInteger, DateTime, Float, Index, LargeBinary, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import mapped_column
 
 from .store.base import EmbeddingBase
 from .types import Config, QuantizationFormat
@@ -55,16 +55,47 @@ class ModelCache:
             return cached
 
     def _create_model(self, config: Config) -> type:
-        """Create a new model class for the given config."""
+        """Declare the ORM class for the config's table under a name unique to it.
+
+        SQLAlchemy registers a declarative class by its name when the class is created,
+        so the name is set at creation: a class statement renamed afterwards registers
+        every table of a format under the same name.
+        """
+        name = f"Embedding{config.format.name}_{self._class_suffix(config)}"
+        namespace: dict[str, Any] = {
+            "__module__": __name__,
+            "__qualname__": name,
+            "__tablename__": config.table_name,
+            "__table_args__": self._table_args(config.table_name, config.schema),
+            "id": mapped_column(BigInteger, primary_key=True, autoincrement=True),
+            "entity_type": mapped_column(String(50), nullable=False),
+            "entity_id": mapped_column(String(64), nullable=False),
+            "model_name": mapped_column(String(100), nullable=False),
+            **self._value_columns(config),
+            "created_at": mapped_column(
+                DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+            ),
+        }
+        return type(name, (EmbeddingBase,), namespace)
+
+    @staticmethod
+    def _value_columns(config: Config) -> dict[str, Any]:
+        """Columns holding the embedding itself, by format."""
         match config.format:
             case QuantizationFormat.F32:
-                return self._create_f32_model(config)
+                from pgvector.sqlalchemy import Vector
+
+                return {"embedding": mapped_column(Vector(config.dimensions), nullable=False)}
             case QuantizationFormat.F16:
-                return self._create_f16_model(config)
-            case QuantizationFormat.I8:
-                return self._create_i8_model(config)
-            case QuantizationFormat.I4:
-                return self._create_i4_model(config)
+                from pgvector.sqlalchemy import HALFVEC
+
+                return {"embedding": mapped_column(HALFVEC(config.dimensions), nullable=False)}
+            case QuantizationFormat.I8 | QuantizationFormat.I4:
+                return {
+                    "embedding_bytes": mapped_column(LargeBinary, nullable=False),
+                    "scale": mapped_column(Float, nullable=False),
+                    "offset": mapped_column(Float, nullable=False, default=0.0),
+                }
 
     @staticmethod
     def _table_args(table_name: str, schema: str | None) -> tuple:
@@ -82,104 +113,6 @@ class ModelCache:
     @staticmethod
     def _class_suffix(config: Config) -> str:
         return f"{config.schema}_{config.table_name}" if config.schema else config.table_name
-
-    def _create_f32_model(self, config: Config) -> type:
-        from pgvector.sqlalchemy import Vector
-
-        table_name = config.table_name
-        dimensions = config.dimensions
-        table_args = self._table_args(table_name, config.schema)
-
-        class EmbeddingF32(EmbeddingBase):
-            __tablename__ = table_name
-            __table_args__ = table_args
-
-            id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-            entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
-            entity_id: Mapped[str] = mapped_column(String(64), nullable=False)
-            model_name: Mapped[str] = mapped_column(String(100), nullable=False)
-            embedding: Mapped[list[float]] = mapped_column(Vector(dimensions), nullable=False)
-            created_at: Mapped[datetime] = mapped_column(
-                DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
-            )
-
-        suffix = self._class_suffix(config)
-        EmbeddingF32.__name__ = f"EmbeddingF32_{suffix}"
-        EmbeddingF32.__qualname__ = f"EmbeddingF32_{suffix}"
-        return EmbeddingF32
-
-    def _create_f16_model(self, config: Config) -> type:
-        from pgvector.sqlalchemy import HALFVEC
-
-        table_name = config.table_name
-        dimensions = config.dimensions
-        table_args = self._table_args(table_name, config.schema)
-
-        class EmbeddingF16(EmbeddingBase):
-            __tablename__ = table_name
-            __table_args__ = table_args
-
-            id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-            entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
-            entity_id: Mapped[str] = mapped_column(String(64), nullable=False)
-            model_name: Mapped[str] = mapped_column(String(100), nullable=False)
-            embedding: Mapped[list[float]] = mapped_column(HALFVEC(dimensions), nullable=False)
-            created_at: Mapped[datetime] = mapped_column(
-                DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
-            )
-
-        suffix = self._class_suffix(config)
-        EmbeddingF16.__name__ = f"EmbeddingF16_{suffix}"
-        EmbeddingF16.__qualname__ = f"EmbeddingF16_{suffix}"
-        return EmbeddingF16
-
-    def _create_i8_model(self, config: Config) -> type:
-        table_name = config.table_name
-        table_args = self._table_args(table_name, config.schema)
-
-        class EmbeddingI8(EmbeddingBase):
-            __tablename__ = table_name
-            __table_args__ = table_args
-
-            id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-            entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
-            entity_id: Mapped[str] = mapped_column(String(64), nullable=False)
-            model_name: Mapped[str] = mapped_column(String(100), nullable=False)
-            embedding_bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-            scale: Mapped[float] = mapped_column(Float, nullable=False)
-            offset: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-            created_at: Mapped[datetime] = mapped_column(
-                DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
-            )
-
-        suffix = self._class_suffix(config)
-        EmbeddingI8.__name__ = f"EmbeddingI8_{suffix}"
-        EmbeddingI8.__qualname__ = f"EmbeddingI8_{suffix}"
-        return EmbeddingI8
-
-    def _create_i4_model(self, config: Config) -> type:
-        table_name = config.table_name
-        table_args = self._table_args(table_name, config.schema)
-
-        class EmbeddingI4(EmbeddingBase):
-            __tablename__ = table_name
-            __table_args__ = table_args
-
-            id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-            entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
-            entity_id: Mapped[str] = mapped_column(String(64), nullable=False)
-            model_name: Mapped[str] = mapped_column(String(100), nullable=False)
-            embedding_bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-            scale: Mapped[float] = mapped_column(Float, nullable=False)
-            offset: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-            created_at: Mapped[datetime] = mapped_column(
-                DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
-            )
-
-        suffix = self._class_suffix(config)
-        EmbeddingI4.__name__ = f"EmbeddingI4_{suffix}"
-        EmbeddingI4.__qualname__ = f"EmbeddingI4_{suffix}"
-        return EmbeddingI4
 
 
 class Factory:

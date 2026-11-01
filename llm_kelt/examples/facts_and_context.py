@@ -29,7 +29,7 @@ from pathlib import Path
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-try:
+if __package__:
     from ._helpers import (
         CMD,
         H1,
@@ -44,7 +44,7 @@ try:
         get_demo_context_key,
         psql_cmd,
     )
-except ImportError:
+else:
     from _helpers import (  # type: ignore[no-redef]
         CMD,
         H1,
