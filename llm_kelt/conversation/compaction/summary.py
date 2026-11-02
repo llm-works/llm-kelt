@@ -14,9 +14,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..tokens import Tokenizer, estimate_message_tokens, estimate_tokens
+from ..tokens import Tokenizer, estimate_message_tokens
 from ..types import Message
-from ._helpers import build_compacted_messages, check_guards, format_messages_for_summary
+from ._helpers import (
+    build_compacted_messages,
+    build_guard_context,
+    check_guards,
+    format_messages_for_summary,
+)
 from .base import AsyncCompactor
 from .guard import CompactionContext, CompactionGuard
 
@@ -100,7 +105,7 @@ class SummarizingCompactor(AsyncCompactor):
         if not self._guards:
             return await self._call_llm(formatted)
 
-        guard_attempts: dict[int, int] = {i: 0 for i in range(len(self._guards))}
+        guard_attempts: dict[int, int] = dict.fromkeys(range(len(self._guards)), 0)
         last_feedback: str | None = None
         attempt = 0
 
@@ -108,7 +113,7 @@ class SummarizingCompactor(AsyncCompactor):
             prompt = self._build_prompt(formatted, last_feedback, attempt)
             summary = await self._call_llm(prompt)
 
-            ctx = self._build_context(
+            ctx = build_guard_context(
                 preserved, before_messages, summary, before_tokens, attempt, tokenizer
             )
             result = self._check_guards(ctx, guard_attempts)
@@ -142,35 +147,3 @@ class SummarizingCompactor(AsyncCompactor):
             **kwargs,
         )
         return response.content or "[Summary unavailable]"
-
-    def _build_context(
-        self,
-        preserved: list[Message],
-        before_messages: list[Message],
-        summary: str,
-        before_tokens: int,
-        attempt: int,
-        tokenizer: Tokenizer | None,
-    ) -> CompactionContext:
-        """Build context for guard validation."""
-        # Build the actual after_messages for accurate token counting
-        after_messages = build_compacted_messages(preserved, summary)
-
-        # Calculate actual after_tokens from the compacted messages
-        after_tokens = sum(
-            estimate_message_tokens(m.role, m.content, m.tool_calls, tokenizer=tokenizer)
-            for m in after_messages
-        )
-
-        # Calculate summary-only tokens for max_summary_tokens guard
-        summary_tokens = estimate_tokens(summary, tokenizer=tokenizer)
-
-        return CompactionContext(
-            before_messages=before_messages,
-            after_messages=after_messages,
-            before_tokens=before_tokens,
-            after_tokens=after_tokens,
-            summary=summary,
-            summary_tokens=summary_tokens,
-            attempt=attempt,
-        )

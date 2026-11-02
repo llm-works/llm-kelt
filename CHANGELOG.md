@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-01
+
+### Added
+- `Database.dispose()` closes the pooled connections, e.g. before a process exits.
+
+### Changed
+- Requires appinfra 0.14 with its `sql` and `fastapi` extras: SQLAlchemy 2.1 and psycopg 3
+  (instead of psycopg2) come from there, as do fastapi and uvicorn. Requires llm-infer 0.8.1.
+- `Fact.outgoing_relationships` / `incoming_relationships` raise on access instead of
+  returning an empty list; edges are read through the relationships client.
+
 ## [0.5.0] - 2026-10-25
 
 ### Added
@@ -421,7 +432,8 @@ Config keys: `model_name` → `model`, added `type` (provider: "openai"/"google"
 - Example scripts for common workflows
 - API reference documentation in README
 
-[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/llm-works/llm-kelt/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/llm-works/llm-kelt/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/llm-works/llm-kelt/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/llm-works/llm-kelt/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/llm-works/llm-kelt/compare/v0.4.3...v0.4.4

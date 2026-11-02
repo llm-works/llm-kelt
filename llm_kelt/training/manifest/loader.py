@@ -287,19 +287,13 @@ def _build_manifest_dict(manifest: Manifest) -> dict[str, Any]:
 class _FlowStyleDumper(yaml.SafeDumper):
     """YAML dumper that uses flow style for data records (compact, one per line)."""
 
-    pass
-
 
 class _QuotedStr(str):
     """String that serializes with double quotes in YAML."""
 
-    pass
-
 
 class _FlowDict(dict):
     """Dict that serializes in YAML flow style with quoted strings."""
-
-    pass
 
 
 def _quoted_str(dumper: yaml.SafeDumper, data: str) -> yaml.Node:
@@ -360,7 +354,7 @@ def save_manifest(manifest: Manifest, path: Path, *, compress: bool = False) -> 
     )
 
     if compress:
-        if not path.suffix == ".gz":
+        if path.suffix != ".gz":
             path = path.with_suffix(path.suffix + ".gz")
         with gzip.open(path, "wt", encoding="utf-8") as f:
             f.write(yaml_content)

@@ -32,17 +32,17 @@ class TestClientWithSchema:
     @pytest.fixture
     def kelt_client(self, mock_logger, mock_database):
         """Create Client with mocked dependencies."""
-        with patch.object(Client, "_apply_schema_mode"):
-            with patch.object(Client, "_setup_stores"):
-                with patch.object(Client, "_setup_query_interface"):
-                    context = ClientContext(context_key="test-agent")
-                    client = Client(
-                        database=mock_database,
-                        context=context,
-                        lg=mock_logger,
-                        schema_mode=SchemaMode.ENSURE,
-                    )
-                    return client
+        with (
+            patch.object(Client, "_apply_schema_mode"),
+            patch.object(Client, "_setup_stores"),
+            patch.object(Client, "_setup_query_interface"),
+        ):
+            return Client(
+                database=mock_database,
+                context=ClientContext(context_key="test-agent"),
+                lg=mock_logger,
+                schema_mode=SchemaMode.ENSURE,
+            )
 
     def test_with_schema_returns_scoped_client(self, kelt_client):
         """Test that with_schema() returns a ScopedClient."""

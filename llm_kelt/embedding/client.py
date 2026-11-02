@@ -137,7 +137,7 @@ class StoreClient:
             List of (entity_id, similarity) tuples, ordered by similarity descending.
         """
         self._ensure_table()
-        results = self._store.search(
+        return self._store.search(
             query=query,
             entity_type=entity_type,
             model=model,
@@ -145,7 +145,6 @@ class StoreClient:
             min_similarity=min_similarity,
             entity_id_subquery=entity_id_subquery,
         )
-        return results
 
     def get(
         self,

@@ -603,9 +603,13 @@ class EntityRelationshipStore:
             for rel in rels:
                 if direction in ("from", "both") and rel.from_entity_id in results:
                     results[rel.from_entity_id].append(rel)
-                if direction in ("to", "both") and rel.to_entity_id in results:
-                    if rel.to_entity_id != rel.from_entity_id or direction == "to":
-                        results[rel.to_entity_id].append(rel)
+                # Under "both", a self-loop is already listed by the "from" branch
+                if (
+                    direction in ("to", "both")
+                    and rel.to_entity_id in results
+                    and (rel.to_entity_id != rel.from_entity_id or direction == "to")
+                ):
+                    results[rel.to_entity_id].append(rel)
             detach_all(rels, s)
             return results
 
@@ -704,11 +708,13 @@ class FactEntityStore:
                 extra=extra or {},
             )
             .on_conflict_do_nothing(index_elements=["fact_id", "entity_id"])
+            # RETURNING tells whether the row was inserted: psycopg 3 reports rowcount -1 here
+            .returning(FactEntity.fact_id)
         )
-        result = s.execute(stmt)
+        inserted = s.execute(stmt).first()
         s.flush()
 
-        if result.rowcount == 0:  # type: ignore[attr-defined]
+        if inserted is None:
             return None
 
         fe = s.get(FactEntity, (fact_id, entity_id))

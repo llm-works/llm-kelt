@@ -86,17 +86,15 @@ def get_size_profile_name(size_b: float) -> ModelSizeProfile:
     """Get profile name for a given model size."""
     if size_b <= 14:
         return "small"
-    elif size_b <= 50:
+    if size_b <= 50:
         return "medium"
-    elif size_b <= 70:
+    if size_b <= 70:
         return "large"
     return "xlarge"
 
 
 class ProfileDetectionError(ValueError):
     """Raised when model size cannot be auto-detected and no profile override given."""
-
-    pass
 
 
 def get_model_size_profile(

@@ -8,6 +8,7 @@ Provides model detection, quantization config, and training config helpers.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 from pathlib import Path
@@ -52,11 +53,10 @@ def _load_stored_quantization_config(base_model: str) -> Any | None:
     - bitsandbytes: reconstructs BitsAndBytesConfig from config.json. Transformers has a bug
       where loading pre-quantized models without explicitly passing the quantization_config
       causes 'NoneType has no attribute to_dict'.
-    - compressed-tensors: CompressedTensorsConfig(dequantize=True). PEFT cannot attach LoRA
-      to packed int4/int8 layers, so the weights are expanded to the model dtype at load.
 
     Reads the local checkpoint's config.json. Returns None when there is none (e.g. a hub ID)
-    and for other formats (they load with the checkpoint's own config).
+    and for other formats: they load with the checkpoint's own config, which for
+    compressed-tensors load_model_config sets to dequantize.
     """
     from transformers import BitsAndBytesConfig
 
@@ -64,12 +64,7 @@ def _load_stored_quantization_config(base_model: str) -> Any | None:
     if model_config is None:
         return None
     quant_dict = model_config.get("quantization_config") or {}
-    quant_method = quant_dict.get("quant_method")
-    if quant_method == "compressed-tensors":
-        from transformers import CompressedTensorsConfig
-
-        return CompressedTensorsConfig(dequantize=True)
-    if quant_method != "bitsandbytes":
+    if quant_dict.get("quant_method") != "bitsandbytes":
         return None
 
     # Filter out private keys (start with _) that aren't BitsAndBytesConfig params
@@ -126,23 +121,23 @@ _TRAINABLE_ARCH_SUFFIXES = ("ForCausalLM", "ForConditionalGeneration")
 def load_model_config(lg: Logger, base_model: str) -> Any:
     """Load a checkpoint's transformers config for loading the model to train.
 
-    A compressed-tensors ``kv_cache_scheme`` is dropped. It quantizes the KV cache, which
-    training does not use, and applying it needs ``num_attention_heads`` on the top-level
-    config: multimodal configs keep it in ``text_config``, so the load fails
-    with "Cannot determine num_attention_heads from config". The checkpoint's config.json
-    is untouched, so inference still applies the scheme.
+    A compressed-tensors quantization config is set to dequantize at load: PEFT cannot
+    attach LoRA to packed int4/int8 layers, so the weights are expanded to the model dtype.
+    Its ``kv_cache_scheme`` is dropped. It quantizes the KV cache, which training does not
+    use, and applying it needs ``num_attention_heads`` on the top-level config: multimodal
+    configs keep it in ``text_config``, so the load fails with "Cannot determine
+    num_attention_heads from config". The checkpoint's config.json is untouched, so
+    inference still loads it compressed and applies the scheme.
     """
     from transformers import AutoConfig
 
     config = AutoConfig.from_pretrained(base_model, trust_remote_code=True)
     quant = getattr(config, "quantization_config", None)
-    if (
-        isinstance(quant, dict)
-        and quant.get("quant_method") == "compressed-tensors"
-        and quant.get("kv_cache_scheme")
-    ):
-        config.quantization_config = {**quant, "kv_cache_scheme": None}
-        lg.info("dropped kv_cache_scheme for training", extra={"model": base_model})
+    if isinstance(quant, dict) and quant.get("quant_method") == "compressed-tensors":
+        config.quantization_config = {**quant, "dequantize": True}
+        if quant.get("kv_cache_scheme"):
+            config.quantization_config["kv_cache_scheme"] = None
+            lg.info("dropped kv_cache_scheme for training", extra={"model": base_model})
     return config
 
 
@@ -228,16 +223,12 @@ def _coerce_types(config: dict[str, Any]) -> dict[str, Any]:
     result = dict(config)
     for key in _INT_KEYS:
         if key in result and result[key] is not None:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 result[key] = int(float(result[key]))
-            except (ValueError, TypeError):
-                pass
     for key in _FLOAT_KEYS:
         if key in result and result[key] is not None:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 result[key] = float(result[key])
-            except (ValueError, TypeError):
-                pass
     return result
 
 
@@ -287,9 +278,8 @@ def _apply_precision_settings(lg: Logger, base_model: str, config: dict, overrid
         for key in ("fp16", "bf16"):
             config[key] = explicit.get(key, False)
         return
-    for key, value in (_checkpoint_precision(lg, base_model) or {}).items():
-        if key not in overrides:
-            config[key] = value
+    detected = _checkpoint_precision(lg, base_model) or {}
+    config.update({key: value for key, value in detected.items() if key not in overrides})
 
 
 def compute_warmup_steps(num_samples: int, tc: DotDict) -> int:

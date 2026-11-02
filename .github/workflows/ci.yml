@@ -38,11 +38,11 @@ jobs:
           python -m pip install zizmor==1.31.1 actionlint-py==1.7.12.25
           # Install appinfra, llm-infer and llm-saia from develop branch (policy: use @develop
           # during active development, pin to specific commit for releases)
-          python -m pip install "appinfra @ git+https://github.com/llm-works/appinfra.git@develop"
+          python -m pip install "appinfra[sql,fastapi,dev] @ git+https://github.com/llm-works/appinfra.git@develop"
           python -m pip install "llm-infer @ git+https://github.com/llm-works/llm-infer.git@develop"
           python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop"
-          # dev: ruff, mypy, stubs. The training extra is skipped by the mypy overrides in
-          # pyproject.toml, not installed.
+          # dev: appinfra's toolchain (ruff, mypy, pylint, ...). The training extra is skipped by
+          # the mypy overrides in pyproject.toml, not installed.
           python -m pip install -e ".[dev]"
 
       - name: Check formatting
@@ -50,6 +50,14 @@ jobs:
 
       - name: Lint
         run: python -m ruff check .
+
+      - name: Check function size
+        run: python -m appinfra.cli.cli -l error cq cf --strict --exclude "llm_kelt/examples/*"
+
+      - name: Check duplicated and dead code
+        run: |
+          python -m appinfra.cli.cli -l error cq dup llm_kelt/ --strict --exclude "llm_kelt/examples/*"
+          python -m appinfra.cli.cli -l error cq dead llm_kelt/ --strict --exclude "llm_kelt/examples/*"
 
       - name: Lint workflows
         # zizmor policy in .github/zizmor.yml; actionlint runs shellcheck on run: scripts
@@ -104,19 +112,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Install runtime deps (avoid heavy ML deps from llm-infer)
-          python -m pip install sqlalchemy psycopg2-binary pgvector alembic httpx fastapi uvicorn pydantic
-          # Install appinfra from develop branch (policy: use @develop during active development,
-          # pin to specific commit for releases)
-          python -m pip install "appinfra[all] @ git+https://github.com/llm-works/appinfra.git@develop"
-          # Install llm-infer and llm-saia from develop branch (policy: use @develop during
-          # active development, pin to specific commit for releases)
-          python -m pip install "llm-infer @ git+https://github.com/llm-works/llm-infer.git@develop" --no-deps
-          python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop" --no-deps
-          # Install dev deps explicitly
-          python -m pip install pytest pytest-cov pytest-xdist pytest-asyncio coverage
-          # Install package without transitive deps
-          python -m pip install -e . --no-deps
+          # Install appinfra, llm-infer and llm-saia from develop branch (policy: use @develop
+          # during active development, pin to specific commit for releases)
+          python -m pip install "appinfra[sql,fastapi,dev] @ git+https://github.com/llm-works/appinfra.git@develop"
+          python -m pip install "llm-infer @ git+https://github.com/llm-works/llm-infer.git@develop"
+          python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop"
+          # Runtime and dev deps within the ranges pyproject.toml declares
+          python -m pip install -e ".[dev]"
 
       - name: Run tests
         env:
@@ -157,9 +159,9 @@ jobs:
   #
   # Matrix: 3.12 (baseline, matches lint/coverage) + 3.14 (newest supported).
   #
-  # Sibling deps (appinfra/llm-infer/llm-saia) install with the same
-  # @develop + --no-deps pattern used by lint/test/coverage — smoke does not
-  # attempt strict "PyPI-only" resolution during active development.
+  # Sibling deps (appinfra/llm-infer/llm-saia) install from @develop, as in
+  # lint/test/coverage — smoke does not attempt strict "PyPI-only" resolution
+  # during active development.
   smoke-wheel:
     name: Smoke (wheel install) ${{ matrix.python-version }}
     runs-on: ubuntu-latest
@@ -209,16 +211,13 @@ jobs:
         run: |
           python -m venv /tmp/smoke
           /tmp/smoke/bin/pip install --upgrade pip
-          # Install runtime deps (mirror lint/test): PyPI for non-sibling,
-          # @develop for own siblings per repo policy.
-          /tmp/smoke/bin/pip install sqlalchemy psycopg2-binary pgvector alembic httpx fastapi uvicorn pydantic
-          /tmp/smoke/bin/pip install "appinfra[all] @ git+https://github.com/llm-works/appinfra.git@develop"
-          /tmp/smoke/bin/pip install "llm-infer @ git+https://github.com/llm-works/llm-infer.git@develop" --no-deps
-          /tmp/smoke/bin/pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop" --no-deps
-          # Install the built wheel with --no-deps: exercises the wheel
-          # contents (imports, package-data, exports) without re-pulling deps.
+          # Own siblings from @develop per repo policy; the wheel then pulls the
+          # rest of its runtime deps from PyPI within the ranges it declares.
+          /tmp/smoke/bin/pip install "appinfra[sql,fastapi] @ git+https://github.com/llm-works/appinfra.git@develop"
+          /tmp/smoke/bin/pip install "llm-infer @ git+https://github.com/llm-works/llm-infer.git@develop"
+          /tmp/smoke/bin/pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop"
           wheels=(./dist/*.whl)
-          /tmp/smoke/bin/pip install --no-deps "${wheels[0]}"
+          /tmp/smoke/bin/pip install "${wheels[0]}"
 
       - name: Import + version from installed wheel
         run: |
@@ -266,11 +265,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install sqlalchemy psycopg2-binary pgvector alembic httpx fastapi uvicorn pydantic
-          python -m pip install "appinfra[all] @ git+https://github.com/llm-works/appinfra.git@develop"
-          python -m pip install "llm-infer @ git+https://github.com/llm-works/llm-infer.git@develop" --no-deps
-          python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop" --no-deps
-          python -m pip install -e . --no-deps
+          python -m pip install "appinfra[sql,fastapi] @ git+https://github.com/llm-works/appinfra.git@develop"
+          python -m pip install "llm-infer @ git+https://github.com/llm-works/llm-infer.git@develop"
+          python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop"
+          python -m pip install -e .
 
       # Starts the server from the shipped etc/pg.yaml (127.0.0.1:25432, trust
       # auth), which the runner's `ci-requires: pg` probe, quickstart's
@@ -327,19 +325,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Install runtime deps (avoid heavy ML deps from llm-infer)
-          python -m pip install sqlalchemy psycopg2-binary pgvector alembic httpx fastapi uvicorn pydantic
-          # Install appinfra from develop branch (policy: use @develop during active development,
-          # pin to specific commit for releases)
-          python -m pip install "appinfra[all] @ git+https://github.com/llm-works/appinfra.git@develop"
-          # Install llm-infer and llm-saia from develop branch (policy: use @develop during
-          # active development, pin to specific commit for releases)
-          python -m pip install "llm-infer @ git+https://github.com/llm-works/llm-infer.git@develop" --no-deps
-          python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop" --no-deps
-          # Install dev deps explicitly
-          python -m pip install pytest pytest-cov pytest-xdist pytest-asyncio coverage
-          # Install package without transitive deps
-          python -m pip install -e . --no-deps
+          # Install appinfra, llm-infer and llm-saia from develop branch (policy: use @develop
+          # during active development, pin to specific commit for releases)
+          python -m pip install "appinfra[sql,fastapi,dev] @ git+https://github.com/llm-works/appinfra.git@develop"
+          python -m pip install "llm-infer @ git+https://github.com/llm-works/llm-infer.git@develop"
+          python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop"
+          # Runtime and dev deps within the ranges pyproject.toml declares
+          python -m pip install -e ".[dev]"
 
       - name: Run tests with coverage
         env:

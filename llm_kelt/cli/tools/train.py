@@ -728,11 +728,12 @@ class MergeTool(_ConfigMixin, Tool):
 
     def _find_by_md5(self, storage: FileStorage, pattern: str) -> Path | None:
         """Search all adapters for a version matching md5 pattern."""
-        matches: list[tuple[str, str]] = []  # (key, version_id)
-        for key in storage.list_adapters():
-            for vid in storage.list_versions(key):
-                if md5_matches(vid, pattern):
-                    matches.append((key, vid))
+        matches = [  # (key, version_id)
+            (key, vid)
+            for key in storage.list_adapters()
+            for vid in storage.list_versions(key)
+            if md5_matches(vid, pattern)
+        ]
         if not matches:
             return None
         if len(matches) > 1:
@@ -798,7 +799,7 @@ class MergeTool(_ConfigMixin, Tool):
         # Safety check: ensure output doesn't overlap with source paths
         model_resolved = model_path.resolve()
         adapter_resolved = adapter_path.resolve()
-        if output_path == model_resolved or output_path == adapter_resolved:
+        if output_path in (model_resolved, adapter_resolved):
             self.lg.error("output path cannot be same as model or adapter path")
             return None
         try:
@@ -826,25 +827,23 @@ class MergeTool(_ConfigMixin, Tool):
 
         from safetensors.torch import load_file
 
-        weights: dict[str, Any] = {}
         index_path = model_path / "model.safetensors.index.json"
         if index_path.exists():
             # Sharded checkpoint: load only files containing visual weights
             with open(index_path) as f:
                 weight_map = json.load(f).get("weight_map", {})
             visual_files = {f for k, f in weight_map.items() if self._is_visual_key(k)}
-            for filename in visual_files:
-                for key, tensor in load_file(model_path / filename).items():
-                    if self._is_visual_key(key):
-                        weights[key] = tensor
+            files = [model_path / name for name in visual_files]
         else:
             # Non-sharded checkpoint: single model.safetensors file
             single_file = model_path / "model.safetensors"
-            if single_file.exists():
-                for key, tensor in load_file(single_file).items():
-                    if self._is_visual_key(key):
-                        weights[key] = tensor
-        return weights
+            files = [single_file] if single_file.exists() else []
+        return {
+            key: tensor
+            for path in files
+            for key, tensor in load_file(path).items()
+            if self._is_visual_key(key)
+        }
 
     def _copy_visual_weights(self, model_path: Path, output_path: Path) -> None:
         """Copy visual tower weights from base model (for VLM architectures)."""

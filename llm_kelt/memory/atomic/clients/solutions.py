@@ -86,8 +86,7 @@ class SolutionsClient(FactClient[SolutionDetails]):
         # Use actual solution text if provided, otherwise summarize problem
         content_text = (
             answer_text
-            if answer_text
-            else f"{agent_name} solved: {problem[:100]}{'...' if len(problem) > 100 else ''}"
+            or f"{agent_name} solved: {problem[:100]}{'...' if len(problem) > 100 else ''}"
         )
         return Fact(
             context_key=self.context_key,

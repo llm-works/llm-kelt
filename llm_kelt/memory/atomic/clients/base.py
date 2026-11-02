@@ -84,6 +84,21 @@ class FactClient(Generic[T]):
 
         return build_context_filter(self.context_key, column)
 
+    def _list_categories(self) -> list[str]:
+        """Distinct categories of this fact type in the context (excluding None)."""
+        with self._session_factory() as session:
+            stmt = select(Fact.category).where(
+                Fact.type == self.fact_type,
+                Fact.category.isnot(None),
+            )
+
+            context_filter = self._build_context_filter(Fact.context_key)
+            if context_filter is not None:
+                stmt = stmt.where(context_filter)
+
+            stmt = stmt.distinct().order_by(Fact.category)
+            return [c for c in session.scalars(stmt).all() if c is not None]
+
     def _get_fact(self, session: Session, fact_id: int) -> Fact | None:
         """Get fact by ID, verifying context ownership."""
         # Build query with all filters upfront (single query)

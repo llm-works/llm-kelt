@@ -7,22 +7,23 @@ Uses TRL's SFTTrainer with PEFT for parameter-efficient fine-tuning.
 Supports QLoRA (4-bit quantization) to reduce VRAM requirements.
 """
 
-from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from appinfra import DotDict
 from appinfra.log import Logger
 
 from ..lora.config import Config as LoraConfig
-from ..schema import TRAINING_CONFIG_KEYS, Adapter, RunResult
-from ..stability import check_training_stability, log_stability_warnings
-from .dataset import load_sft_dataset, require_chat_template
-from .model import build_training_config, compute_warmup_steps
+from ..schema import RunResult
+from .base import SFTBase, lora_config_summary
 from .peft_config import lora_peft_config
 
 
-class Trainer:
+class Trainer(SFTBase):
     """Trainer for LoRA adapters using supervised fine-tuning."""
+
+    METHOD = "sft"
+    LABEL = "LoRA training"
 
     def __init__(
         self,
@@ -34,53 +35,23 @@ class Trainer:
         training_config: DotDict | None = None,
         quantize: bool | None = None,
     ):
-        self._lg = lg
-        self.data_path = Path(data_path)
-        self.output_dir = Path(output_dir)
-        self.base_model = base_model
+        super().__init__(lg, data_path, output_dir, base_model, training_config, quantize)
         self.lora_config = lora_config or LoraConfig()
-        self.training_config = build_training_config(lg, base_model, training_config)
-        self._quantize_override = quantize  # None = auto-detect
-        self._is_quantized = False  # True if model uses quantization (new or pre-existing)
 
-        self.model = None
-        self.tokenizer = None
-        self.trainer = None
-        self.train_dataset = None
-        self.eval_dataset = None
-
-    def _load_tokenizer(self):
-        """Load tokenizer for the base model."""
-        from transformers import AutoTokenizer
-
-        # trust_remote_code required for Qwen and other models with custom architectures
-        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model, trust_remote_code=True)
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-
-    def _apply_lora(self):
+    def _apply_lora(self) -> None:
         """Apply LoRA adapter to the loaded model."""
         from peft import get_peft_model
 
         self.lora_config = self.lora_config.resolve(self.model.config.model_type)
         peft_config = lora_peft_config(self.lora_config)
         self.model = get_peft_model(self.model, peft_config)
-        trainable, total = self.model.get_nb_trainable_parameters()
-        pct = 100 * trainable / total if total > 0 else 0.0
-        self._lg.info(f"Trainable params: {trainable:,} / {total:,} ({pct:.2f}%)")
+        self._log_trainable_params()
 
-    def _load_model(self):
+    def _load_model(self) -> None:
         """Load base model with auto-detected quantization and apply LoRA."""
         from peft import prepare_model_for_kbit_training
 
-        from .model import is_kbit_loaded, load_base_model
-
-        self._lg.info(f"loading base model: {self.base_model}")
-        self._load_tokenizer()
-
-        self.model = load_base_model(self._lg, self.base_model, self._quantize_override)
-        self._is_quantized = is_kbit_loaded(self.model)
-
+        self._load_base_model()
         if self.training_config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
         if self._is_quantized:
@@ -88,145 +59,13 @@ class Trainer:
 
         self._apply_lora()
 
-    def _load_data(self):
-        """Load training and eval datasets."""
-        self.train_dataset, self.eval_dataset = load_sft_dataset(
-            self.data_path, self.training_config.eval_split
-        )
-        self._lg.info(f"loaded {len(self.train_dataset)} training samples")
-        if self.eval_dataset:
-            self._lg.info(f"loaded {len(self.eval_dataset)} eval samples")
-
-    def _create_training_args(self):
-        """Create training arguments for SFT."""
-        from trl import SFTConfig
-
-        return SFTConfig(
-            output_dir=str(self.output_dir),
-            num_train_epochs=self.training_config.num_epochs,
-            per_device_train_batch_size=self.training_config.batch_size,
-            gradient_accumulation_steps=self.training_config.gradient_accumulation_steps,
-            learning_rate=self.training_config.learning_rate,
-            warmup_steps=compute_warmup_steps(len(self.train_dataset), self.training_config),
-            max_grad_norm=self.training_config.max_grad_norm,
-            logging_steps=self.training_config.logging_steps,
-            save_steps=self.training_config.save_steps,
-            save_total_limit=2,
-            fp16=self.training_config.fp16,
-            bf16=self.training_config.bf16,
-            gradient_checkpointing=self.training_config.gradient_checkpointing,
-            seed=self.training_config.seed,
-            eval_strategy="steps" if self.eval_dataset else "no",
-            eval_steps=self.training_config.save_steps if self.eval_dataset else None,
-            load_best_model_at_end=self.eval_dataset is not None,
-            report_to="none",
-            optim="paged_adamw_8bit",
-            max_length=self.training_config.max_seq_length,
-            neftune_noise_alpha=self.training_config.neftune_noise_alpha,
-            completion_only_loss=self.training_config.completion_only_loss,
-        )
-
-    def _create_trainer(self):
-        """Create the SFTTrainer."""
-        from trl import SFTTrainer
-
-        require_chat_template(self.tokenizer, self.base_model)
-        self.trainer = SFTTrainer(
-            model=self.model,
-            args=self._create_training_args(),
-            train_dataset=self.train_dataset,
-            eval_dataset=self.eval_dataset,
-            processing_class=self.tokenizer,
-        )
-
-    def _collect_metrics(self) -> dict:
-        """Extract training metrics from trainer state."""
-        if self.trainer is None or not self.trainer.state.log_history:
-            return {}
-
-        metrics: dict = {"history": self.trainer.state.log_history[-100:]}
-        final = self.trainer.state.log_history[-1]
-        metrics["train_loss"] = final.get("train_loss", 0.0)
-        metrics["train_runtime"] = final.get("train_runtime", 0.0)
-        metrics["train_samples_per_second"] = final.get("train_samples_per_second", 0.0)
-        metrics["epoch"] = final.get("epoch", 0.0)
-
-        stability_report = check_training_stability(self.trainer.state.log_history)
-        log_stability_warnings(self._lg, stability_report)
-        if not stability_report.stable:
-            metrics["unstable"] = True
-            metrics["stability_warnings"] = stability_report.warnings
-
-        return metrics
-
-    def _save_and_collect_metrics(self) -> tuple[Path, dict]:
-        """Save adapter and collect training metrics."""
-        if self.trainer is None:
-            raise RuntimeError("_create_trainer() must be called first")
-        if self.tokenizer is None:
-            raise RuntimeError("_load_model() must be called first")
-
-        final_path = self.output_dir / "final"
-        self.trainer.save_model(str(final_path))
-        self.tokenizer.save_pretrained(str(final_path))
-        self._lg.info(f"saved adapter to {final_path}")
-
-        metrics = self._collect_metrics()
-        if self.eval_dataset:
-            metrics["eval_loss"] = self.trainer.evaluate().get("eval_loss", 0.0)
-            # Re-capture history to include eval entries added by evaluate()
-            metrics["history"] = self.trainer.state.log_history[-100:]
-
-        return final_path, metrics
-
-    def _build_result(self, adapter_path: Path, metrics: dict, started_at: datetime) -> RunResult:
-        """Build the training result."""
-        # Adapter md5/mtime populated by caller (runner) after training
-        adapter = Adapter(md5="", mtime="", path=str(adapter_path))
-        return RunResult(
-            status="completed",
-            base_model=self.base_model,
-            method="sft",
-            metrics=metrics,
-            config={
-                "lora": {
-                    "r": self.lora_config.r,
-                    "lora_alpha": self.lora_config.lora_alpha,
-                    "lora_dropout": self.lora_config.lora_dropout,
-                    "target_modules": self.lora_config.target_modules,
-                    "exclude_modules": self.lora_config.exclude_modules,
-                    "use_rslora": self.lora_config.use_rslora,
-                },
-                "training": {k: self.training_config[k] for k in TRAINING_CONFIG_KEYS},
-                "quantized": self._is_quantized,
-            },
-            started_at=started_at,
-            completed_at=datetime.now(UTC),
-            samples_trained=int(len(self.train_dataset) * self.training_config.num_epochs),  # type: ignore[arg-type]
-            adapter=adapter,
-        )
-
-    def train(self, resume_from: str | Path | None = None) -> RunResult:
-        """Run the full training pipeline."""
-        started_at = datetime.now(UTC)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        self._lg.info(f"starting LoRA training: {self.data_path} -> {self.output_dir}")
-
-        self._load_data()
-        self._load_model()
-        self._create_trainer()
-        if self.trainer is None:
-            raise RuntimeError("Failed to create trainer")
-
-        if resume_from:
-            self._lg.info(f"resuming from checkpoint: {resume_from}")
-            self.trainer.train(resume_from_checkpoint=str(resume_from))
-        else:
-            self.trainer.train()
-
-        adapter_path, metrics = self._save_and_collect_metrics()
-        return self._build_result(adapter_path, metrics, started_at)
+    def _run_config(self) -> dict[str, Any]:
+        """Hyperparameters the run records in its result."""
+        return {
+            "lora": lora_config_summary(self.lora_config),
+            "training": self._training_summary(),
+            "quantized": self._is_quantized,
+        }
 
 
 def train_lora(

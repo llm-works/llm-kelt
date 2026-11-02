@@ -29,8 +29,9 @@ from llm_kelt.memory.kg import models as kg_models  # noqa: F401
 from llm_kelt.training import dpo as training_dpo  # noqa: F401
 from llm_kelt.training import sft as training_sft  # noqa: F401
 
-# Enable appinfra's schema isolation fixtures for parallel test execution
-pytest_plugins = ["appinfra.db.pg.testing"]
+# appinfra's schema isolation fixtures for parallel test execution, and its suite
+# assignment: each test runs in the suite of its tests/<suite>/ directory or marker
+pytest_plugins = ["appinfra.db.pg.testing", "appinfra.pytest_suites"]
 
 
 @pytest.fixture(scope="session")
@@ -68,12 +69,11 @@ def pytest_cmdline_main(config):
     """
     # Check if running e2e tests
     markexpr = config.getoption("-m", default="")
-    if "e2e" in markexpr:
-        # Force sequential execution by setting numprocesses to 0
-        if hasattr(config.option, "numprocesses") and config.option.numprocesses:
-            original = config.option.numprocesses
-            config.option.numprocesses = 0
-            print(f"\n*** E2E detected: forcing sequential (was -n {original}) ***\n")
+    # Force sequential execution by setting numprocesses to 0
+    if "e2e" in markexpr and getattr(config.option, "numprocesses", None):
+        original = config.option.numprocesses
+        config.option.numprocesses = 0
+        print(f"\n*** E2E detected: forcing sequential (was -n {original}) ***\n")
 
 
 def pytest_configure(config):
@@ -145,8 +145,7 @@ def _get_llm_server_address() -> tuple[str, int] | None:
 
 
 def pytest_collection_modifyitems(config, items):
-    """Auto-apply markers based on test directory, then deselect PG-dependent
-    tests when Postgres is unreachable.
+    """Deselect PG-dependent tests when Postgres is unreachable.
 
     Deselection (vs pytest.skip) keeps the failure-step output clean: skipped
     tests appear in pytest's `-rs` summary as `SKIPPED [1] ...` lines, which
@@ -154,15 +153,6 @@ def pytest_collection_modifyitems(config, items):
     so a downstream failure (e.g. coverage threshold) shows the actual cause,
     not 200+ lines of PG noise.
     """
-    for item in items:
-        test_path = Path(item.fspath)
-        if "unit" in test_path.parts:
-            item.add_marker(pytest.mark.unit)
-        elif "integration" in test_path.parts:
-            item.add_marker(pytest.mark.integration)
-        elif "e2e" in test_path.parts:
-            item.add_marker(pytest.mark.e2e)
-
     status = config.stash.get(_PG_STATUS_KEY, None)
     if status is None or status["available"]:
         return
@@ -429,14 +419,13 @@ def clean_tables(database, test_context):
 @pytest.fixture
 def sample_content(kelt_client, clean_tables):
     """Create sample content for testing."""
-    content_id = kelt_client.content.create(
+    return kelt_client.content.create(
         content_text="This is a test article about AI and machine learning.",
         source="test",
         external_id="test_001",
         title="Test Article",
         extra={"category": "tech"},
     )
-    return content_id
 
 
 @pytest.fixture
@@ -447,13 +436,12 @@ def sample_feedback(kelt_client, clean_tables):
         content_text="Sample content for feedback",
         source="test",
     )
-    feedback_id = kelt_client.atomic.feedback.record(
+    return kelt_client.atomic.feedback.record(
         signal="positive",
         content_id=content_id,
         strength=0.9,
         tags=["interesting"],
     )
-    return feedback_id
 
 
 # Default embedding dimensions (matches default EmbeddingConfig)

@@ -45,7 +45,7 @@ class TestTemplateId:
     def test_is_sha256_hex_of_utf8_text(self):
         import hashlib
 
-        assert TID == hashlib.sha256(TEMPLATE.encode("utf-8")).hexdigest()
+        assert hashlib.sha256(TEMPLATE.encode("utf-8")).hexdigest() == TID
         assert len(TID) == 64
 
     def test_changes_with_text(self):

@@ -137,18 +137,7 @@ class PreferencesClient(FactClient[PreferenceDetails]):
 
     def get_categories(self) -> list[str]:
         """Get list of unique categories."""
-        with self._session_factory() as session:
-            stmt = select(Fact.category).where(
-                Fact.type == self.fact_type,
-                Fact.category.isnot(None),
-            )
-
-            context_filter = self._build_context_filter(Fact.context_key)
-            if context_filter is not None:
-                stmt = stmt.where(context_filter)
-
-            stmt = stmt.distinct().order_by(Fact.category)
-            return [c for c in session.scalars(stmt).all() if c is not None]
+        return self._list_categories()
 
     def search(
         self,

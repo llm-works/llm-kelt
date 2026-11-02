@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -646,10 +646,8 @@ class TestConcurrentOperations:
             storage.submit_manifest(manifest)
 
         def annotate() -> None:
-            try:
+            with suppress(ValueError):  # the wipe came first
                 storage.lineage.annotate_build("foo", built, {"gate": "passed"})
-            except ValueError:
-                pass  # the wipe came first
 
         threads = [threading.Thread(target=submit, args=(i,)) for i in range(1, 9)]
         threads += [threading.Thread(target=annotate) for _ in range(4)]

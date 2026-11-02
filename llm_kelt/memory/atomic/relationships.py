@@ -260,10 +260,7 @@ class RelationshipsClient:
         always treated as "both" to avoid missing symmetric edges.
         Returns FactRelationship objects with source_fact and target_fact loaded.
         """
-        if rel_type is None or rel_type.symmetric:
-            effective_dir = "both"
-        else:
-            effective_dir = direction
+        effective_dir = "both" if rel_type is None or rel_type.symmetric else direction
 
         with self._session_factory() as session:
             stmt = self._query_relationships()
