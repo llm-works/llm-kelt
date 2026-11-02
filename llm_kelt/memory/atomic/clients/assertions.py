@@ -355,4 +355,4 @@ class AssertionsClient(FactClient[None]):
                 stmt = stmt.where(context_filter)
 
             stmt = stmt.group_by(Fact.category)
-            return dict(session.execute(stmt).tuples().all())
+            return dict(session.execute(stmt).all())

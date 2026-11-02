@@ -119,19 +119,19 @@ class Fact(Base):
     )
 
     # Relationship edges (one-to-many).
-    # lazy="noload" prevents accidental N+1 queries — these collections are
+    # lazy="raise" prevents accidental N+1 queries — these collections are
     # only useful via RelationshipsClient, never via Fact attribute access.
     outgoing_relationships: Mapped[list["FactRelationship"]] = relationship(
         foreign_keys="FactRelationship.source_id",
         back_populates="source_fact",
         passive_deletes=True,
-        lazy="noload",
+        lazy="raise",
     )
     incoming_relationships: Mapped[list["FactRelationship"]] = relationship(
         foreign_keys="FactRelationship.target_id",
         back_populates="target_fact",
         passive_deletes=True,
-        lazy="noload",
+        lazy="raise",
     )
 
     __table_args__ = (

@@ -708,11 +708,13 @@ class FactEntityStore:
                 extra=extra or {},
             )
             .on_conflict_do_nothing(index_elements=["fact_id", "entity_id"])
+            # RETURNING tells whether the row was inserted: psycopg 3 reports rowcount -1 here
+            .returning(FactEntity.fact_id)
         )
-        result = s.execute(stmt)
+        inserted = s.execute(stmt).first()
         s.flush()
 
-        if result.rowcount == 0:  # type: ignore[attr-defined]
+        if inserted is None:
             return None
 
         fe = s.get(FactEntity, (fact_id, entity_id))

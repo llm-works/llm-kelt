@@ -84,12 +84,15 @@ def _run(database_url: str) -> int:
         config=config,
     )
 
-    kelt.atomic.assertions.add("Timezone: UTC", category="settings")
-    kelt.atomic.assertions.add("Prefers concise, code-first answers", category="style")
+    try:
+        kelt.atomic.assertions.add("Timezone: UTC", category="settings")
+        kelt.atomic.assertions.add("Prefers concise, code-first answers", category="style")
 
-    system_prompt = ContextBuilder(kelt.atomic.assertions).build_system_prompt(
-        base_prompt="You are a helpful assistant.",
-    )
+        system_prompt = ContextBuilder(kelt.atomic.assertions).build_system_prompt(
+            base_prompt="You are a helpful assistant.",
+        )
+    finally:
+        kelt.database.dispose()
 
     assert "Timezone: UTC" in system_prompt, "expected assertion missing from prompt"
     assert "code-first" in system_prompt, "expected assertion missing from prompt"

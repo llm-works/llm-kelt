@@ -70,6 +70,19 @@ class TestLoadModelConfig:
         on_disk = json.loads((path / "config.json").read_text())
         assert on_disk["quantization_config"]["kv_cache_scheme"] == _KV_CACHE_SCHEME
 
+    def test_compressed_tensors_loads_dequantized(self, tmp_path: Path, lg):
+        path = _write_config(
+            tmp_path / "m",
+            model_type="qwen2",
+            quantization_config={"quant_method": "compressed-tensors", "format": "pack-quantized"},
+        )
+        quant = model_mod.load_model_config(lg, str(path)).quantization_config
+        assert quant["dequantize"] is True
+        # transformers builds the load-time quantization config from this dict
+        assert transformers.CompressedTensorsConfig.from_dict(quant).dequantize is True
+        on_disk = json.loads((path / "config.json").read_text())
+        assert "dequantize" not in on_disk["quantization_config"]
+
     def test_keeps_other_formats(self, tmp_path: Path, lg):
         quant = {"quant_method": "gptq", "bits": 4, "kv_cache_scheme": _KV_CACHE_SCHEME}
         path = _write_config(tmp_path / "m", model_type="qwen2", quantization_config=quant)
@@ -100,17 +113,15 @@ class TestLoadModelConfig:
 
 class TestQuantizationConfig:
     @pytest.mark.parametrize("override", [None, False, True])
-    def test_compressed_tensors_loads_dequantized_whatever_the_override(
+    def test_compressed_tensors_passes_no_config_whatever_the_override(
         self, tmp_path: Path, lg, override
     ):
+        """The checkpoint's own config, set to dequantize by load_model_config, is the only one."""
         path = _write_config(
             tmp_path / "m",
             quantization_config={"quant_method": "compressed-tensors", "format": "pack-quantized"},
         )
-        config, applied = model_mod.get_quantization_config(lg, str(path), override)
-        assert isinstance(config, transformers.CompressedTensorsConfig)
-        assert config.dequantize is True
-        assert applied is False
+        assert model_mod.get_quantization_config(lg, str(path), override) == (None, False)
 
     def test_other_prequantized_formats_load_with_own_config(self, tmp_path: Path, lg):
         path = _write_config(tmp_path / "m", quantization_config={"quant_method": "gptq"})

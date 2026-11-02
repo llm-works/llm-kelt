@@ -36,9 +36,9 @@ from tempfile import TemporaryDirectory
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-try:
+if __package__:
     from ._helpers import H1, H2, INFO, MUTED, OK, RESET, WARN
-except ImportError:
+else:
     from _helpers import H1, H2, INFO, MUTED, OK, RESET, WARN  # type: ignore[no-redef]
 from appinfra.config import Config
 from appinfra.log import Logger, create_root_lg

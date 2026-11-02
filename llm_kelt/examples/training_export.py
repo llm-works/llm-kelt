@@ -31,9 +31,9 @@ from tempfile import TemporaryDirectory
 # Allow running without package installation
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-try:
+if __package__:
     from ._helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, psql_cmd
-except ImportError:
+else:
     from _helpers import CMD, H1, H2, INFO, MUTED, OK, RESET, psql_cmd  # type: ignore[no-redef]
 
 from llm_kelt import Client, ClientContext, ClientFactory
@@ -288,14 +288,17 @@ def main():
     kelt = factory.create_from_config(context=context, config=config)
     print(f"{MUTED}Using context_key={RESET}{INFO}{kelt.context_key}{RESET}")
 
-    record_sample_data(kelt)
+    try:
+        record_sample_data(kelt)
 
-    with TemporaryDirectory() as tmpdir:
-        output_dir = Path(tmpdir)
-        demo_dpo_export(output_dir, kelt)
-        demo_sft_export(output_dir, kelt)
-        demo_classifier_export(output_dir, kelt)
-        demo_filtered_export(output_dir, kelt)
+        with TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            demo_dpo_export(output_dir, kelt)
+            demo_sft_export(output_dir, kelt)
+            demo_classifier_export(output_dir, kelt)
+            demo_filtered_export(output_dir, kelt)
+    finally:
+        kelt.database.dispose()
 
     print_summary()
 

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `Database.dispose()` closes the pooled connections, e.g. before a process exits.
+
+### Changed
+- Requires appinfra 0.14 with its `sql` and `fastapi` extras: SQLAlchemy 2.1 and psycopg 3
+  (instead of psycopg2) come from there, as do fastapi and uvicorn.
+- `Fact.outgoing_relationships` / `incoming_relationships` raise on access instead of
+  returning an empty list; edges are read through the relationships client.
+
 ## [0.5.0] - 2026-10-25
 
 ### Added

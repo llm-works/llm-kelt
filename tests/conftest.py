@@ -29,8 +29,9 @@ from llm_kelt.memory.kg import models as kg_models  # noqa: F401
 from llm_kelt.training import dpo as training_dpo  # noqa: F401
 from llm_kelt.training import sft as training_sft  # noqa: F401
 
-# Enable appinfra's schema isolation fixtures for parallel test execution
-pytest_plugins = ["appinfra.db.pg.testing"]
+# appinfra's schema isolation fixtures for parallel test execution, and its suite
+# assignment: each test runs in the suite of its tests/<suite>/ directory or marker
+pytest_plugins = ["appinfra.db.pg.testing", "appinfra.pytest_suites"]
 
 
 @pytest.fixture(scope="session")
@@ -144,8 +145,7 @@ def _get_llm_server_address() -> tuple[str, int] | None:
 
 
 def pytest_collection_modifyitems(config, items):
-    """Auto-apply markers based on test directory, then deselect PG-dependent
-    tests when Postgres is unreachable.
+    """Deselect PG-dependent tests when Postgres is unreachable.
 
     Deselection (vs pytest.skip) keeps the failure-step output clean: skipped
     tests appear in pytest's `-rs` summary as `SKIPPED [1] ...` lines, which
@@ -153,15 +153,6 @@ def pytest_collection_modifyitems(config, items):
     so a downstream failure (e.g. coverage threshold) shows the actual cause,
     not 200+ lines of PG noise.
     """
-    for item in items:
-        test_path = Path(item.fspath)
-        if "unit" in test_path.parts:
-            item.add_marker(pytest.mark.unit)
-        elif "integration" in test_path.parts:
-            item.add_marker(pytest.mark.integration)
-        elif "e2e" in test_path.parts:
-            item.add_marker(pytest.mark.e2e)
-
     status = config.stash.get(_PG_STATUS_KEY, None)
     if status is None or status["available"]:
         return

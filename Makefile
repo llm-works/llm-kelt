@@ -5,10 +5,10 @@ local := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 infra := $(shell appinfra scripts-path)
 
 # Configuration
-INFRA_DEV_PKG_NAME := llm_kelt
-INFRA_PYTEST_COVERAGE_THRESHOLD := 50
-INFRA_PYTEST_COVERAGE_MARKERS := unit or integration
-INFRA_DEV_DOCSTRING_THRESHOLD := 90
+APPINFRA_DEV_PKG_NAME := llm_kelt
+APPINFRA_PYTEST_COVERAGE_THRESHOLD := 50
+APPINFRA_PYTEST_COVERAGE_MARKERS := unit or integration
+APPINFRA_DEV_DOCSTRING_THRESHOLD := 90
 
 # Test configuration file (used by integration and e2e tests)
 export KELT_TEST_CONFIG_FILE := $(local)etc/llm-kelt.yaml
@@ -16,31 +16,34 @@ export KELT_TEST_CONFIG_FILE := $(local)etc/llm-kelt.yaml
 # Code quality strictness
 # - true: Fail on any code quality violations (CI mode)
 # - false: Report violations but don't fail (development mode)
-INFRA_DEV_CQ_STRICT := true
+APPINFRA_DEV_CQ_STRICT := true
 
 # No ruff rules reported as warnings only: they are enforced in pyproject's select
-INFRA_DEV_CQ_LINT_SELECT :=
+APPINFRA_DEV_CQ_LINT_SELECT := false
 
 # Fail on duplicated code blocks and unused private definitions
-INFRA_DEV_CQ_DUP := strict
-INFRA_DEV_CQ_DEAD := strict
+APPINFRA_DEV_CQ_DUP := strict
+APPINFRA_DEV_CQ_DEAD := strict
+
+# Report tests that sit in another suite's directory, or leak process-wide state
+APPINFRA_DEV_TEST_HEALTH := warn
 
 # Enforce SPDX license headers on all source files
-INFRA_DEV_CQ_SPDX := true
+APPINFRA_DEV_CQ_SPDX := true
 
 # Run example scripts as a check subcheck (same as `make examples.check`)
 # Each example declares its invocation via `# ci-*` header markers.
-INFRA_DEV_CHECK_EXAMPLES := true
+APPINFRA_DEV_CHECK_EXAMPLES := true
 
 # Exclude examples from function size checks (demo scripts have longer functions)
-INFRA_DEV_CQ_EXCLUDE := llm_kelt/examples/*
+APPINFRA_DEV_CQ_EXCLUDE := llm_kelt/examples/*
 
 # Skip built-in targets (we define custom ones below)
 # - test.e2e: GPU tests must run sequentially to avoid OOM
-INFRA_DEV_SKIP_TARGETS := test.e2e
+APPINFRA_DEV_SKIP_TARGETS := test.e2e
 
 # PostgreSQL configuration
-INFRA_PG_CONFIG_FILE := pg.yaml
+APPINFRA_PG_CONFIG_FILE := pg.yaml
 
 # Include framework (config first)
 include $(infra)/make/Makefile.config
