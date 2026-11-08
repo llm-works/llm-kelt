@@ -159,8 +159,8 @@ class TestList:
         assert summaries[0].preview.endswith("...")
         assert len(summaries[0].preview) < 200
 
-    def test_list_nonexistent_directory(self, lg):
-        storage = FileSessionStorage(lg, "/tmp/nonexistent_dir_xyz")
+    def test_list_nonexistent_directory(self, lg, tmp_path: Path):
+        storage = FileSessionStorage(lg, tmp_path / "nonexistent")
         assert storage.list() == []
 
     def test_list_skips_corrupt_files(self, storage: FileSessionStorage, tmp_path: Path, lg):

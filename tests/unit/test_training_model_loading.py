@@ -7,9 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-transformers = pytest.importorskip("transformers")
-
-from llm_kelt.training.runtime import model as model_mod  # noqa: E402
+from llm_kelt.training.runtime import model as model_mod
 
 
 class _Loaded:
