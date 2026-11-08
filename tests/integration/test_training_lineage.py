@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
 
-"""Unit tests for training lineage: series of sets, and series builds through the queue."""
+"""Training lineage: series of sets, and series builds through the queue."""
 
 from __future__ import annotations
 

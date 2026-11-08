@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
 
-"""Unit tests for the training queue: submit, claim, complete, fail, status, run_pending."""
+"""The training queue: submit, claim, complete, fail, status, run_pending."""
 
 from __future__ import annotations
 
