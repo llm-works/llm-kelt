@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Writing with a key pattern (`*`, `?`) raises `ValidationError` instead of storing it as a key.
+- Building from source requires setuptools 77.0.3 or later; the license is declared as the SPDX
+  expression `Apache-2.0`.
 
 ### Fixed
 - KG scope resolution includes every `:` prefix of a key, not only `key:value` pairs.
