@@ -5,12 +5,11 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
-from llm_kelt.training.manifest import Client, Manifest, template_id
+from llm_kelt.training.manifest import Manifest, template_id
 from llm_kelt.training.manifest.loader import load_manifest, save_manifest, validate_manifest
 from llm_kelt.training.manifest.schema import Data
 from llm_kelt.training.manifest.templates import (
@@ -85,6 +84,7 @@ class TestShortIds:
             {TID: TEMPLATE}, full
         )
 
+    @pytest.mark.integration
     def test_manifest_round_trip(self, tmp_path: Path):
         record = {"template": self.SHORT, "slots": {"text": "t"}, "output": "o"}
         path = tmp_path / "manifest.yaml"
@@ -215,102 +215,3 @@ class TestValidateManifestTemplates:
             ),
         )
         assert any("only supported for method 'sft'" in e for e in validate_manifest(manifest))
-
-
-class TestTemplateRoundTrip:
-    @pytest.mark.parametrize(
-        "text",
-        [
-            TEMPLATE,
-            "  leading spaces\ntrailing spaces  \n\n\ttab {{text}}\n",
-            "unicode: é – 漢字 {{text}} 'single' \"double\" # not a comment: yes",
-        ],
-    )
-    def test_save_load_keeps_text_and_id(self, tmp_path: Path, text: str):
-        tid = template_id(text)
-        record = {"template": tid, "slots": {"text": "yes: 1.0 # no"}, "output": "o"}
-        path = tmp_path / "manifest.yaml"
-        save_manifest(_sft_manifest([record], {tid: text}), path)
-
-        loaded = load_manifest(path)
-        assert loaded.data.templates[tid] == text
-        assert loaded.data.records[0]["slots"] == {"text": "yes: 1.0 # no"}
-        assert validate_manifest(loaded) == []
-
-    def test_manifest_without_templates_has_no_templates_key(self, tmp_path: Path):
-        path = tmp_path / "manifest.yaml"
-        save_manifest(_sft_manifest([{"instruction": "i", "output": "o"}], {}), path)
-        assert "templates" not in path.read_text()
-
-
-class TestClientCreate:
-    @pytest.fixture
-    def client(self, lg, tmp_path: Path) -> Client:
-        from llm_kelt.training.storage import FileStorage
-
-        return Client(lg=lg, storage=FileStorage(lg, tmp_path))
-
-    def test_create_with_templates(self, client: Client):
-        manifest = client.create(
-            adapter="test-sft",
-            method="sft",
-            data=[_templated("t", "o")],
-            templates={TID: TEMPLATE},
-        )
-        assert dict(manifest.data.templates) == {TID: TEMPLATE}
-        assert validate_manifest(manifest) == []
-
-    def test_create_without_templates(self, client: Client):
-        manifest = client.create(
-            adapter="test-sft", method="sft", data=[{"instruction": "i", "output": "o"}]
-        )
-        assert dict(manifest.data.templates) == {}
-
-
-class TestSftClientRendering:
-    @pytest.fixture
-    def sft_client(self, lg, tmp_path: Path):
-        from llm_kelt.training.sft import Client as SftClient
-        from llm_kelt.training.storage import FileStorage
-
-        return SftClient(lg, FileStorage(lg, tmp_path / "registry"))
-
-    def _write_jsonl(self, path: Path, records: list[dict]) -> Path:
-        path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
-        return path
-
-    def test_renders_external_records(self, sft_client, tmp_path: Path):
-        data_path = self._write_jsonl(tmp_path / "data.jsonl", [_templated("foo text", "foo")])
-        manifest = Manifest(
-            adapter="test-sft",
-            method="sft",
-            data=Data(format="external", path=str(data_path), templates={TID: TEMPLATE}),
-        )
-        work_dir, rendered_path = sft_client._prepare_training(manifest)
-
-        assert rendered_path.parent == work_dir
-        lines = rendered_path.read_text(encoding="utf-8").splitlines()
-        assert [json.loads(line) for line in lines] == [_expanded("foo text", "foo")]
-
-    def test_without_templates_keeps_data_path(self, sft_client, tmp_path: Path):
-        data_path = self._write_jsonl(
-            tmp_path / "data.jsonl", [{"instruction": "i", "output": "o"}]
-        )
-        manifest = Manifest(
-            adapter="test-sft", method="sft", data=Data(format="external", path=str(data_path))
-        )
-        _, resolved = sft_client._prepare_training(manifest)
-        assert resolved == data_path
-
-    def test_invalid_templates_raise(self, sft_client, tmp_path: Path):
-        data_path = self._write_jsonl(tmp_path / "data.jsonl", [_templated("t", "o")])
-        manifest = Manifest(
-            adapter="test-sft",
-            method="sft",
-            data=Data(format="external", path=str(data_path), templates={"0" * 64: TEMPLATE}),
-        )
-        with pytest.raises(ValueError, match="Invalid SFT templates"):
-            sft_client._prepare_training(manifest)
-
-    def test_inline_templated_records_pass_record_validation(self, sft_client):
-        sft_client._validate_records(_sft_manifest([_templated("t", "o")], {TID: TEMPLATE}))

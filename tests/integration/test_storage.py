@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-kelt Authors
 
-"""Unit tests for FileStorage class."""
+"""FileStorage on a real directory tree."""
 
 from __future__ import annotations
 
