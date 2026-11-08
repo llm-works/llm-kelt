@@ -13,30 +13,47 @@ kg = kelt.kg  # KGStore instance
 
 ## Scope keys — hierarchical
 
-Every KG record has a `scope_key: str`. Reads resolve *up* the hierarchy; writes always land
-in the exact scope you specified.
+Every KG record has a `scope_key: str`. The key is an opaque string; the only structure
+assumed is `:` between its parts. Writes always land in the exact scope you specified.
+
+A read with a key resolves *up*: the key itself, each of its `:` prefixes, and `"global"`.
 
 ```text
-"org:acme:user:alice"
+"org:acme:user"
        ↓ read visibility
-"org:acme:user:alice"   ← the record
-"org:acme"              ← inherited
-"global"                ← inherited
+"org:acme:user"   ← the record
+"org:acme"        ← inherited
+"org"             ← inherited
+"global"          ← inherited
 ```
 
-Convention: colon-separated `key:value` pairs. `"global"` is the root. `scope_ancestors()`
-enumerates the resolved chain:
+`scope_ancestors()` enumerates the resolved chain:
 
 ```python
 from llm_kelt.memory.kg.store import scope_ancestors
 
-scope_ancestors("org:acme:user:alice")
-# → ["org:acme:user:alice", "org:acme", "global"]
+scope_ancestors("org:acme:user")
+# → ["org:acme:user", "org:acme", "org", "global"]
 ```
 
-This is **not** the same as the atomic `context_key`. `context_key` is a flat isolation
-key filtered exactly on every read. `scope_key` is hierarchical — narrower scopes see
-broader ones.
+### Patterns — reading a subgraph
+
+`in_scope`, `relationships.get_relationships[_for_entities]` and
+`fact_entities.get_entities_for_fact[s]` also take a pattern, which reads *down*. The patterns
+are the same as for the atomic `context_key` (`llm_kelt.core.keys`):
+
+| Pattern | Matches |
+|---------|---------|
+| `org:acme:**` | `org:acme` itself and every key below `org:acme:` |
+| `org:*:eng` | `*` is any run of characters, `:` included |
+| `org:acme:???` | `?` is exactly one character |
+
+Under a pattern, refs, relationships and fact links are selected by their own key. An entity
+is in the view when it was created under a matching key, or when selected knowledge touches
+it — so a subgraph over shared entities (e.g. created at `"global"`) needs no copies of them.
+
+Writes, `delete_in_scope` and every other read take a key only; a pattern raises
+`ValidationError`.
 
 ## Entities — `kg.entities`
 

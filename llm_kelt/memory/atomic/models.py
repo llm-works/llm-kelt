@@ -29,9 +29,10 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from llm_kelt.core.base import Base
+from llm_kelt.core.keys import require_exact_key
 
 # =============================================================================
 # Result Types
@@ -155,6 +156,10 @@ class Fact(Base):
             postgresql_where=text("context_key IS NULL"),
         ),
     )
+
+    @validates("context_key")
+    def _validate_context_key(self, _attr: str, value: str | None) -> str | None:
+        return None if value is None else require_exact_key(value)
 
     def __repr__(self) -> str:
         preview = self.content[:30] + "..." if len(self.content) > 30 else self.content
@@ -487,6 +492,10 @@ class FactRelationship(Base):
         Index("idx_kelt_atomic_rel_context", "context_key"),
         Index("idx_kelt_atomic_rel_type", "relationship_type"),
     )
+
+    @validates("context_key")
+    def _validate_context_key(self, _attr: str, value: str | None) -> str | None:
+        return None if value is None else require_exact_key(value)
 
     def __repr__(self) -> str:
         return (

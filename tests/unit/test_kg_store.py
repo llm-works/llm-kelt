@@ -46,9 +46,9 @@ class TestScopeAncestors:
         assert "global" in result
 
     def test_two_levels(self):
-        """Two level scope includes parent and global."""
+        """Two level scope includes every prefix and global."""
         result = scope_ancestors("org:acme:user:alice")
-        assert result == ["org:acme:user:alice", "org:acme", "global"]
+        assert result == ["org:acme:user:alice", "org:acme:user", "org:acme", "org", "global"]
 
     def test_three_levels(self):
         """Three level scope includes all ancestors."""

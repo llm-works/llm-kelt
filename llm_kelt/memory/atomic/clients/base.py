@@ -50,11 +50,11 @@ class FactClient(Generic[T]):
             lg: Logger instance for all client operations.
             session_factory: Callable that returns a context manager for database sessions.
             context_key: Context key to scope all operations to (None = no filtering).
-                Supports SQL LIKE patterns (% and _) for prefix/pattern matching.
+                Reads accept a key pattern (see llm_kelt.core.keys); writes need a key.
                 Examples:
                   - "acme:prod:reviewer" - exact match
-                  - "acme:prod:%" - all agents in environment
-                  - "acme:%" - all environments for customer
+                  - "acme:prod:*" - all agents in environment
+                  - "acme:**" - acme itself and everything below it
             embedding_adapter: Optional EmbeddingAdapter for auto-embedding facts.
         """
         self._lg = lg

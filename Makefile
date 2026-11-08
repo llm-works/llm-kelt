@@ -24,6 +24,8 @@ APPINFRA_DEV_CQ_LINT_SELECT := false
 # Fail on duplicated code blocks and unused private definitions
 APPINFRA_DEV_CQ_DUP := strict
 APPINFRA_DEV_CQ_DEAD := strict
+# SQLAlchemy calls @validates methods on attribute set; nothing calls them by name
+APPINFRA_DEV_CQ_DEAD_KEEP_DECORATORS := validates
 
 # Report tests that sit in another suite's directory, or leak process-wide state
 APPINFRA_DEV_TEST_HEALTH := warn

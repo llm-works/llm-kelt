@@ -6,40 +6,24 @@
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import ColumnElement, SQLColumnExpression
 
-def glob_to_like(context_key: str) -> tuple[str, bool]:
+from ..core.keys import key_filter
+
+
+def build_context_filter(
+    context_key: str | None, column: SQLColumnExpression[Any]
+) -> ColumnElement[bool] | None:
     """
-    Convert a glob-style context key to a SQL LIKE pattern.
+    Build SQLAlchemy filter for a context key or pattern.
 
-    Returns:
-        (pattern, is_glob) — the LIKE pattern string and whether glob
-        wildcards were present. The escape character is always backslash.
-    """
-    if "*" not in context_key and "?" not in context_key:
-        return (context_key, False)
-
-    # Escape the LIKE escape character first, then SQL wildcards, then translate glob
-    pattern = context_key.replace("\\", "\\\\")
-    pattern = pattern.replace("%", r"\%").replace("_", r"\_")
-    pattern = pattern.replace("*", "%").replace("?", "_")
-    return (pattern, True)
-
-
-def build_context_filter(context_key: str | None, column: Any) -> Any:
-    """
-    Build SQLAlchemy filter for context_key with glob pattern support.
-
-    Glob patterns:
-        * - matches zero or more characters (like SQL %)
-        ? - matches exactly one character (like SQL _)
-
-    Examples:
-        "acme_prod"     -> exact match only
-        "acme_*"        -> matches "acme_prod", "acme_dev", etc.
-        "acme_???"      -> matches "acme_dev", "acme_123" (exactly 3 chars)
+    Patterns (see llm_kelt.core.keys):
+        *     - any run of characters
+        ?     - exactly one character
+        K:**  - K itself and every key below it
 
     Args:
-        context_key: Context key with optional glob wildcards (* or ?)
+        context_key: Key or pattern. None means no filtering.
         column: SQLAlchemy column to filter on
 
     Returns:
@@ -47,11 +31,7 @@ def build_context_filter(context_key: str | None, column: Any) -> Any:
     """
     if context_key is None:
         return None
-
-    pattern, is_glob = glob_to_like(context_key)
-    if is_glob:
-        return column.like(pattern, escape="\\")
-    return column == context_key
+    return key_filter(context_key, column)
 
 
 @dataclass
@@ -64,10 +44,11 @@ class ClientContext:
 
     Attributes:
         context_key: Partition key (any string format). If None, no filtering applied.
-            Supports glob patterns (* and ?) for hierarchical prefix matching:
+            Reads accept a pattern; a client opened with a pattern reads across keys
+            but cannot write.
             - "acme:prod:reviewer" - exact match (single agent)
-            - "acme:prod:*" - prefix match (all agents in environment)
-            - "acme:*" - prefix match (all environments for customer)
+            - "acme:prod:*" - every key below acme:prod
+            - "acme:prod:**" - acme:prod itself and every key below it
         schema_name: Schema where data lives. If None, defaults to "public".
 
     Examples:
@@ -102,7 +83,7 @@ class ClientContext:
     """
 
     # Partition key - if None, no filtering (caller owns all data)
-    # Supports glob patterns (* and ?) for prefix matching
+    # Reads accept a pattern; writes need an exact key
     context_key: str | None = None
 
     # Schema where data lives - if None, defaults to "public"

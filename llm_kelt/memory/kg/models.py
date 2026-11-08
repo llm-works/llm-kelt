@@ -27,9 +27,10 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from llm_kelt.core.base import Base
+from llm_kelt.core.keys import require_exact_key
 
 if TYPE_CHECKING:
     pass
@@ -59,6 +60,10 @@ class ScopedMixin:
 
     scope_key: Mapped[str] = mapped_column(String(255), nullable=False)
     extra: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+
+    @validates("scope_key")
+    def _validate_scope_key(self, _attr: str, value: str) -> str:
+        return require_exact_key(value)
 
 
 class Entity(ScopedMixin, Base):

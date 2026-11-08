@@ -17,7 +17,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from llm_kelt.core.errors import ConflictError, ValidationError
-from llm_kelt.memory.isolation import build_context_filter, glob_to_like
+from llm_kelt.core.keys import key_sql
+from llm_kelt.memory.isolation import build_context_filter
 
 from .models import Fact, FactRelationship, RelType
 
@@ -120,14 +121,8 @@ class RelationshipsClient:
         """Build SQL fragment and params for context filtering in raw CTE queries."""
         if self.context_key is None:
             return ("", {})
-
-        pattern, is_glob = glob_to_like(self.context_key)
-        if is_glob:
-            return (
-                r"AND r.context_key LIKE :ctx_key ESCAPE '\'",
-                {"ctx_key": pattern},
-            )
-        return ("AND r.context_key = :ctx_key", {"ctx_key": self.context_key})
+        condition, params = key_sql(self.context_key, "r.context_key", "ctx_key")
+        return (f"AND {condition}", params)
 
     def _build_chain_sql(self, ctx_clause: str) -> Any:
         """Build the recursive CTE SQL for get_chain()."""
