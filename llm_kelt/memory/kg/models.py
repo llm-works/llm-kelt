@@ -62,7 +62,11 @@ class ScopedMixin:
     extra: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
     @validates("scope_key")
-    def _validate_scope_key(self, _attr: str, value: str) -> str:
+    def _validate_scope_key(  # cq: keep SQLAlchemy calls @validates methods on set
+        self,
+        _attr: str,
+        value: str,
+    ) -> str:
         return require_exact_key(value)
 
 

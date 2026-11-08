@@ -72,7 +72,11 @@ class Content(Base):
     )
 
     @validates("context_key")
-    def _validate_context_key(self, _attr: str, value: str | None) -> str | None:
+    def _validate_context_key(  # cq: keep SQLAlchemy calls @validates methods on set
+        self,
+        _attr: str,
+        value: str | None,
+    ) -> str | None:
         return None if value is None else require_exact_key(value)
 
     def __repr__(self) -> str:
