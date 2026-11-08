@@ -11,8 +11,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from appinfra.db.utils import detach, detach_all
+from sqlalchemy import ColumnElement, exists, func, or_, select
 from sqlalchemy import delete as sql_delete
-from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as SASession
@@ -20,6 +20,8 @@ from sqlalchemy.orm import Session as SASession
 from llm_kelt.embedding import Factory as EmbeddingFactory
 from llm_kelt.embedding.types import QuantizationFormat
 
+from ...core.errors import ValidationError
+from ...core.keys import is_key_pattern, key_filter, require_exact_key
 from .models import Entity, EntityAlias, EntityRef, EntityRelationship, FactEntity
 
 if TYPE_CHECKING:
@@ -51,25 +53,16 @@ class AliasConflictError(Exception):
 
 
 def scope_ancestors(scope_key: str) -> list[str]:
-    """Get all ancestor scopes including the scope itself and global.
+    """Get the scope itself, each of its ':' prefixes, and global, most specific first.
 
-    Example: "org:acme:user:alice" -> ["org:acme:user:alice", "org:acme", "global"]
+    The key's parts carry no meaning here; every prefix is an ancestor.
+
+    Example: "org:acme:user" -> ["org:acme:user", "org:acme", "org", "global"]
     """
-    if scope_key == "global":
-        return ["global"]
-
-    ancestors = [scope_key]
     parts = scope_key.split(":")
-
-    while len(parts) > 1:
-        parts = parts[:-1]
-        # Handle odd-length splits (key:value pairs)
-        if len(parts) % 2 == 0:
-            ancestors.append(":".join(parts))
-
+    ancestors = [":".join(parts[:n]) for n in range(len(parts), 0, -1)]
     if "global" not in ancestors:
         ancestors.append("global")
-
     return ancestors
 
 
@@ -77,9 +70,56 @@ def build_scope_filter(scope_key: str, column: Any) -> Any:
     """Build SQLAlchemy filter for hierarchical scope resolution.
 
     Returns filter matching scope_key and all ancestor scopes up to global.
+
+    Raises:
+        ValidationError: scope_key is a pattern. Reads that accept one say so.
     """
+    if is_key_pattern(scope_key):
+        raise ValidationError(f"this read takes a scope key, not a pattern: {scope_key!r}")
     ancestors = scope_ancestors(scope_key)
     return column.in_(ancestors)
+
+
+def _knowledge_filter(scope_key: str, column: Any) -> Any:
+    """Filter knowledge rows (refs, relationships, fact links) by a key or pattern.
+
+    A key sees its own scope and its ancestors; a pattern sees the keys it matches.
+    """
+    if is_key_pattern(scope_key):
+        return key_filter(scope_key, column)
+    return build_scope_filter(scope_key, column)
+
+
+def _entity_view_filter(scope_key: str) -> ColumnElement[bool]:
+    """Filter entities by a key or pattern.
+
+    A key sees entities in its own scope and its ancestors. A pattern sees entities
+    created under a matching key, and entities that knowledge under a matching key
+    touches, wherever they were created.
+    """
+    if not is_key_pattern(scope_key):
+        return cast("ColumnElement[bool]", build_scope_filter(scope_key, Entity.scope_key))
+    links = (
+        (EntityRef.entity_id, EntityRef.scope_key),
+        (FactEntity.entity_id, FactEntity.scope_key),
+        (EntityRelationship.from_entity_id, EntityRelationship.scope_key),
+        (EntityRelationship.to_entity_id, EntityRelationship.scope_key),
+    )
+    touched = [
+        exists().where(entity_id == Entity.id, key_filter(scope_key, link_scope))
+        for entity_id, link_scope in links
+    ]
+    return or_(key_filter(scope_key, Entity.scope_key), *touched)
+
+
+def _limit_linked_entity_scope(stmt: Any, scope_key: str) -> Any:
+    """Under a key, also limit the joined entity to that key's scopes.
+
+    Under a pattern the matching link is what puts the entity in view.
+    """
+    if is_key_pattern(scope_key):
+        return stmt
+    return stmt.where(build_scope_filter(scope_key, Entity.scope_key))
 
 
 class EntityStore:
@@ -223,7 +263,11 @@ class EntityStore:
 
         Returns:
             Number of entities deleted (excluding cascaded dependents).
+
+        Raises:
+            ValidationError: scope_key is a pattern.
         """
+        require_exact_key(scope_key)
         with self._scope(sa_session) as s:
             stmt = sql_delete(Entity).where(Entity.scope_key == scope_key)
             if entity_type is not None:
@@ -354,9 +398,14 @@ class EntityStore:
         offset: int = 0,
         sa_session: SASession | None = None,
     ) -> list[Entity]:
-        """List entities visible in scope (includes ancestor scopes up to global)."""
+        """List entities visible under a scope key or pattern.
+
+        A key includes its ancestor scopes up to global. A pattern (e.g. "org:acme:**")
+        includes entities created under matching keys and entities that refs,
+        relationships or fact links under matching keys touch.
+        """
         with self._scope(sa_session) as s:
-            stmt = select(Entity).where(build_scope_filter(scope_key, Entity.scope_key))
+            stmt = select(Entity).where(_entity_view_filter(scope_key))
             if entity_type:
                 stmt = stmt.where(Entity.entity_type == entity_type)
             stmt = stmt.order_by(Entity.created_at.desc()).limit(limit).offset(offset)
@@ -558,7 +607,7 @@ class EntityRelationshipStore:
         relationship_type: str | None = None,
         sa_session: SASession | None = None,
     ) -> list[EntityRelationship]:
-        """Get relationships for an entity within scope hierarchy."""
+        """Get relationships for an entity under a scope key (with ancestors) or pattern."""
         if direction not in ("from", "to", "both"):
             raise ValueError(f"direction must be 'from', 'to', or 'both', got {direction!r}")
 
@@ -571,7 +620,7 @@ class EntityRelationshipStore:
 
             stmt = select(EntityRelationship).where(
                 or_(*dir_conditions),
-                build_scope_filter(scope_key, EntityRelationship.scope_key),
+                _knowledge_filter(scope_key, EntityRelationship.scope_key),
             )
 
             if relationship_type:
@@ -590,7 +639,10 @@ class EntityRelationshipStore:
         relationship_type: str | None = None,
         sa_session: SASession | None = None,
     ) -> dict[int, list[EntityRelationship]]:
-        """Get relationships for multiple entities. Returns {entity_id -> [relationships]}."""
+        """Get relationships for multiple entities under a scope key or pattern.
+
+        Returns {entity_id -> [relationships]}.
+        """
         if not entity_ids:
             return {}
         if direction not in ("from", "to", "both"):
@@ -628,7 +680,7 @@ class EntityRelationshipStore:
             dir_conditions.append(EntityRelationship.to_entity_id.in_(entity_ids))
         stmt = select(EntityRelationship).where(
             or_(*dir_conditions),
-            build_scope_filter(scope_key, EntityRelationship.scope_key),
+            _knowledge_filter(scope_key, EntityRelationship.scope_key),
         )
         if relationship_type:
             stmt = stmt.where(EntityRelationship.relationship_type == relationship_type)
@@ -670,6 +722,7 @@ class FactEntityStore:
             if_not_exists: When True, uses PostgreSQL upsert to avoid session corruption
                 from IntegrityError on duplicate keys. Returns None if link already exists.
         """
+        require_exact_key(scope_key)  # the upsert below is a Core insert: no model validator
         with self._scope(sa_session) as s:
             if if_not_exists:
                 return self._link_upsert(s, fact_id, entity_id, scope_key, role, confidence, extra)
@@ -728,17 +781,20 @@ class FactEntityStore:
         role: str | None = None,
         sa_session: SASession | None = None,
     ) -> list[tuple[Entity, str, float]]:
-        """Get entities linked to a fact. Returns (entity, role, confidence)."""
+        """Get entities linked to a fact under a scope key or pattern.
+
+        Returns (entity, role, confidence).
+        """
         with self._scope(sa_session) as s:
             stmt = (
                 select(Entity, FactEntity.role, FactEntity.confidence)
                 .join(FactEntity, Entity.id == FactEntity.entity_id)
                 .where(
                     FactEntity.fact_id == fact_id,
-                    build_scope_filter(scope_key, FactEntity.scope_key),
-                    build_scope_filter(scope_key, Entity.scope_key),
+                    _knowledge_filter(scope_key, FactEntity.scope_key),
                 )
             )
+            stmt = _limit_linked_entity_scope(stmt, scope_key)
             if role:
                 stmt = stmt.where(FactEntity.role == role)
             results = [(row[0], row[1], row[2]) for row in s.execute(stmt)]
@@ -755,7 +811,10 @@ class FactEntityStore:
         entity_type: str | None = None,
         sa_session: SASession | None = None,
     ) -> dict[int, list[tuple[Entity, str, float]]]:
-        """Get entities linked to multiple facts. Returns {fact_id -> [(entity, role, confidence), ...]}."""
+        """Get entities linked to multiple facts under a scope key or pattern.
+
+        Returns {fact_id -> [(entity, role, confidence), ...]}.
+        """
         if not fact_ids:
             return {}
 
@@ -765,10 +824,10 @@ class FactEntityStore:
                 .join(Entity, Entity.id == FactEntity.entity_id)
                 .where(
                     FactEntity.fact_id.in_(fact_ids),
-                    build_scope_filter(scope_key, FactEntity.scope_key),
-                    build_scope_filter(scope_key, Entity.scope_key),
+                    _knowledge_filter(scope_key, FactEntity.scope_key),
                 )
             )
+            stmt = _limit_linked_entity_scope(stmt, scope_key)
             if role:
                 stmt = stmt.where(FactEntity.role == role)
             if entity_type:

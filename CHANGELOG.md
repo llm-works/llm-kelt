@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Key pattern `K:**` reads `K` itself and every key below it, for facts and the KG.
+- KG `in_scope`, `get_relationships[_for_entities]` and `get_entities_for_fact[s]` accept a
+  key pattern and read the matching subgraph (see docs/knowledge-graph.md).
+
+### Changed
+- Writing with a key pattern (`*`, `?`) raises `ValidationError` instead of storing it as a key.
+- Building from source requires setuptools 77.0.3 or later; the license is declared as the SPDX
+  expression `Apache-2.0`.
+
+### Fixed
+- KG scope resolution includes every `:` prefix of a key, not only `key:value` pairs.
+
 ## [0.5.1] - 2026-11-01
 
 ### Added

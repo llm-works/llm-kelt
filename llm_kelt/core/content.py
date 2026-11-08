@@ -14,10 +14,11 @@ from appinfra.db.utils import detach, detach_all
 from sqlalchemy import BigInteger, DateTime, Index, String, Text, UniqueConstraint, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from .base import Base
 from .errors import ValidationError
+from .keys import key_filter, require_exact_key
 
 
 class Content(Base):
@@ -70,6 +71,14 @@ class Content(Base):
         ),
     )
 
+    @validates("context_key")
+    def _validate_context_key(  # cq: keep SQLAlchemy calls @validates methods on set
+        self,
+        _attr: str,
+        value: str | None,
+    ) -> str | None:
+        return None if value is None else require_exact_key(value)
+
     def __repr__(self) -> str:
         return f"<Content(id={self.id}, source={self.source!r}, hash={self.content_hash[:8]}...)>"
 
@@ -89,11 +98,11 @@ class ContentStore:
         Args:
             session_factory: Callable that returns a context manager for database sessions.
             context_key: Context key to scope all operations to (None = no filtering).
-                Supports SQL LIKE patterns (% and _) for prefix/pattern matching.
+                Reads accept a key pattern (see llm_kelt.core.keys); writes need a key.
                 Examples:
                   - "acme:prod:reviewer" - exact match
-                  - "acme:prod:%" - all agents in environment
-                  - "acme:%" - all environments for customer
+                  - "acme:prod:*" - all agents in environment
+                  - "acme:**" - acme itself and everything below it
         """
         self._session_factory = session_factory
         self._context_key = context_key
@@ -113,9 +122,9 @@ class ContentStore:
         Returns:
             SQLAlchemy filter condition, or None if no filtering needed.
         """
-        from llm_kelt.memory.isolation import build_context_filter
-
-        return build_context_filter(self._context_key, column)
+        if self._context_key is None:
+            return None
+        return key_filter(self._context_key, column)
 
     def create(
         self,
