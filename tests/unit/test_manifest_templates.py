@@ -84,6 +84,7 @@ class TestShortIds:
             {TID: TEMPLATE}, full
         )
 
+    @pytest.mark.integration
     def test_manifest_round_trip(self, tmp_path: Path):
         record = {"template": self.SHORT, "slots": {"text": "t"}, "output": "o"}
         path = tmp_path / "manifest.yaml"

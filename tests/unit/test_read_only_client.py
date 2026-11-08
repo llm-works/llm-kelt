@@ -161,6 +161,7 @@ _SUBPROCESS_SCRIPT = textwrap.dedent(
 ).strip()
 
 
+@pytest.mark.integration
 def test_read_only_client_does_not_import_numpy(tmp_path):
     """Ticket reproducer: block numpy at import, construct a read-only Client.
 
