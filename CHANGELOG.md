@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - KG scope resolution includes every `:` prefix of a key, not only `key:value` pairs.
+- `ContextQuery.ask_without_facts` takes `temperature` and `max_tokens` instead of `**kwargs`;
+  passing `rag` no longer injects retrieved facts, it raises `TypeError`.
 
 ## [0.5.1] - 2026-11-01
 
