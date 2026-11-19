@@ -203,18 +203,22 @@ class ContextQuery:
         question: str,
         conversation: Conversation | None = None,
         system_prompt: str | None = None,
-        **kwargs,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         """
         Ask a question without injecting user facts.
 
-        Convenience method for queries that shouldn't be context-aware.
+        Convenience method for queries that shouldn't be context-aware. It takes
+        none of ask()'s fact parameters: rag would inject retrieved facts, and
+        fact_categories and embedder_context only apply when facts are used.
 
         Args:
             question: The user's question
             conversation: Optional conversation
             system_prompt: Optional system prompt
-            **kwargs: Additional arguments passed to ask()
+            temperature: Override temperature (None = use default)
+            max_tokens: Maximum response tokens
 
         Returns:
             The assistant's response
@@ -223,8 +227,9 @@ class ContextQuery:
             question=question,
             conversation=conversation,
             system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
             include_facts=False,
-            **kwargs,
         )
 
     def get_injected_context(

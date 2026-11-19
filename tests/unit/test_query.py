@@ -490,6 +490,27 @@ class TestContextQueryRAG:
         facts_passed = call_args[0][1]
         assert len(facts_passed) == 0
 
+    @pytest.mark.asyncio
+    async def test_ask_without_facts_rejects_rag(
+        self, mock_client, mock_context_builder, mock_embedding_adapter, mock_embedder, sample_fact
+    ):
+        """RAG retrieval would inject facts, so ask_without_facts does not take it."""
+        mock_embedding_adapter.search_similar.return_value = [
+            ScoredEntity(entity=sample_fact, score=0.9)
+        ]
+        query = ContextQuery(
+            client=mock_client,
+            context_builder=mock_context_builder,
+            embedder=mock_embedder,
+            embedding_adapter=mock_embedding_adapter,
+        )
+
+        with pytest.raises(TypeError):
+            await query.ask_without_facts("Q?", rag=RAGArgs())  # type: ignore[call-arg]
+
+        mock_embedding_adapter.search_similar.assert_not_called()
+        mock_context_builder.build_system_prompt_from_facts.assert_not_called()
+
 
 class TestContextQueryBasic:
     """Test basic ContextQuery functionality (non-RAG)."""
@@ -535,6 +556,23 @@ class TestContextQueryBasic:
 
         call_kwargs = mock_client.chat_async.call_args.kwargs
         assert call_kwargs["system"] == "Base prompt"
+        mock_context_builder.build_system_prompt.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ask_without_facts_method(self, mock_client, mock_context_builder):
+        """ask_without_facts uses the base prompt and forwards sampling settings."""
+        query = ContextQuery(
+            client=mock_client,
+            context_builder=mock_context_builder,
+            base_system_prompt="Base prompt",
+        )
+
+        await query.ask_without_facts("Hello", temperature=0.2, max_tokens=64)
+
+        call_kwargs = mock_client.chat_async.call_args.kwargs
+        assert call_kwargs["system"] == "Base prompt"
+        assert call_kwargs["temperature"] == 0.2
+        assert call_kwargs["max_tokens"] == 64
         mock_context_builder.build_system_prompt.assert_not_called()
 
     @pytest.mark.asyncio
