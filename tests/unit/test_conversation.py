@@ -457,6 +457,7 @@ class TestAsyncCompaction:
         assert conv.message_count == 1
         assert conv.messages[0].content == "short"
 
+    @pytest.mark.integration
     async def test_append_async_with_sync_compactor(self, lg):
         class MockSyncCompactor(Compactor):
             def __init__(self):
