@@ -324,8 +324,11 @@ class Client:
         return ClientView(self, context)
 
     def _is_own_schema(self, schema_name: str | None) -> bool:
-        """Whether a view's schema is the one this client's stores use."""
-        return schema_name is None or schema_name == self._embedding_schema
+        """Whether a view's schema is the one this client's stores use.
+
+        An unset client schema is public, as in SchemaManager.
+        """
+        return schema_name is None or schema_name == (self._embedding_schema or "public")
 
     def _schema_session(self, schema_name: str | None) -> tuple[Callable[[], Any], str | None]:
         """Session factory and schema name for a view's stores.

@@ -55,6 +55,18 @@ class TestClientViewCreation:
         assert view.context.schema_name == client.context.schema_name
         assert client.context_key == "parent"
 
+    def test_context_is_a_copy(self, lg, db):
+        view = _client(lg, db).view("agent-a")
+
+        with patch("llm_kelt.client_view.Protocol"):
+            view.atomic
+        view.context.context_key = "other"
+
+        assert view.context_key == "agent-a"
+        with patch("llm_kelt.client_view.ContentStore") as content:
+            view.content
+        assert content.call_args.args[1] == "agent-a"
+
     def test_view_creation_builds_nothing(self, lg, db):
         client = _client(lg, db)
         db.reset_mock()
@@ -99,6 +111,16 @@ class TestClientViewStores:
         client = _client(lg, db)
 
         assert client.view("agent-a").kg is client.kg
+
+    def test_public_is_parent_schema_when_unset(self, lg, db):
+        client = _client(lg, db)
+
+        with patch("llm_kelt.client.prepare_scoped_schema") as prepare:
+            kg = client.view("agent-a", schema_name="public").kg
+
+        assert kg is client.kg
+        db.scoped.assert_not_called()
+        prepare.assert_not_called()
 
     def test_kg_on_other_schema_uses_scoped_session(self, lg, db):
         scoped = _scoped_db("other")

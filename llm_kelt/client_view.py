@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from .core.content import ContentStore
@@ -75,8 +76,8 @@ class ClientView:
 
     @property
     def context(self) -> ClientContext:
-        """Isolation context of this view."""
-        return self._context
+        """Copy of this view's isolation context; changing it does not affect the view."""
+        return replace(self._context)
 
     @property
     def context_key(self) -> str | None:
