@@ -5,17 +5,14 @@
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from appinfra.db.utils import detach_all
 from sqlalchemy import select
 
-from llm_kelt.embedding import Config as EmbeddingConfig
-from llm_kelt.embedding import Factory as EmbeddingFactory
+from llm_kelt.embedding import StoreCache
 from llm_kelt.embedding import StoreClient as EmbeddingStoreClient
-from llm_kelt.embedding.types import QuantizationFormat
 
 from .models import Entity
 from .store import build_scope_filter
@@ -33,10 +30,10 @@ class EntityEmbeddingAdapter:
     Entities are embedded by concatenating canonical_name + description.
 
     Example:
+        stores = StoreCache(EmbeddingFactory(), session_factory, QuantizationFormat.F16, None)
         adapter = EntityEmbeddingAdapter(
             session_factory=session_factory,
-            factory=EmbeddingFactory(),
-            format=QuantizationFormat.F16,
+            stores=stores,
             embedder=embedder,
         )
 
@@ -55,47 +52,28 @@ class EntityEmbeddingAdapter:
     def __init__(
         self,
         session_factory: Callable[[], Any],
-        factory: EmbeddingFactory,
-        format: QuantizationFormat,
+        stores: StoreCache,
         embedder: EmbeddingClient | None = None,
         default_dimensions: int | None = None,
-        schema: str | None = None,
     ) -> None:
         """Initialize EntityEmbeddingAdapter with dynamic dimension routing.
 
         Args:
             session_factory: Callable that returns a context manager for database sessions.
-            factory: EmbeddingFactory for creating dimension-specific stores.
-            format: Quantization format to use (F32, F16, I8, I4).
+            stores: Dimension-specific stores for this session factory and schema,
+                shared with the atomic adapter on the same scope. Stores bind a
+                schema-qualified ORM model when the cache has a schema.
             embedder: Optional EmbeddingClient for generating embeddings via HTTP.
             default_dimensions: Default dimensions for operations when not specified.
-            schema: Postgres schema for the embedding tables. Forwarded to each
-                dimension-specific store so ORM operations never rely on
-                search_path resolution.
         """
         self._session_factory = session_factory
-        self._factory = factory
-        self._format = format
+        self._stores = stores
         self._embedder = embedder
         self._default_dimensions = default_dimensions
-        self._schema = schema
-        self._stores: dict[int, EmbeddingStoreClient] = {}
-        self._stores_lock = threading.Lock()
 
     def _get_store(self, dimensions: int) -> EmbeddingStoreClient:
         """Get or create a store for the given dimensions (thread-safe)."""
-        if dimensions in self._stores:
-            return self._stores[dimensions]
-        with self._stores_lock:
-            if dimensions not in self._stores:
-                config = EmbeddingConfig(
-                    context_key="_kg",
-                    format=self._format,
-                    dimensions=dimensions,
-                    schema=self._schema,
-                )
-                self._stores[dimensions] = self._factory.create(self._session_factory, config)
-            return self._stores[dimensions]
+        return self._stores.get(dimensions)
 
     def _entity_text(self, entity: Entity) -> str:
         """Build text representation of entity for embedding."""
@@ -203,7 +181,8 @@ class EntityEmbeddingAdapter:
         Args:
             entity_id: The entity ID.
             dimensions: Embedding dimensions to delete from. If None, uses
-                default_dimensions. Falls back to cached stores if neither set.
+                default_dimensions. If neither is set, deletes from the stores
+                built so far on this adapter's store cache.
 
         Returns:
             Number of embeddings deleted.
@@ -212,9 +191,7 @@ class EntityEmbeddingAdapter:
         if dims is not None:
             store = self._get_store(dims)
             return store.delete(entity_type=self.ENTITY_TYPE, entity_id=str(entity_id))
-        # Snapshot stores under lock to avoid iteration race
-        with self._stores_lock:
-            stores = list(self._stores.values())
+        stores = self._stores.stores()
         total = 0
         for store in stores:
             total += store.delete(

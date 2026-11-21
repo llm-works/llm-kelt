@@ -315,8 +315,9 @@ mapping = kg.fact_entities.get_entities_for_facts(
 
 ## Entity embeddings — `kg.embeddings`
 
-Available when the `Client` was constructed with an `embedding_factory`. Same underlying
-store as atomic embeddings, but keyed on `entity_id` under `entity_type="kg.entity"`.
+Available when the `Client` has embeddings configured: an `embedder` or an `embeddings` store,
+or a schema mode other than `SKIP`. Shares the client's per-dimension stores with atomic
+embeddings, keyed on `entity_id` under `entity_type="kg.entity"`.
 
 ```python
 kg.embeddings.set_embedding(entity_id, [0.12, -0.03, ...], model="text-embedding-3-small")

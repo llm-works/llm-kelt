@@ -13,14 +13,14 @@ from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 from llm_infer.client import ChatClient, EmbeddingClient
 
-from .client_view import ClientView
+from .client_view import ClientView, SchemaScope
 from .core.content import ContentStore
 from .core.database import Database
 from .core.errors import SchemaVersionError
 from .core.schema import SchemaManager, SchemaMode, SchemaState, SchemaStatus
-from .core.scoped_database import ScopedDatabase
 from .embedding import Config as EmbeddingConfig
 from .embedding import Factory as EmbeddingFactory
+from .embedding import StoreCache
 from .embedding import StoreClient as EmbeddingStoreClient
 from .inference.context import ContextBuilder
 from .inference.query import ContextQuery
@@ -131,9 +131,9 @@ class Client:
         self._schema_mode = schema_mode
         self._embeddings = embeddings
         self._embedding_dimensions = embedding_dimensions
-        # Schemas other than this client's, prepared for views (see _schema_session).
-        self._view_schemas: dict[str, ScopedDatabase] = {}
-        self._view_schemas_lock = threading.Lock()
+        # Schemas other than this client's, prepared for views (see _schema_scope).
+        self._view_scopes: dict[str, SchemaScope] = {}
+        self._view_scopes_lock = threading.Lock()
 
         self._ensure_schema_config(ensure=schema_mode is SchemaMode.ENSURE)
         self._apply_schema_mode(schema_mode)
@@ -181,25 +181,17 @@ class Client:
     def _setup_stores(self) -> None:
         """Initialize storage components."""
         self._setup_embedding_factory()
+        self._own_scope = self._build_scope(self._db.session, self._embedding_schema)
         self._content = ContentStore(self._db.session, self._context.context_key)
         self._atomic = atomic.Protocol(
             self._lg,
             self._db.session,
             self._context.context_key,
             embedder=self._embedder,
-            embedding_factory=self._embedding_factory,
-            embedding_format=self._embedding_format,
+            embedding_stores=self._own_scope.embedding_stores,
             embedding_dimensions=self._embedding_dimensions,
-            embedding_schema=self._embedding_schema,
         )
-        self._kg = KGStore(
-            self._lg,
-            self._db.session,
-            embedder=self._embedder,
-            embedding_factory=self._embedding_factory,
-            embedding_format=self._embedding_format,
-            embedding_schema=self._embedding_schema,
-        )
+        self._kg = self._own_scope.kg
         self._context_builder = ContextBuilder(self._atomic.assertions)
         self._train: TrainFactory | None = None
 
@@ -330,22 +322,32 @@ class Client:
         """
         return schema_name is None or schema_name == (self._embedding_schema or "public")
 
-    def _schema_session(self, schema_name: str | None) -> tuple[Callable[[], Any], str | None]:
-        """Session factory and schema name for a view's stores.
+    def _build_scope(self, session: Callable[[], Any], schema: str | None) -> SchemaScope:
+        """Objects shared by this client and its views on one schema."""
+        stores = None
+        if self._embedding_factory is not None:
+            stores = StoreCache(self._embedding_factory, session, self._embedding_format, schema)
+        kg = KGStore(self._lg, session, embedder=self._embedder, embedding_stores=stores)
+        return SchemaScope(session=session, schema=schema, embedding_stores=stores, kg=kg)
 
-        This client's own schema uses its own session. Any other schema gets
-        a ScopedDatabase prepared per schema_mode, once per client.
+    def _schema_scope(self, schema_name: str | None) -> SchemaScope:
+        """Shared scope for a view's schema.
+
+        This client's own schema is the scope built at construction. Any other
+        schema gets a ScopedDatabase prepared per schema_mode and its own
+        scope, once per client.
         """
         if self._is_own_schema(schema_name):
-            return self._db.session, self._embedding_schema
+            return self._own_scope
         assert schema_name is not None  # _is_own_schema covers None
-        with self._view_schemas_lock:
-            scoped = self._view_schemas.get(schema_name)
-            if scoped is None:
+        with self._view_scopes_lock:
+            scope = self._view_scopes.get(schema_name)
+            if scope is None:
                 scoped = self._db.scoped(schema_name)
                 prepare_scoped_schema(self._lg, scoped, schema_name, self._schema_mode)
-                self._view_schemas[schema_name] = scoped
-        return scoped.session, schema_name
+                scope = self._build_scope(scoped.session, schema_name)
+                self._view_scopes[schema_name] = scope
+        return scope
 
     def with_schema(self, schema_name: str) -> ScopedClient:
         """

@@ -12,6 +12,7 @@ from appinfra.log import Logger
 
 from .core.errors import SchemaVersionError
 from .core.schema import SchemaManager, SchemaMode, SchemaState
+from .embedding import StoreCache
 from .memory import atomic
 
 if TYPE_CHECKING:
@@ -88,15 +89,22 @@ class ScopedClient:
         self._scoped_db = self._parent._db.scoped(self._schema_name)
         prepare_scoped_schema(self._lg, self._scoped_db, self._schema_name, self._schema_mode)
 
+        parent = self._parent
+        stores = None
+        if parent._embedding_factory is not None:
+            stores = StoreCache(
+                parent._embedding_factory,
+                self._scoped_db.session,
+                parent._embedding_format,
+                self._schema_name,
+            )
         self._atomic = atomic.Protocol(
             self._lg,
             self._scoped_db.session,
-            self._parent._context.context_key,
-            embedder=self._parent._embedder,
-            embedding_factory=self._parent._embedding_factory,
-            embedding_format=self._parent._embedding_format,
-            embedding_dimensions=self._parent._embedding_dimensions,
-            embedding_schema=self._schema_name,
+            parent._context.context_key,
+            embedder=parent._embedder,
+            embedding_stores=stores,
+            embedding_dimensions=parent._embedding_dimensions,
         )
         self._initialized = True
 

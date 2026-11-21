@@ -799,16 +799,15 @@ class TestEntityEmbeddings:
     @pytest.fixture
     def kg_with_embeddings(self, logger, database):
         """Create KGStore with embedding support (no embedder for manual tests)."""
-        from llm_kelt.embedding import Factory, QuantizationFormat
+        from llm_kelt.embedding import Factory, QuantizationFormat, StoreCache
         from llm_kelt.memory.kg import KGStore
 
-        factory = Factory()
+        stores = StoreCache(Factory(), database.session, QuantizationFormat.F16, None)
         return KGStore(
             logger,
             database.session,
             embedder=None,
-            embedding_factory=factory,
-            embedding_format=QuantizationFormat.F16,
+            embedding_stores=stores,
             embedding_dimensions=TestEntityEmbeddings.TEST_DIMS,
         )
 
@@ -996,7 +995,7 @@ class TestEntityEmbeddings:
         """Accessing embeddings without embeddings client raises error."""
         from llm_kelt.memory.kg import KGStore
 
-        # Create KGStore without embedding_factory
-        kg = KGStore(logger, database.session, embedder=None, embedding_factory=None)
+        # Create KGStore without embedding stores
+        kg = KGStore(logger, database.session, embedder=None, embedding_stores=None)
         with pytest.raises(RuntimeError, match="Embeddings not configured"):
             _ = kg.embeddings

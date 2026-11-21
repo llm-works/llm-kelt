@@ -167,6 +167,66 @@ class Factory:
                 return Int4Store(session_factory, config.dimensions, model)
 
 
+class StoreCache:
+    """Per-dimension embedding stores for one session factory and schema, built on first use.
+
+    A store does not depend on a context key, and it checks its table once on
+    first use, so adapters on the same database scope share one cache.
+    """
+
+    def __init__(
+        self,
+        factory: Factory,
+        session_factory: Callable[[], Any],
+        format: QuantizationFormat,
+        schema: str | None,
+    ) -> None:
+        """
+        Bind the cache to a database scope.
+
+        Args:
+            factory: Builds each store.
+            session_factory: Callable that returns a context manager for DB sessions.
+            format: Quantization format of every store.
+            schema: Postgres schema of the embedding tables (None: unqualified).
+        """
+        self._factory = factory
+        self._session_factory = session_factory
+        self._format = format
+        self._schema = schema
+        self._stores: dict[int, StoreClient] = {}
+        self._lock = threading.Lock()
+
+    @property
+    def schema(self) -> str | None:
+        """Postgres schema of the embedding tables."""
+        return self._schema
+
+    def get(self, dimensions: int) -> StoreClient:
+        """Return the store for the given dimensions, building it once."""
+        store = self._stores.get(dimensions)
+        if store is not None:
+            return store
+        with self._lock:
+            store = self._stores.get(dimensions)
+            if store is None:
+                # The store does not read context_key; the config requires one.
+                config = Config(
+                    context_key="_default",
+                    format=self._format,
+                    dimensions=dimensions,
+                    schema=self._schema,
+                )
+                store = self._factory.create(self._session_factory, config)
+                self._stores[dimensions] = store
+            return store
+
+    def stores(self) -> list[StoreClient]:
+        """Snapshot of the stores built so far."""
+        with self._lock:
+            return list(self._stores.values())
+
+
 # Module-level factory instance for convenience
 _default_factory: Factory | None = None
 

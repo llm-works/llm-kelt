@@ -17,8 +17,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as SASession
 
-from llm_kelt.embedding import Factory as EmbeddingFactory
-from llm_kelt.embedding.types import QuantizationFormat
+from llm_kelt.embedding import StoreCache
 
 from ...core.errors import ValidationError
 from ...core.keys import is_key_pattern, key_filter, require_exact_key
@@ -882,17 +881,22 @@ class KGStore:
         lg: Logger,
         session_factory: SessionFactory,
         embedder: EmbeddingClient | None = None,
-        embedding_factory: EmbeddingFactory | None = None,
-        embedding_format: QuantizationFormat | None = None,
+        embedding_stores: StoreCache | None = None,
         embedding_dimensions: int | None = None,
-        embedding_schema: str | None = None,
     ) -> None:
+        """
+        Args:
+            lg: Logger instance.
+            session_factory: Database session factory.
+            embedder: Optional embedder for generating entity embeddings.
+            embedding_stores: Dimension-specific embedding stores for this session
+                factory and schema, shared with atomic memory on the same scope.
+                None leaves entity embeddings unconfigured.
+            embedding_dimensions: Default output dimensions for embeddings.
+        """
         self._lg = lg
         self._session_factory = session_factory
         self._embedder = embedder
-        self._embedding_factory = embedding_factory
-        self._embedding_format = embedding_format or QuantizationFormat.F16
-        self._embedding_schema = embedding_schema
 
         self.entities = EntityStore(lg, session_factory)
         self.refs = EntityRefStore(lg, session_factory)
@@ -900,16 +904,16 @@ class KGStore:
         self.fact_entities = FactEntityStore(lg, session_factory)
         self._embedding_adapter = (
             self._create_embedding_adapter(
-                session_factory, embedding_factory, embedder, embedding_dimensions
+                session_factory, embedding_stores, embedder, embedding_dimensions
             )
-            if embedding_factory
+            if embedding_stores is not None
             else None
         )
 
     def _create_embedding_adapter(
         self,
         session_factory: SessionFactory,
-        factory: EmbeddingFactory,
+        stores: StoreCache,
         embedder: EmbeddingClient | None,
         dimensions: int | None,
     ) -> EntityEmbeddingAdapter:
@@ -917,11 +921,9 @@ class KGStore:
 
         return EntityEmbeddingAdapter(
             session_factory=session_factory,
-            factory=factory,
-            format=self._embedding_format,
+            stores=stores,
             embedder=embedder,
             default_dimensions=dimensions,
-            schema=self._embedding_schema,
         )
 
     @property
@@ -929,8 +931,8 @@ class KGStore:
         """Access entity embedding operations.
 
         Raises:
-            RuntimeError: If embedding_factory was not provided at construction.
+            RuntimeError: If embedding_stores was not provided at construction.
         """
         if self._embedding_adapter is None:
-            raise RuntimeError("Embeddings not configured: embedding_factory not provided")
+            raise RuntimeError("Embeddings not configured: embedding_stores not provided")
         return self._embedding_adapter
