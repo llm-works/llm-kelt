@@ -104,7 +104,36 @@ for fact in admin.atomic.assertions.list_active(limit=1000):
 ```
 
 Writes with a glob key raise — you can't write to `"*"`. Construct a separate isolated
-writer per real key, or use `with_isolation()`.
+writer per real key, or use `view()`.
+
+## `view` — one client, many contexts
+
+`view()` scopes a shared client to another context key. Creating a view does no database
+I/O and builds no stores: each store (`.atomic`, `.content`, `.kg`, `.context_builder`,
+`.query`) is built on first access and shares the client's database, embedder and LLM
+client. This suits a process serving many contexts, one view per context, from any thread.
+
+```python
+kelt = ClientFactory(lg).create_from_config(
+    context=ClientContext(context_key="host"), config=config
+)
+
+planner = kelt.view("agent:planner")
+reviewer = kelt.view("agent:reviewer")
+
+planner.atomic.assertions.add("Always draft before executing")
+reviewer.atomic.assertions.add("Never approve without reading tests")
+```
+
+Signature:
+
+```python
+def view(self, context_key: str, schema_name: str | None = None) -> ClientView
+```
+
+A `schema_name` other than the client's is prepared per the client's `SchemaMode` once,
+on the first store access of any view that names it. Training (`.train`), `.embeddings`
+and `.database` are not scoped by context key and stay on the client.
 
 ## `with_isolation` — new client, different context
 
@@ -126,7 +155,8 @@ def with_isolation(self, *, context_key=..., schema_name=..., **kwargs) -> Clien
 ```
 
 Schema mode downgrades on isolation: `ENSURE → VERIFY`, `SKIP → SKIP`. The child client
-won't re-run migrations on the parent's schema.
+won't re-run migrations on the parent's schema, but under `VERIFY` it reads the migration
+head on every call. For many contexts in one process, use `view()`.
 
 ## `with_schema` — scoped handle, lazy schema init
 

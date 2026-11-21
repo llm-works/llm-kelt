@@ -5,16 +5,20 @@
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 from llm_infer.client import ChatClient, EmbeddingClient
 
+from .client_view import ClientView
 from .core.content import ContentStore
 from .core.database import Database
 from .core.errors import SchemaVersionError
 from .core.schema import SchemaManager, SchemaMode, SchemaState, SchemaStatus
+from .core.scoped_database import ScopedDatabase
 from .embedding import Config as EmbeddingConfig
 from .embedding import Factory as EmbeddingFactory
 from .embedding import StoreClient as EmbeddingStoreClient
@@ -23,6 +27,7 @@ from .inference.query import ContextQuery
 from .memory import atomic
 from .memory.isolation import ClientContext
 from .memory.kg import KGStore
+from .scoped_client import prepare_scoped_schema
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -126,6 +131,9 @@ class Client:
         self._schema_mode = schema_mode
         self._embeddings = embeddings
         self._embedding_dimensions = embedding_dimensions
+        # Schemas other than this client's, prepared for views (see _schema_session).
+        self._view_schemas: dict[str, ScopedDatabase] = {}
+        self._view_schemas_lock = threading.Lock()
 
         self._ensure_schema_config(ensure=schema_mode is SchemaMode.ENSURE)
         self._apply_schema_mode(schema_mode)
@@ -284,6 +292,57 @@ class Client:
             embeddings=self._embeddings,
             embedding_dimensions=self._embedding_dimensions,
         )
+
+    def view(self, context_key: str, schema_name: str | None = None) -> ClientView:
+        """
+        Get a view of this client scoped to another context_key.
+
+        Creating a view does no database I/O and builds no stores; each store
+        is built on first access and shares this client's database, embedder
+        and LLM client. Prefer this over with_isolation() when many contexts
+        share one process: with_isolation() builds a full Client, including a
+        schema check, per call.
+
+        Args:
+            context_key: Context key of the view
+            schema_name: Schema of the view. None keeps this client's schema.
+                Another schema is prepared per this client's schema_mode
+                once, on the first store access of any view that names it.
+
+        Returns:
+            ClientView bound to the context
+
+        Example:
+            agent = kelt.view("acme:prod:reviewer")
+            agent.atomic.assertions.add("Prefers concise answers", category="style")
+        """
+        from dataclasses import replace
+
+        context = replace(self._context, context_key=context_key)
+        if schema_name is not None:
+            context = replace(context, schema_name=schema_name)
+        return ClientView(self, context)
+
+    def _is_own_schema(self, schema_name: str | None) -> bool:
+        """Whether a view's schema is the one this client's stores use."""
+        return schema_name is None or schema_name == self._embedding_schema
+
+    def _schema_session(self, schema_name: str | None) -> tuple[Callable[[], Any], str | None]:
+        """Session factory and schema name for a view's stores.
+
+        This client's own schema uses its own session. Any other schema gets
+        a ScopedDatabase prepared per schema_mode, once per client.
+        """
+        if self._is_own_schema(schema_name):
+            return self._db.session, self._embedding_schema
+        assert schema_name is not None  # _is_own_schema covers None
+        with self._view_schemas_lock:
+            scoped = self._view_schemas.get(schema_name)
+            if scoped is None:
+                scoped = self._db.scoped(schema_name)
+                prepare_scoped_schema(self._lg, scoped, schema_name, self._schema_mode)
+                self._view_schemas[schema_name] = scoped
+        return scoped.session, schema_name
 
     def with_schema(self, schema_name: str) -> ScopedClient:
         """

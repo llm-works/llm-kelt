@@ -21,8 +21,11 @@ writes. Writes always use the literal string.
 Switch to a different key without rebuilding the client:
 
 ```python
-sub = kelt.with_isolation(context_key="agent:planner")
+planner = kelt.view("agent:planner")
 ```
+
+A view shares the client's database and clients; creating one does no database I/O. See
+[multi-schema](multi-schema.md) for `view()` and `with_isolation()`.
 
 ## Schema
 
@@ -102,6 +105,7 @@ ClientFactory        ← constructed once, holds the logger
         ├── .query           → ContextQuery (lazy, requires llm_client)
         ├── .context_builder → ContextBuilder over atomic.assertions
         ├── .database        → SQLAlchemy engine + session factory
+        ├── .view()          → returns ClientView for another context_key (shared resources)
         └── .with_schema()   → returns ScopedClient for a different schema
         └── .with_isolation()→ returns Client with overridden context_key/schema
 ```
