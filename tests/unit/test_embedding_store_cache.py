@@ -3,7 +3,10 @@
 
 """Unit tests for StoreCache."""
 
+import threading
 from unittest.mock import Mock
+
+import pytest
 
 from llm_kelt.embedding import QuantizationFormat, StoreCache
 
@@ -41,3 +44,28 @@ class TestStoreCache:
         store = cache.get(384)
         assert cache.stores() == [store]
         assert cache.schema == "tenant"
+
+    @pytest.mark.integration
+    def test_threads_share_one_store_per_dimension(self):
+        cache, factory, _ = _cache()
+        workers = 16
+        barrier = threading.Barrier(workers)
+        seen: list[object] = []
+        seen_lock = threading.Lock()
+
+        def work() -> None:
+            barrier.wait(timeout=10)
+            store = cache.get(384)
+            with seen_lock:
+                seen.append(store)
+
+        threads = [threading.Thread(target=work) for _ in range(workers)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert len(seen) == workers
+        assert all(store is seen[0] for store in seen)
+        factory.create.assert_called_once()
+        assert cache.stores() == [seen[0]]
