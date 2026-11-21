@@ -327,14 +327,7 @@ class Client:
         stores = None
         if self._embedding_factory is not None:
             stores = StoreCache(self._embedding_factory, session, self._embedding_format, schema)
-        kg = KGStore(
-            self._lg,
-            session,
-            embedder=self._embedder,
-            embedding_factory=self._embedding_factory,
-            embedding_format=self._embedding_format,
-            embedding_schema=schema,
-        )
+        kg = KGStore(self._lg, session, embedder=self._embedder, embedding_stores=stores)
         return SchemaScope(session=session, schema=schema, embedding_stores=stores, kg=kg)
 
     def _schema_scope(self, schema_name: str | None) -> SchemaScope:

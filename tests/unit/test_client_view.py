@@ -136,7 +136,7 @@ class TestClientViewStores:
             view.kg
 
         assert kg.call_args.args[1] is scoped.session
-        assert kg.call_args.kwargs["embedding_schema"] == "other"
+        assert kg.call_args.kwargs["embedding_stores"].schema == "other"
 
     def test_views_on_parent_schema_share_embedding_stores(self, lg, db):
         client = _client(lg, db)
@@ -148,6 +148,11 @@ class TestClientViewStores:
         first, second = (call.kwargs["embedding_stores"] for call in protocol.call_args_list)
         assert first is second
         assert first is client.atomic.embeddings._stores
+
+    def test_kg_and_atomic_share_one_store_cache(self, lg, db):
+        client = _client(lg, db)
+
+        assert client.kg.embeddings._stores is client.atomic.embeddings._stores
 
     def test_views_on_one_schema_share_its_scope(self, lg, db):
         client = _client(lg, db, mode=SchemaMode.VERIFY)
