@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from .core.content import ContentStore
+from .embedding import StoreCache
 from .inference.context import ContextBuilder
 from .inference.query import ContextQuery
 from .memory.atomic import Protocol
@@ -24,15 +25,27 @@ if TYPE_CHECKING:
 _T = TypeVar("_T")
 
 
+@dataclass(frozen=True)
+class SchemaScope:
+    """What a Client and its views share for one schema; nothing here depends on context_key."""
+
+    session: Callable[[], Any]
+    schema: str | None
+    embedding_stores: StoreCache | None
+    kg: KGStore
+
+
 class ClientView:
     """
     Context-keyed view over a shared Client.
 
     Created by Client.view(). Creating a view only binds its context: no
-    database I/O and no store setup. Each store is built on first access
-    and reuses the parent's database, embedder, embedding factory and LLM
-    client. A schema other than the parent's is prepared once per parent
-    Client, on the first store access of any view that names it.
+    database I/O and no store setup. Each store keyed by context_key is built
+    on first access and reuses the parent's database, embedder and LLM client.
+    What does not depend on context_key (embedding stores, KGStore) is held
+    once per schema by the parent and shared by every view on that schema. A
+    schema other than the parent's is prepared once per parent Client, on the
+    first store access of any view that names it.
 
     A view and its parent can be used from any thread.
 
@@ -71,8 +84,8 @@ class ClientView:
                     setattr(self, attr, value)
         return value  # type: ignore[no-any-return]
 
-    def _session(self) -> tuple[Callable[[], Any], str | None]:
-        return self._parent._schema_session(self._context.schema_name)
+    def _scope(self) -> SchemaScope:
+        return self._parent._schema_scope(self._context.schema_name)
 
     @property
     def context(self) -> ClientContext:
@@ -115,36 +128,22 @@ class ClientView:
         return self._lazy("_query", self._build_query)
 
     def _build_atomic(self) -> Protocol:
-        session, schema = self._session()
+        scope = self._scope()
         parent = self._parent
         return Protocol(
             parent._lg,
-            session,
+            scope.session,
             self._context.context_key,
             embedder=parent._embedder,
-            embedding_factory=parent._embedding_factory,
-            embedding_format=parent._embedding_format,
+            embedding_stores=scope.embedding_stores,
             embedding_dimensions=parent._embedding_dimensions,
-            embedding_schema=schema,
         )
 
     def _build_content(self) -> ContentStore:
-        session, _ = self._session()
-        return ContentStore(session, self._context.context_key)
+        return ContentStore(self._scope().session, self._context.context_key)
 
     def _build_kg(self) -> KGStore:
-        parent = self._parent
-        if parent._is_own_schema(self._context.schema_name):
-            return parent._kg
-        session, schema = self._session()
-        return KGStore(
-            parent._lg,
-            session,
-            embedder=parent._embedder,
-            embedding_factory=parent._embedding_factory,
-            embedding_format=parent._embedding_format,
-            embedding_schema=schema,
-        )
+        return self._scope().kg
 
     def _build_context_builder(self) -> ContextBuilder:
         return ContextBuilder(self.atomic.assertions)

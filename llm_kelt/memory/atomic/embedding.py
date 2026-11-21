@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
@@ -16,10 +15,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from llm_kelt.core.types import ScoredEntity
-from llm_kelt.embedding import Config as EmbeddingConfig
-from llm_kelt.embedding import Factory as EmbeddingFactory
+from llm_kelt.embedding import StoreCache
 from llm_kelt.embedding import StoreClient as EmbeddingStoreClient
-from llm_kelt.embedding.types import QuantizationFormat
 from llm_kelt.memory.isolation import build_context_filter
 
 from .models import Fact
@@ -111,11 +108,11 @@ class EmbeddingAdapter:
     Uses entity_type "atomic.fact" to namespace embeddings.
 
     Example:
+        stores = StoreCache(EmbeddingFactory(), session_factory, QuantizationFormat.F16, None)
         adapter = EmbeddingAdapter(
             session_factory=session_factory,
             context_key=context_key,
-            factory=EmbeddingFactory(),
-            format=QuantizationFormat.F16,
+            stores=stores,
             embedder=embedder,
         )
 
@@ -135,11 +132,9 @@ class EmbeddingAdapter:
         self,
         session_factory: Callable[[], Any],
         context_key: str | None,
-        factory: EmbeddingFactory,
-        format: QuantizationFormat,
+        stores: StoreCache,
         embedder: EmbeddingClient | None = None,
         default_dimensions: int | None = None,
-        schema: str | None = None,
     ) -> None:
         """
         Initialize EmbeddingAdapter with dynamic dimension routing.
@@ -147,23 +142,17 @@ class EmbeddingAdapter:
         Args:
             session_factory: Callable that returns a context manager for database sessions.
             context_key: Profile ID (32-char hash) to scope operations to.
-            factory: EmbeddingFactory for creating dimension-specific stores.
-            format: Quantization format to use (F32, F16, I8, I4).
+            stores: Dimension-specific stores for this session factory and schema,
+                shared with other adapters on the same scope. Stores bind a
+                schema-qualified ORM model when the cache has a schema.
             embedder: Optional EmbeddingClient for generating embeddings via HTTP.
             default_dimensions: Default dimensions for embed_fact when not specified.
-            schema: Postgres schema for the embedding tables. When set, every
-                dimension-specific store is created with a schema-qualified ORM
-                model so reads and writes never fall back through search_path.
         """
         self._session_factory = session_factory
         self._context_key = context_key
-        self._factory = factory
-        self._format = format
+        self._stores = stores
         self._embedder = embedder
         self._default_dimensions = default_dimensions
-        self._schema = schema
-        self._stores: dict[int, EmbeddingStoreClient] = {}
-        self._stores_lock = threading.Lock()
 
     @property
     def can_embed(self) -> bool:
@@ -172,18 +161,7 @@ class EmbeddingAdapter:
 
     def _get_store(self, dimensions: int) -> EmbeddingStoreClient:
         """Get or create a store for the given dimensions (thread-safe)."""
-        if dimensions in self._stores:
-            return self._stores[dimensions]
-        with self._stores_lock:
-            if dimensions not in self._stores:
-                config = EmbeddingConfig(
-                    context_key=self._context_key or "_default",
-                    format=self._format,
-                    dimensions=dimensions,
-                    schema=self._schema,
-                )
-                self._stores[dimensions] = self._factory.create(self._session_factory, config)
-            return self._stores[dimensions]
+        return self._stores.get(dimensions)
 
     def embed_fact(
         self,
@@ -457,7 +435,8 @@ class EmbeddingAdapter:
         Args:
             fact_id: The fact ID.
             dimensions: Embedding dimensions to delete from. If None, uses default_dimensions.
-                If both are None, falls back to deleting from cached stores only.
+                If both are None, deletes from the stores built so far on this
+                adapter's store cache.
             session: Optional session for transaction participation. If provided,
                 the deletion participates in the caller's transaction.
 
@@ -468,9 +447,7 @@ class EmbeddingAdapter:
         if dims is not None:
             store = self._get_store(dims)
             return store.delete(self.ENTITY_TYPE, str(fact_id), session=session)
-        # Snapshot stores under lock to avoid iteration race
-        with self._stores_lock:
-            stores = list(self._stores.values())
+        stores = self._stores.stores()
         total = 0
         for store in stores:
             total += store.delete(self.ENTITY_TYPE, str(fact_id), session=session)
@@ -546,7 +523,8 @@ class EmbeddingAdapter:
         Args:
             model: Optional model filter.
             dimensions: Embedding dimensions. If None, uses default_dimensions.
-                If both are None, sums across cached stores only.
+                If both are None, sums across the stores built so far on this
+                adapter's store cache.
 
         Returns:
             Total count.
@@ -555,9 +533,7 @@ class EmbeddingAdapter:
         if dims is not None:
             store = self._get_store(dims)
             return store.count(entity_type=self.ENTITY_TYPE, model=model)
-        # Snapshot stores under lock to avoid iteration race
-        with self._stores_lock:
-            stores = list(self._stores.values())
+        stores = self._stores.stores()
         total = 0
         for store in stores:
             total += store.count(entity_type=self.ENTITY_TYPE, model=model)

@@ -132,8 +132,10 @@ def view(self, context_key: str, schema_name: str | None = None) -> ClientView
 ```
 
 A `schema_name` other than the client's is prepared per the client's `SchemaMode` once,
-on the first store access of any view that names it. Training (`.train`), `.embeddings`
-and `.database` are not scoped by context key and stay on the client.
+on the first store access of any view that names it. What does not depend on the context
+key is held once per schema and shared by the client and its views: one embedding store
+per dimension, which checks its table on first use, and one `KGStore`. Training (`.train`),
+`.embeddings` and `.database` are not scoped by context key and stay on the client.
 
 ## `with_isolation` — new client, different context
 

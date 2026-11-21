@@ -11,8 +11,7 @@ from typing import TYPE_CHECKING, Any
 from appinfra.log import Logger
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
-from llm_kelt.embedding import Factory as EmbeddingFactory
-from llm_kelt.embedding.types import QuantizationFormat
+from llm_kelt.embedding import StoreCache
 
 from .clients import (
     AssertionsClient,
@@ -58,10 +57,8 @@ class Protocol:
         context_key: str | None,
         *,
         embedder: EmbeddingClient | None = None,
-        embedding_factory: EmbeddingFactory | None = None,
-        embedding_format: QuantizationFormat = QuantizationFormat.F16,
+        embedding_stores: StoreCache | None = None,
         embedding_dimensions: int | None = None,
-        embedding_schema: str | None = None,
     ) -> None:
         """
         Initialize Atomic memory protocol.
@@ -71,21 +68,17 @@ class Protocol:
             session_factory: Database session factory.
             context_key: Context key to scope all operations to (None = no filtering).
             embedder: Optional embedder for generating embeddings.
-            embedding_factory: Factory for creating dimension-specific embedding stores.
-            embedding_format: Quantization format for embeddings (default: F16).
+            embedding_stores: Dimension-specific embedding stores for this
+                session factory and schema, shared with other protocols on the
+                same scope. None leaves embeddings unconfigured.
             embedding_dimensions: Default output dimensions for embeddings.
-            embedding_schema: Postgres schema for embedding tables. Forwarded to
-                the EmbeddingAdapter so every dimension-specific store binds a
-                schema-qualified ORM model.
         """
         self._lg = lg
         self._session_factory = session_factory
         self._context_key = context_key
         self._embedder = embedder
-        self._embedding_factory = embedding_factory
-        self._embedding_format = embedding_format
+        self._embedding_stores = embedding_stores
         self._embedding_dimensions = embedding_dimensions
-        self._embedding_schema = embedding_schema
 
         # Lazy-initialized clients
         self._assertions: AssertionsClient | None = None
@@ -100,17 +93,15 @@ class Protocol:
         self._embedding_adapter: EmbeddingAdapter | None = self._build_adapter()
 
     def _build_adapter(self) -> EmbeddingAdapter | None:
-        """Eagerly construct the embedding adapter when a factory is available."""
-        if self._embedding_factory is None:
+        """Eagerly construct the embedding adapter when stores are configured."""
+        if self._embedding_stores is None:
             return None
         return EmbeddingAdapter(
             session_factory=self._session_factory,
             context_key=self._context_key,
-            factory=self._embedding_factory,
-            format=self._embedding_format,
+            stores=self._embedding_stores,
             embedder=self._embedder,
             default_dimensions=self._embedding_dimensions,
-            schema=self._embedding_schema,
         )
 
     @property

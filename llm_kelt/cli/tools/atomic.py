@@ -33,15 +33,15 @@ def _get_database(lg: Any, app_config: Any):
 def _create_embedding_adapter(lg: Any, app_config: Any):
     """Create embedding adapter for vacuum operations."""
     from llm_kelt.embedding import Factory as EmbeddingFactory
-    from llm_kelt.embedding import QuantizationFormat
+    from llm_kelt.embedding import QuantizationFormat, StoreCache
     from llm_kelt.memory.atomic import EmbeddingAdapter
 
     database = _get_database(lg, app_config)
+    stores = StoreCache(EmbeddingFactory(), database.session, QuantizationFormat.F16, None)
     return EmbeddingAdapter(
         session_factory=database.session,
         context_key=None,  # Vacuum all contexts
-        factory=EmbeddingFactory(),
-        format=QuantizationFormat.F16,
+        stores=stores,
         embedder=None,
     )
 

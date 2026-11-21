@@ -131,27 +131,45 @@ class TestClientViewStores:
 
         with (
             patch("llm_kelt.client.prepare_scoped_schema"),
-            patch("llm_kelt.client_view.KGStore") as kg,
+            patch("llm_kelt.client.KGStore") as kg,
         ):
             view.kg
 
         assert kg.call_args.args[1] is scoped.session
         assert kg.call_args.kwargs["embedding_schema"] == "other"
 
-    def test_views_on_one_schema_prepare_it_once(self, lg, db):
+    def test_views_on_parent_schema_share_embedding_stores(self, lg, db):
+        client = _client(lg, db)
+
+        with patch("llm_kelt.client_view.Protocol") as protocol:
+            client.view("agent-a").atomic
+            client.view("agent-b").atomic
+
+        first, second = (call.kwargs["embedding_stores"] for call in protocol.call_args_list)
+        assert first is second
+        assert first is client.atomic.embeddings._stores
+
+    def test_views_on_one_schema_share_its_scope(self, lg, db):
         client = _client(lg, db, mode=SchemaMode.VERIFY)
 
         with (
             patch("llm_kelt.client.prepare_scoped_schema") as prepare,
             patch("llm_kelt.client_view.Protocol") as protocol,
         ):
-            client.view("agent-a", schema_name="other").atomic
-            client.view("agent-b", schema_name="other").atomic
+            first = client.view("agent-a", schema_name="other")
+            second = client.view("agent-b", schema_name="other")
+            first.atomic
+            second.atomic
+            kgs = (first.kg, second.kg)
 
         db.scoped.assert_called_once_with("other")
         prepare.assert_called_once()
         assert prepare.call_args.args[2:] == ("other", SchemaMode.VERIFY)
-        assert protocol.call_args.kwargs["embedding_schema"] == "other"
+        stores = [call.kwargs["embedding_stores"] for call in protocol.call_args_list]
+        assert stores[0] is stores[1]
+        assert stores[0].schema == "other"
+        assert kgs[0] is kgs[1]
+        assert kgs[0] is not client.kg
 
     def test_stale_schema_raises_on_first_use(self, lg, db):
         client = _client(lg, db, mode=SchemaMode.VERIFY)
