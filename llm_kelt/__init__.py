@@ -65,6 +65,7 @@ except PackageNotFoundError:
 
 from .bootstrap import ensure_schema
 from .client import Client
+from .client_view import ClientView
 from .core.errors import (
     ConfigError,
     ConflictError,
@@ -85,6 +86,7 @@ from .memory.kg import KGStore
 __all__ = [
     "__version__",
     "Client",
+    "ClientView",
     "ClientFactory",
     "EmbeddingStoreClient",
     "EmbeddingConfig",

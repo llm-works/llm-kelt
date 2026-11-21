@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Key pattern `K:**` reads `K` itself and every key below it, for facts and the KG.
 - KG `in_scope`, `get_relationships[_for_entities]` and `get_entities_for_fact[s]` accept a
   key pattern and read the matching subgraph (see docs/knowledge-graph.md).
+- `Client.view(context_key, schema_name=None)` returns a `ClientView` sharing the client's
+  database and clients; creating one does no DB I/O, and views are usable from any thread.
 
 ### Changed
 - Writing with a key pattern (`*`, `?`) raises `ValidationError` instead of storing it as a key.

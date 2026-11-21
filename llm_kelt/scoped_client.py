@@ -20,6 +20,26 @@ if TYPE_CHECKING:
     from .memory.atomic import Protocol
 
 
+def prepare_scoped_schema(
+    lg: Logger, scoped_db: ScopedDatabase, schema_name: str, mode: SchemaMode
+) -> None:
+    """Bring a scoped schema to the state the schema mode asks for.
+
+    ENSURE creates the schema and runs migrations; VERIFY raises
+    SchemaVersionError unless the schema is at head; SKIP does nothing.
+    """
+    if mode is SchemaMode.ENSURE:
+        scoped_db.ensure_schema()
+        SchemaManager(lg, scoped_db.engine, schema_name=schema_name).ensure_schema()
+    elif mode is SchemaMode.VERIFY:
+        status = SchemaManager(lg, scoped_db.engine, schema_name=schema_name).get_status()
+        if status.state != SchemaState.CURRENT:
+            raise SchemaVersionError(
+                f"Scoped schema '{schema_name}' is not current "
+                f"(state={status.state.value}). Use schema_mode=SchemaMode.ENSURE."
+            )
+
+
 class ScopedClient:
     """
     Client operations scoped to a specific PostgreSQL schema.
@@ -66,19 +86,7 @@ class ScopedClient:
     def _do_initialize(self) -> None:
         """Perform actual initialization (called once, inside lock)."""
         self._scoped_db = self._parent._db.scoped(self._schema_name)
-
-        if self._schema_mode is SchemaMode.ENSURE:
-            self._scoped_db.ensure_schema()
-            manager = SchemaManager(self._lg, self._scoped_db.engine, schema_name=self._schema_name)
-            manager.ensure_schema()
-        elif self._schema_mode is SchemaMode.VERIFY:
-            manager = SchemaManager(self._lg, self._scoped_db.engine, schema_name=self._schema_name)
-            status = manager.get_status()
-            if status.state != SchemaState.CURRENT:
-                raise SchemaVersionError(
-                    f"Scoped schema '{self._schema_name}' is not current "
-                    f"(state={status.state.value}). Use schema_mode=SchemaMode.ENSURE."
-                )
+        prepare_scoped_schema(self._lg, self._scoped_db, self._schema_name, self._schema_mode)
 
         self._atomic = atomic.Protocol(
             self._lg,
